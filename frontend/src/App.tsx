@@ -36,7 +36,6 @@ export default function App() {
       window.removeEventListener("open-entity", onOpen);
     };
   }, []);
-  console.log('clg')
 
   useEffect(() => {
     if (page === "ask") document.title = "Investigations · Analytics Manager";
