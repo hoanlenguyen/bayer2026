@@ -148,6 +148,39 @@ They cover the data pack mapping, every decision outcome, the migration rules, a
 
 Not covered: a live OpenAI key, a real Atlas cluster, and opening the generated PBIP in Power BI Desktop.
 
+## Docker and automatic deployment
+
+`backend/Dockerfile` builds a self-contained image with the data pack. Build from the **repository root** (the image needs `materials/`):
+
+```bash
+docker build -f backend/Dockerfile -t analytics-manager-backend .
+docker run -p 8000:8000 --env-file backend/.env analytics-manager-backend
+```
+
+Keys are passed at run time (`--env-file` or `-e`), never baked into the image. The container listens on `PORT` (default 8000), which hosting platforms can set.
+
+**GitHub Actions** (`.github/workflows/backend-docker.yml`) runs on every push to `main` that changes `backend/`, `materials/` or the workflow:
+
+1. runs `pytest`;
+2. builds the image and pushes it to Docker Hub as `<user>/analytics-manager-backend:latest` and `:sha-<commit>`.
+
+Pull requests run the tests and build the image without pushing. Set these once in GitHub under **Settings → Secrets and variables → Actions**:
+
+| Name | Type | Value |
+|---|---|---|
+| `DOCKERHUB_USERNAME` | Secret | Docker Hub user or organization |
+| `DOCKERHUB_TOKEN` | Secret | Docker Hub access token with Read & Write (Docker Hub → Account settings → Personal access tokens) |
+| `DOCKERHUB_REPOSITORY` | Variable (optional) | Image name, default `analytics-manager-backend` |
+
+**Running the image.** Docker Hub stores the image; a host runs it. Any container host works (a VM with Docker, Azure Container Apps, Render, Railway, Fly.io). Point it at `<user>/analytics-manager-backend:latest` and set:
+
+| Variable | Value |
+|---|---|
+| `OPENAI_API_KEY`, `MONGODB_URI` | Your keys (as host secrets) |
+| `CORS_ORIGINS` | The frontend's address, for example `https://your-frontend.example.com` (comma-separated; `*` allows any) |
+
+For MongoDB Atlas, also allow the host's outgoing IP addresses under Network Access. Then build the frontend with `VITE_API_BASE` set to the backend's public URL (see `../frontend/README.md`).
+
 ## Troubleshooting
 
 - **Windows: "uvicorn is not recognized":** the virtual environment is not active, or the requirements are not installed in it. Use `.venv\Scripts\python.exe -m uvicorn …` as shown in Quick start.

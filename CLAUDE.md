@@ -131,6 +131,12 @@ backend/   Python 3.12+, FastAPI
 - Empty database is seeded from the workbook on startup; `python -m app.load_datapack --reset` reloads it. Registered/repaired reports are written back to `catalog_assets`.
 - Not verified against Atlas from the cloud session (no network route); tests use mongomock. The MongoDB MCP connector is disabled at the Atlas organization level.
 
+## Deployment
+- `backend/Dockerfile` (build context = repo root, includes `materials/`); keys at run time only.
+- `.github/workflows/backend-docker.yml`: on push to `main` touching backend/materials → pytest → build and push `<DOCKERHUB_USERNAME>/analytics-manager-backend:{latest,sha-…}`. Needs secrets `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`. PRs build without pushing.
+- Docker Hub only stores the image; a container host runs it with `OPENAI_API_KEY`, `MONGODB_URI`, `CORS_ORIGINS`.
+- Frontend: `VITE_API_BASE` (build time) points it at the deployed backend; empty = dev proxy.
+
 ## Secrets
 Never commit keys; `backend/.env` is git-ignored. Never paste keys into chat.
 

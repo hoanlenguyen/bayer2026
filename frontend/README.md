@@ -25,6 +25,16 @@ Start the backend first (see `../backend/README.md`). Pages: `#ask`, `#explorer`
 | `src/components/EntityHeader.tsx`, `TopBar.tsx`, `ui.tsx` | Header, search and shared UI pieces |
 | `src/styles.css` | Design tokens (light and dark) and component styles |
 
+## Connecting to a deployed backend
+
+In development the frontend calls `/api`, and Vite forwards it to `http://localhost:8000`. To use a backend running elsewhere (for example the Docker Hub image on a host), set its public URL at build time:
+
+```bash
+VITE_API_BASE=https://your-backend.example.com npm run build
+```
+
+On Windows PowerShell: `$env:VITE_API_BASE="https://your-backend.example.com"; npm run build`. Or copy `.env.example` to `.env` and set it there. The output in `dist/` is static and can be served from any static host. The backend must list the frontend's address in `CORS_ORIGINS`.
+
 ## Graph interactions
 
 Click a node to inspect it, double-click (or press Enter) to make it the focus, drag to rearrange, scroll to zoom. Depth and entity-type filters are in the left panel.

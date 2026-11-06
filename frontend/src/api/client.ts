@@ -1,13 +1,21 @@
 import type { Action, ActionSummary, CatalogMeta, Health, PipelineEvent, Preset } from "./types";
 
+/**
+ * Backend address. Empty in development: Vite proxies /api to localhost:8000.
+ * For a deployed backend (for example the Docker Hub image on a host), build with
+ *   VITE_API_BASE=https://your-backend.example.com npm run build
+ */
+export const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
+export const apiUrl = (path: string) => `${API_BASE}${path}`;
+
 async function getJSON<T>(path: string): Promise<T> {
-  const res = await fetch(path);
+  const res = await fetch(apiUrl(path));
   if (!res.ok) throw new Error(`${path} returned ${res.status}`);
   return res.json() as Promise<T>;
 }
 
 async function sendJSON<T>(method: string, path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const res = await fetch(apiUrl(path), { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data as { detail?: string }).detail ?? `${path} returned ${res.status}`);
   return data as T;
@@ -24,7 +32,7 @@ export const api = {
 
 /** POST a JSON body and read the Server-Sent Events stream it returns. */
 export async function streamPost(path: string, body: unknown, onEvent: (e: PipelineEvent) => void): Promise<void> {
-  const res = await fetch(path, {
+  const res = await fetch(apiUrl(path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

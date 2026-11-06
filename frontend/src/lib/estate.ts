@@ -1,3 +1,4 @@
+import { apiUrl } from "../api/client";
 import { EDGES, ENTITIES, REL, TYPES } from "../data/estate";
 import type { Edge, Entity, EntityType } from "../data/types";
 
@@ -26,7 +27,7 @@ export interface GraphPayload {
 
 /** Fetch the plant catalog graph from the backend. */
 export async function loadEstate(): Promise<GraphPayload> {
-  const res = await fetch("/api/graph");
+  const res = await fetch(apiUrl("/api/graph"));
   if (!res.ok) throw new Error(`/api/graph returned ${res.status}`);
   const data = (await res.json()) as GraphPayload;
   setEstate(data.entities, data.edges);
