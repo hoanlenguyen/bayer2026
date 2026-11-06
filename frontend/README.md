@@ -40,3 +40,5 @@ The workbench is a presentation layer over the existing SSE events. API clients,
 ### Verification
 
 After installing the backend dependencies in `backend/.venv`, run `npm run test:workbench`. Set `WORKBENCH_PYTHON` to an alternative Python executable if needed. The test captures real offline backend SSE events and renders the workbench at each stage across all presets, a free-text request and approval output, and checks that the migrate, new build, repair, reuse and not-feasible paths all appear. It also verifies that partial governance events do not replace complete discovery candidates. These rendering checks complement the backend pytest suite; they do not exercise a live OpenAI key or Atlas database.
+
+The **Molecular view** adds directed lineage lenses, candidate migration filtering and exact source-row inspection. **Workbook** (`#source`) exposes all 24 sheets. `node --test tests/graph.test.mjs` checks cycle-safe traversal and rendering limits. See `docs/BAYER_MOLECULAR.md`.

@@ -1,0 +1,5 @@
+{
+  "name": "bayer-analytics-workspace",
+  "private": true,
+  "scripts": { "dev": "node scripts/dev.mjs" }
+}

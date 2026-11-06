@@ -22,3 +22,7 @@ cd frontend && npm install && npm run dev    # http://localhost:5173
 ```
 
 All data is synthetic. No patient or HCP data is used.
+
+## Workbook-backed molecular view
+
+The molecular explorer now includes source-row evidence, upstream/downstream lineage, explicit migration candidates and live action links. The **Workbook** page exposes every row of all 24 supplied sheets. [Data contract and demo walkthrough](docs/BAYER_MOLECULAR.md). Existing investigation and action flows are preserved.

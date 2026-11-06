@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ENTITIES, TYPES } from "../data/estate";
 import type { Entity } from "../data/types";
 
-export type Page = "ask" | "explorer" | "actions";
+export type Page = "ask" | "explorer" | "actions" | "source";
 
 interface Props {
   page: Page;
@@ -35,10 +35,11 @@ export function TopBar({ page, onPick, activeActions }: Props) {
         </a>
         <nav className="app-nav" aria-label="Main">
           <a href="#ask" aria-current={page === "ask" ? "page" : undefined}>Investigations</a>
-          <a href="#explorer" aria-current={page === "explorer" ? "page" : undefined}>Asset index</a>
+          <a href="#explorer" aria-current={page === "explorer" ? "page" : undefined}>Molecular view</a>
           <a href="#actions" aria-current={page === "actions" ? "page" : undefined}>
             Actions{activeActions ? <span className="nav-count" aria-label={`${activeActions} active`}>{activeActions}</span> : null}
           </a>
+          <a href="#source" aria-current={page === "source" ? "page" : undefined}>Workbook</a>
         </nav>
         {page === "explorer" && <div className="search">
           <label htmlFor="search" className="sr-only">Search entities</label>

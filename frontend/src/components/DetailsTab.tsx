@@ -1,3 +1,4 @@
+import { SourceEvidence } from "./SourceEvidence";
 import type { ReactNode } from "react";
 import { EDGES, PROV, TYPES } from "../data/estate";
 import type { Entity } from "../data/types";
@@ -42,9 +43,9 @@ function governanceRows(e: Entity, onFocus: (id: string) => void): [string, Reac
     const users = EDGES.filter((l) => l.t === e.id && l.rel === "uses").map((l) => byId[l.s]);
     const views = users.reduce((a, d) => a + (d.views ?? 0), 0);
     rows.push(["Used by", `${users.length} dashboard${users.length === 1 ? "" : "s"}`]);
-    rows.push(["Views via those", `${views.toLocaleString("en-US")} in 90 days`]);
+    rows.push(["Views via those", `${views.toLocaleString("en-US")} · January–October 2026`]);
   }
-  if (e.type === "dashboard" && e.views !== undefined) rows.push(["Audience", `${e.views.toLocaleString("en-US")} views in 90 days`]);
+  if (e.type === "dashboard" && e.views !== undefined) rows.push(["Audience", `${e.views.toLocaleString("en-US")} views · ${e.usage_period ?? "period not supplied"}`]);
   if (e.type === "person") rows.push(["Assets owned", String(EDGES.filter((l) => l.s === e.id && l.rel === "owns").length)]);
   if (e.props["Next review"]) rows.push(["Next review", e.props["Next review"]]);
   return rows;
@@ -60,6 +61,7 @@ export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Pr
         <article className="card">
           <h2 className="card-title">Summary</h2>
           <p className="summary">{e.summary}</p>
+          <SourceEvidence sources={[...(e.sources ?? []), ...(e.evidence_sources ?? [])]} />
         </article>
         <article className="card">
           <h2 className="card-title">Properties</h2>
@@ -109,7 +111,7 @@ export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Pr
           )}
         </article>
         <article className="card">
-          <h2 className="card-title">AI review flags <span className="count">{e.flags.length}</span></h2>
+          <h2 className="card-title">Review flags <span className="count">{e.flags.length}</span></h2>
           {e.flags.length ? (
             <ul className="flags">
               {e.flags.map((f, i) => (
@@ -120,7 +122,7 @@ export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Pr
               ))}
             </ul>
           ) : (
-            <p className="empty">No open issues. The last review found nothing to flag.</p>
+            <p className="empty">No flags are recorded for this entity. This does not establish that validation has run.</p>
           )}
         </article>
         <article className="card">

@@ -1,11 +1,40 @@
-export type EntityType = "metric" | "dashboard" | "dataset" | "source" | "person" | "glossary" | "domain";
+export type EntityType =
+  | "metric"
+  | "dashboard"
+  | "dataset"
+  | "source"
+  | "person"
+  | "glossary"
+  | "domain"
+  | "action"
+  | "evidence" | "model" | "workspace" | "product" | "market" | "request";
 
 export type Status =
-  | "certified" | "conflict" | "stale" | "orphaned" | "draft" | "uncertified" | "active" | "left";
+  | "retired"
+  | "certified"
+  | "conflict"
+  | "stale"
+  | "orphaned"
+  | "draft"
+  | "uncertified"
+  | "active"
+  | "left" | "inactive";
 
 export type RelationType =
-  | "uses" | "feeds" | "sources" | "owns" | "derived_from" | "conflicts_with"
-  | "equivalent_to" | "duplicate_of" | "overlaps" | "defines" | "belongs_to" | "joins";
+  | "uses"
+  | "feeds"
+  | "sources"
+  | "owns"
+  | "derived_from"
+  | "conflicts_with"
+  | "equivalent_to"
+  | "duplicate_of"
+  | "overlaps"
+  | "defines"
+  | "belongs_to"
+  | "joins"
+  | "tracks"
+  | "supports" | "variant_of" | "context" | "candidate_target";
 
 export type Severity = "bad" | "warn" | "info";
 
@@ -21,7 +50,10 @@ export interface Entity {
   type: EntityType;
   name: string;
   status: Status;
-  trust: number;
+  trust: number | null;
+  sources?: SourceRef[];
+  evidence_sources?: SourceRef[];
+  usage_period?: string;
   updated: string;
   summary: string;
   props: Record<string, string>;
@@ -38,4 +70,9 @@ export interface Edge {
   s: string;
   rel: RelationType;
   t: string;
+  basis?: "lineage" | "join" | "candidate" | "runtime";
+  label?: string;
+  sources?: SourceRef[];
 }
+
+export interface SourceRef { sheet: string; row: number; record_id?: string; fields?: string[]; snapshot: string; }

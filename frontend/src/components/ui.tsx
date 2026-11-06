@@ -21,7 +21,8 @@ export function TypeChip({ type }: { type: EntityType }) {
   );
 }
 
-export function Meter({ value }: { value: number }) {
+export function Meter({ value }: { value: number | null }) {
+  if (value === null) return <span className="muted">Not established</span>;
   return (
     <span className="meter">
       <span className="meter-track">

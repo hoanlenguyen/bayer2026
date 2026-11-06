@@ -161,3 +161,7 @@ npm run test:workbench               # renders real backend SSE events through t
 - [ ] Validate generated PBIP in Power BI Desktop
 - [ ] Previews for KPIs not in Product_Market_Monthly (e.g. reimbursement from Market_Access)
 - [x] Build plan page updated for the Bayer data pack: https://claude.ai/artifact/NWgjoee8m5ZYAYoBkDmYCC
+
+## Molecular source contract
+
+Read `docs/BAYER_MOLECULAR.md` before changing the explorer. `workbook_source.py` reads every sheet from the same `DATAPACK_PATH`; it preserves original rows and source SHA. Directed impact uses supplied lineage only. ID joins and unapproved migration candidates remain distinct. Owners join by ID, never by display name. The graph overlays current catalogue changes and persisted actions without modifying the decision pipeline.

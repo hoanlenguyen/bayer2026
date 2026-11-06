@@ -1,3 +1,4 @@
+import { WorkbookPage } from "./pages/WorkbookPage";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api/client";
 import { TopBar, type Page } from "./components/TopBar";
@@ -10,7 +11,7 @@ const pageFromHash = (): Page =>
     ? "explorer"
     : window.location.hash.startsWith("#actions")
       ? "actions"
-      : "ask";
+      : window.location.hash.startsWith("#source") ? "source" : "ask";
 
 export default function App() {
   const [page, setPage] = useState<Page>(pageFromHash);
@@ -36,7 +37,6 @@ export default function App() {
       window.removeEventListener("open-entity", onOpen);
     };
   }, []);
-  console.log('clg')
 
   useEffect(() => {
     if (page === "ask") document.title = "Investigations · Analytics Manager";
@@ -58,6 +58,7 @@ export default function App() {
         <AskPage onActionsChanged={refreshActions} />
       </div>
       {page === "explorer" && <ExplorerPage focusRequest={focusRequest} />}
+      {page === "source" && <WorkbookPage />}
       {page === "actions" && <ActionsPage onChanged={refreshActions} />}
     </div>
   );

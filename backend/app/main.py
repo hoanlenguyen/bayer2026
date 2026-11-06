@@ -128,7 +128,8 @@ async def datapack_summary() -> dict[str, Any]:
 @app.get("/api/graph")
 async def graph() -> dict[str, Any]:
     """Entities and relationships for the Estate Explorer, built from the live catalog."""
-    return build_graph()
+    actions = await pipeline().store.list_artifacts("actions", limit=500)
+    return build_graph(actions)
 
 
 @app.get("/api/specs")
@@ -221,3 +222,27 @@ async def conversation(conv_id: str) -> dict[str, Any]:
     if not conv:
         raise HTTPException(404, "Conversation not found")
     return conv
+
+
+@app.get("/api/source")
+async def source_metadata():
+    from .workbook_source import metadata
+    return metadata()
+
+
+@app.get("/api/source/{sheet}")
+async def source_records(sheet: str, offset: int = 0, limit: int = 50, row: int | None = None):
+    from .workbook_source import records, snapshot, source
+    snap=snapshot()
+    if sheet not in snap["sheets"]:
+        raise HTTPException(404, "Worksheet not found.")
+    if offset < 0 or not 1 <= limit <= 200:
+        raise HTTPException(400, "Use a nonnegative offset and a limit from 1 to 200.")
+    table=snap["sheets"][sheet]; values=records(sheet)
+    if row == 1 and table["layout"] == "table":
+        selected=[{"columns":table["columns"],"_source":source(sheet,1)}]
+    else:
+        selected=[r for r in values if r["_source"]["row"]==row] if row is not None else values[offset:offset+limit]
+    if row is not None and not selected:
+        raise HTTPException(404,"Source row not found.")
+    return {"sheet":sheet,"columns":table["columns"],"rows":selected,"total":len(values),"offset":offset,"limit":limit,"snapshot":snap["sha256"]}
