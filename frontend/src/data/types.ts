@@ -5,7 +5,7 @@ export type Status =
 
 export type RelationType =
   | "uses" | "feeds" | "sources" | "owns" | "derived_from" | "conflicts_with"
-  | "equivalent_to" | "duplicate_of" | "overlaps" | "defines" | "belongs_to";
+  | "equivalent_to" | "duplicate_of" | "overlaps" | "defines" | "belongs_to" | "joins";
 
 export type Severity = "bad" | "warn" | "info";
 

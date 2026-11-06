@@ -12,7 +12,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import catalog as cat
-from .llm import get_provider
+from .graph import build_graph
+from .llm import get_llm
 from .pipeline import STAGES, Pipeline
 from .settings import settings
 from .store import create_store
@@ -35,7 +36,8 @@ class ApprovalRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     store = await create_store()
-    app.state.pipeline = Pipeline(store, get_provider())
+    await cat.init(store)
+    app.state.pipeline = Pipeline(store, get_llm())
     yield
 
 
@@ -81,6 +83,23 @@ async def stages() -> dict[str, str]:
 @app.get("/api/catalog")
 async def catalog() -> dict[str, Any]:
     return cat.CATALOG
+
+
+@app.get("/api/graph")
+async def graph() -> dict[str, Any]:
+    """Entities and relationships for the Estate Explorer, built from the live catalog."""
+    return build_graph()
+
+
+@app.get("/api/specs")
+async def specs(conversation_id: str | None = None) -> list[dict[str, Any]]:
+    return await pipeline().store.list_artifacts("specs", conversation_id)
+
+
+@app.get("/api/agent-runs")
+async def agent_runs(conversation_id: str | None = None) -> list[dict[str, Any]]:
+    """Audit log of every agent run: mode, model, steps and duration."""
+    return await pipeline().store.list_artifacts("agent_runs", conversation_id)
 
 
 @app.post("/api/chat")

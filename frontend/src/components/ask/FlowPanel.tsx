@@ -4,13 +4,13 @@ import { StageDetail } from "./StageDetail";
 
 /** Who does the work in each stage. Mirrors the legend in Bayer's reference pipeline. */
 const STAGE_KIND: Record<StageId, { label: string; cls: string }> = {
-  intent: { label: "AI agent", cls: "kind-ai" },
-  discovery: { label: "AI + catalog", cls: "kind-ai" },
+  intent: { label: "Intent agent", cls: "kind-ai" },
+  discovery: { label: "Catalog + Python", cls: "kind-state" },
   governance: { label: "Python", cls: "kind-py" },
   decision: { label: "Python", cls: "kind-py" },
   deliver: { label: "Python", cls: "kind-py" },
-  evidence: { label: "Catalog", cls: "kind-state" },
-  spec: { label: "AI + Python", cls: "kind-ai" },
+  evidence: { label: "Evidence agent", cls: "kind-ai" },
+  spec: { label: "Spec agent", cls: "kind-ai" },
   approval: { label: "Human", cls: "kind-human" },
   render: { label: "Python", cls: "kind-py" },
   register: { label: "Python", cls: "kind-py" },
@@ -31,7 +31,7 @@ const TITLES: Record<StageId, string> = {
 
 const BASE: StageId[] = ["intent", "discovery", "governance", "decision"];
 const BUILD: StageId[] = ["evidence", "spec", "approval", "render", "register"];
-const AUTO_OPEN: StageId[] = ["intent", "decision", "spec", "render"];
+const AUTO_OPEN: StageId[] = ["intent", "decision", "spec", "render", "register", "deliver"];
 
 function stagesFor(decision: DecisionType | null): StageId[] {
   if (decision === "reuse") return [...BASE, "deliver"];

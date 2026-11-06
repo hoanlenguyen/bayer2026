@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { EDGES, TYPES } from "../data/estate";
+import { EDGES, ENTITIES, TYPES } from "../data/estate";
 import type { EntityType } from "../data/types";
 import { byId, neighborhood } from "../lib/estate";
 import { CODE_KEYS } from "./DetailsTab";
@@ -59,7 +59,7 @@ export function GraphTab(p: Props) {
         </div>
         <div className="fgroup">
           <h3>Entity types</h3>
-          {(Object.keys(TYPES) as EntityType[]).map((k) => (
+          {(Object.keys(TYPES) as EntityType[]).filter((k) => ENTITIES.some((e) => e.type === k)).map((k) => (
             <label key={k} className={`type-toggle t-${k}${counts[k] ? "" : " zero"}`}>
               <input type="checkbox" id={`type-${k}`} checked={!p.hidden.has(k)} onChange={(ev) => p.onToggleType(k, ev.target.checked)} />
               <span className="tdot" />
@@ -74,7 +74,7 @@ export function GraphTab(p: Props) {
             <EdgeKey cls="k-bad" label="Metric conflict" />
             <EdgeKey cls="k-warn" label="Duplicate or overlap" />
             <EdgeKey cls="k-accent" label="Equivalent logic" />
-            <EdgeKey cls="k-base" label="Lineage, usage, ownership" />
+            <EdgeKey cls="k-base" label="Lineage, usage, ownership, joins" />
           </div>
         </div>
         <div className="fgroup">

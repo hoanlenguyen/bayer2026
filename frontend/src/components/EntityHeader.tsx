@@ -6,10 +6,11 @@ import { Pill, TypeChip } from "./ui";
 
 interface Props {
   entity: Entity;
+  homeId: string;
   onFocus: (id: string) => void;
 }
 
-export function EntityHeader({ entity: e, onFocus }: Props) {
+export function EntityHeader({ entity: e, homeId, onFocus }: Props) {
   const owner = ownerOf(e.id);
   const [copyLabel, setCopyLabel] = useState("Copy ID");
   const openFlags = e.flags.filter((f) => f.sev !== "info").length;
@@ -25,7 +26,7 @@ export function EntityHeader({ entity: e, onFocus }: Props) {
   return (
     <>
       <nav className="breadcrumb" aria-label="Breadcrumb">
-        <button type="button" onClick={() => onFocus("d_crop")}>Estate</button>
+        <button type="button" onClick={() => onFocus(homeId)}>Estate</button>
         <span aria-hidden="true">/</span>
         <span>{TYPES[e.type].plural}</span>
         <span aria-hidden="true">/</span>

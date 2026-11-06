@@ -28,10 +28,56 @@ function KV({ rows }: { rows: [string, React.ReactNode][] }) {
   );
 }
 
+interface AgentTraceData {
+  agent: string;
+  mode: "llm" | "rules";
+  model: string;
+  ms: number;
+  fallback_reason: string | null;
+  steps: { kind: string; name: string; detail: string; ok: boolean }[];
+}
+
+const STEP_LABEL: Record<string, string> = { tool: "Tool", model: "Model", rule: "Rule", check: "Check", note: "Note" };
+
+/** What the agent did: every tool call, model call and Python check, in order. */
+function AgentTrace({ trace }: { trace: AgentTraceData }) {
+  return (
+    <details className="agent-trace" open={trace.steps.length <= 4}>
+      <summary>
+        <span className="agent-name">{trace.agent}</span>
+        <span className={`badge mode-${trace.mode}`}>{trace.mode === "llm" ? trace.model : "rules, offline"}</span>
+        <span className="muted small">{trace.steps.length} steps · {trace.ms} ms</span>
+      </summary>
+      {trace.fallback_reason && <p className="warn-text small">Model failed, used rules instead: {trace.fallback_reason}</p>}
+      <ol className="steps">
+        {trace.steps.map((st, i) => (
+          <li key={i} className={st.ok ? "" : "step-bad"}>
+            <span className={`step-kind sk-${st.kind}`}>{STEP_LABEL[st.kind] ?? st.kind}</span>
+            <span className="step-text">
+              <code>{st.name}</code>
+              {st.detail && <span className="muted"> → {st.detail}</span>}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+function OpenInExplorer({ id }: { id: string }) {
+  return (
+    <button type="button" className="btn-ghost small" onClick={() => window.dispatchEvent(new CustomEvent("open-entity", { detail: id }))}>
+      Open in Estate Explorer
+    </button>
+  );
+}
+
 export function StageDetail({ stage, data, catalog }: { stage: StageId; data: any; catalog: CatalogMeta | null }) {
   switch (stage) {
     case "intent":
       return (
+        <div className="detail-stack">
+        {data.agent && <AgentTrace trace={data.agent} />}
         <KV rows={[
           ["Decision", data.decision ?? "Not yet known"],
           ["Numbers", names(data.measures, "m", catalog)],
@@ -43,6 +89,7 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
           ...(data.department ? [["Department", data.department] as [string, string]] : []),
           ...(data.unmatched_terms?.length ? [["Not in catalog", data.unmatched_terms.join(", ")] as [string, string]] : []),
         ]} />
+        </div>
       );
 
     case "discovery": {
@@ -132,6 +179,8 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
     case "deliver": {
       const a = data.asset;
       return (
+        <div className="detail-stack">
+        <OpenInExplorer id={a.id} />
         <KV rows={[
           ["Report", <strong key="n">{a.name}</strong>],
           ["Workspace", a.workspace],
@@ -139,15 +188,25 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
           ["Views (90 days)", a.views_90d?.toLocaleString("en-US") ?? "0"],
           ["Last reviewed", a.last_review],
         ]} />
+        </div>
       );
     }
 
     case "evidence":
       return (
         <div className="detail-stack">
+          {data.agent && <AgentTrace trace={data.agent} />}
+          {data.summary && <p>{data.summary}</p>}
+          <strong className="small">Proof from the catalog</strong>
           <ul className="checks">
             {data.proofs.map((p: { ok: boolean; text: string }) => (
               <li key={p.text} className={p.ok ? "pass" : "fail"}><span aria-hidden="true">{p.ok ? "✓" : "!"}</span> {p.text}</li>
+            ))}
+          </ul>
+          <strong className="small">Python verification of the agent's choice</strong>
+          <ul className="checks">
+            {(data.verification ?? []).map((v: { ok: boolean; text: string }) => (
+              <li key={v.text} className={v.ok ? "pass" : "fail"}><span aria-hidden="true">{v.ok ? "✓" : "!"}</span> {v.text}</li>
             ))}
           </ul>
           <KV rows={Object.entries(data.columns as Record<string, string[]>).map(([t, cols]) => [t, <code key={t}>{cols.join(", ")}</code>])} />
@@ -157,6 +216,7 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
     case "spec":
       return (
         <div className="detail-stack">
+          {data.agent && <AgentTrace trace={data.agent} />}
           <KV rows={[
             ["Name", <strong key="n">{data.name}</strong>],
             ["Type", `${data.decision_type}${data.change_type ? ` (${data.change_type})` : ""}`],
@@ -165,9 +225,22 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
             ["Pages", data.pages.map((p: { name: string; visuals: unknown[] }) => `${p.name} (${p.visuals.length} visuals)`).join(", ")],
           ]} />
           {data.rationale && <p className="muted">{data.rationale}</p>}
+          {data.validation && (
+            <details open={!data.validation.passed}>
+              <summary>
+                Validation: {data.validation.passed ? "all checks pass" : "failed"}
+                {data.validation.attempts > 1 ? ` after ${data.validation.attempts} attempts` : ""}
+              </summary>
+              <ul className="checks">
+                {data.validation.checks.map((c: { ok: boolean; text: string }) => (
+                  <li key={c.text} className={c.ok ? "pass" : "fail"}><span aria-hidden="true">{c.ok ? "✓" : "✕"}</span> {c.text}</li>
+                ))}
+              </ul>
+            </details>
+          )}
           <details>
             <summary>DashboardSpec (JSON)</summary>
-            <pre className="code">{JSON.stringify(data, null, 2)}</pre>
+            <pre className="code">{JSON.stringify({ ...data, agent: undefined }, null, 2)}</pre>
           </details>
         </div>
       );
@@ -193,12 +266,15 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
 
     case "register":
       return (
+        <div className="detail-stack">
+        <OpenInExplorer id={data.id} />
         <KV rows={[
           ["Asset", <strong key="n">{data.name}</strong>],
           ["Workspace", data.workspace],
           ["Owner", data.owner],
           ["Next review", data.next_review],
         ]} />
+        </div>
       );
   }
 }

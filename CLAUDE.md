@@ -21,18 +21,19 @@ An AI workspace that helps a pharma manufacturing plant ask the right business q
 
 ```
 User intent (free text or department preset)
-  → Intent extraction (/grill-me)          AI, asks at most 2 questions
-  → Analytics discovery (/explore)         AI + catalog search
+  → Intent agent (/grill-me)               AI, asks at most 2 questions
+  → Analytics discovery                    catalog search + scoring (Python)
   → Governance check (per candidate)       deterministic Python
   → Decision formula                       deterministic Python
        ├─ Reuse        → link to existing report (no new PBIP)
-       ├─ Extend       → Evidence → Spec (change) → updated PBIP
-       ├─ Create       → Evidence → Spec (new)    → new PBIP → governance check
+       ├─ Extend       → Evidence agent → Spec agent (change) → approval → updated PBIP
+       ├─ Create       → Evidence agent → Spec agent (new)    → approval → new PBIP → register
        └─ Not feasible → ask the user to adjust the intent
 ```
 
 Rules:
 - The AI extracts facts (intent fields, matching measures). **Python decides.** Same inputs, same decision.
+- Agents propose, Python verifies: unknown catalog IDs, tables and columns are removed; numbers shown as proof come from the catalog, never from the model.
 - Every decision shows its scores in the UI.
 - A human approves Extend, Create, certification and retirement.
 
@@ -53,17 +54,30 @@ Rules:
 
 Preset = starting intent mapped to certified KPIs. Grill-me then asks only for missing details (line, shift, horizon). Time-based presets (shift start, weekly review, month-end) are in scope.
 
+## Agents (`backend/app/agents/`)
+
+Each agent has `run_llm` (OpenAI) and `run_rules` (offline, deterministic). Same output shape. If the model call fails, the agent falls back to rules and records why. Every run returns a trace (steps: tool / model / rule / check / note) that is shown in the flow panel and saved to `agent_runs`.
+
+| Agent | Model role | What it does | Python verification |
+|---|---|---|---|
+| Intent (/grill-me) | fast (`gpt-6-luna`) | JSON extraction of decision, measures, dimensions, grain, filters; max 2 questions | `sanitize_intent` drops IDs not in the catalog |
+| Evidence (/explore) | reasoning (`gpt-6-astra`) | Tool loop over read-only catalog tools: `search_catalog`, `get_measure`, `get_dataset`, `get_relationships`, `get_report` | `finalize`: removes unknown tables/columns, adds required ones, builds proof lines from catalog facts |
+| Spec (/to-spec) | reasoning | Designs the page (visuals, name, rationale); Python assembles the rest from evidence | `validate`: 11 checks; errors go back to the model, up to 3 attempts |
+
 ## Architecture
 
 ```
 frontend/  React + TypeScript + Vite
   #ask       Ask page: chat, department presets, live processing-flow panel
-  #explorer  Estate Explorer: entity details + relationship graph ("molecular view")
-             (still uses the older sales sample data; to be switched to the plant catalog)
+  #explorer  Estate Explorer: entity details + relationship graph ("molecular view"),
+             loaded from GET /api/graph (live plant catalog, same governance scoring as the Ask flow)
 backend/   Python 3.12+, FastAPI
   app/main.py        HTTP API, Server-Sent Events stream of pipeline events
   app/pipeline.py    orchestrates stages, emits events
-  app/llm.py         model access: "openai" or "mock" provider
+  app/agents/        intent, evidence, spec agents + read-only catalog tools
+  app/llm.py         OpenAI access: text, JSON and tool-calling loop; "mock" = offline
+  app/graph.py       catalog → Explorer graph (entities, edges, status, flags)
+  app/seed.py        python -m app.seed [--reset]: load catalog + presets into MongoDB
   app/decision.py    scores, gates, decision (pure functions, unit tested)
   app/pbip.py        Spec → PBIP folder (plain Python, no AI)
   app/store.py       MongoDB (pymongo async) or in-memory fallback
@@ -77,6 +91,9 @@ backend/   Python 3.12+, FastAPI
 - `POST /api/chat` – body `{conversation_id?, message, preset_id?}`; streams SSE events: `stage` (started/done with payload), `message`, `question`, `done`, `error`
 - `POST /api/approve` – body `{conversation_id, approved, approver}`; streams approval → render → register
 - `GET  /api/conversations`, `GET /api/conversations/{id}` – stored conversations with runs and events
+- `GET  /api/graph` – Estate Explorer entities and edges from the live catalog
+- `GET  /api/specs?conversation_id=` – DashboardSpec versions with status (draft / approved / rejected / superseded)
+- `GET  /api/agent-runs?conversation_id=` – audit log of agent runs
 
 ### Models
 - OpenAI GPT-6 family. `MODEL_REASONING` (default `gpt-6-astra`) for discovery reasoning and spec; `MODEL_FAST` (default `gpt-6-luna`) for grill-me and summaries. Verify exact IDs in the OpenAI dashboard.
@@ -84,8 +101,12 @@ backend/   Python 3.12+, FastAPI
 - Privacy position: the model sees catalog metadata and the user's question, not raw production data. Production path: models hosted in Bayer's own Azure tenant (EU region).
 
 ### Database
-- MongoDB when `MONGODB_URI` is set, otherwise in-memory (data lost on restart).
-- Collections: `conversations` (messages, intent, runs with events).
+- MongoDB when `MONGODB_URI` is set, otherwise in-memory (data lost on restart). Database name: `MONGODB_DB` (default `analytics_manager`).
+- The catalog lives in MongoDB. On startup an empty database is seeded from `app/data/*.json`; `python -m app.seed --reset` reloads it.
+- Collections: `conversations`, `intents`, `evidence`, `specs`, `agent_runs`, `catalog_measures`, `catalog_dimensions`, `catalog_datasets`, `catalog_assets`, `catalog_relationships`, `presets`.
+- Registered or extended reports are written back to `catalog_assets`, so they survive restarts and are reused.
+- Tests use `mongomock` through an async adapter (`tests/fakes.py`); the real Atlas connection has not been exercised yet.
+- The MongoDB MCP connector is not usable: Atlas reports MCP access disabled for the organization (an Organization Owner must enable AI client access).
 
 ## Secrets
 - Never commit keys. `backend/.env` is git-ignored; `backend/.env.example` lists variable names only.
@@ -98,7 +119,8 @@ backend/   Python 3.12+, FastAPI
 cd backend && python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
-pytest                 # 16 tests: decision rules and full API flows
+pytest                 # 28 tests: decision rules, agents (incl. scripted OpenAI tool calls), MongoDB store, graph, API flows
+python -m app.seed     # load catalog into MongoDB (needs MONGODB_URI)
 
 # frontend (proxies /api to :8000)
 cd frontend && npm install && npm run dev
@@ -117,8 +139,11 @@ cd frontend && npm install && npm run dev
 - [x] Estate Explorer prototype (frontend)
 - [x] Backend: pipeline, decision formula (unit tested), mock + OpenAI provider, MongoDB/in-memory store, PBIP skeleton
 - [x] Ask page with department presets, grill-me questions, approval step and live processing flow
-- [ ] Test the OpenAI provider with a real key (only the mock provider has been run so far)
-- [ ] Switch Estate Explorer to the plant catalog
+- [x] Estate Explorer on the plant catalog (`/api/graph`)
+- [x] Agents for intent, evidence and spec with tool calling, verification, fallback and audit log
+- [x] MongoDB persistence for catalog, conversations, intents, evidence, specs, agent runs
+- [ ] Test the OpenAI provider with a real key (model path tested only with a scripted fake client)
+- [ ] Connect to the team's MongoDB Atlas (code tested with mongomock only)
 - [ ] Load Bayer synthetic dataset into the catalog
 - [ ] Action tracker (follow-up actions with owners)
 - [ ] Validate generated PBIP in Power BI Desktop

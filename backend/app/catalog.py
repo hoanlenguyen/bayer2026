@@ -1,7 +1,9 @@
-"""Loads the sample analytics catalog and department presets.
+"""The analytics catalog and department presets.
 
 The catalog holds metadata only (measures, dimensions, datasets, existing
-reports). The AI reasons over this metadata, never over raw production data.
+reports). It is loaded from the store at startup; when the store is empty it is
+seeded from app/data/*.json. The AI reasons over this metadata, never over raw
+production data.
 """
 from __future__ import annotations
 
@@ -12,12 +14,13 @@ from typing import Any
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
-_BASE_CATALOG: dict[str, Any] = json.loads((DATA_DIR / "catalog.json").read_text(encoding="utf-8"))
-PRESETS: list[dict[str, Any]] = json.loads((DATA_DIR / "presets.json").read_text(encoding="utf-8"))
+SEED_CATALOG: dict[str, Any] = {k: v for k, v in json.loads((DATA_DIR / "catalog.json").read_text(encoding="utf-8")).items()
+                                if not k.startswith("_")}
+SEED_PRESETS: list[dict[str, Any]] = json.loads((DATA_DIR / "presets.json").read_text(encoding="utf-8"))
 
-# Mutable runtime copy: assets registered during the session are appended here,
-# so a second identical request is answered by reuse.
-CATALOG: dict[str, Any] = copy.deepcopy(_BASE_CATALOG)
+# Live, in-process copies used by the pipeline. Mutated in place so imports stay valid.
+CATALOG: dict[str, Any] = copy.deepcopy(SEED_CATALOG)
+PRESETS: list[dict[str, Any]] = copy.deepcopy(SEED_PRESETS)
 
 DATASET_DEPARTMENT = {
     "shipments_fact": "Supply chain",
@@ -29,6 +32,19 @@ DATASET_DEPARTMENT = {
     "training_records": "HR",
     "cost_ledger": "Finance",
 }
+
+
+async def init(store: Any) -> str:
+    """Load the catalog from the store, seeding it first if empty. Returns the source used."""
+    await store.seed_catalog(SEED_CATALOG, SEED_PRESETS)
+    loaded = await store.load_catalog()
+    presets = await store.load_presets()
+    if loaded:
+        CATALOG.clear()
+        CATALOG.update(loaded)
+    if presets:
+        PRESETS[:] = presets
+    return store.name
 
 
 def preset_by_id(preset_id: str | None) -> dict[str, Any] | None:
@@ -52,6 +68,7 @@ def department_for(measures: list[str]) -> str | None:
 
 
 def reset_catalog() -> None:
-    """Restore the original sample catalog (used by tests)."""
+    """Restore the seed catalog (used by tests)."""
     CATALOG.clear()
-    CATALOG.update(copy.deepcopy(_BASE_CATALOG))
+    CATALOG.update(copy.deepcopy(SEED_CATALOG))
+    PRESETS[:] = copy.deepcopy(SEED_PRESETS)

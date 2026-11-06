@@ -11,8 +11,17 @@ export default function App() {
 
   useEffect(() => {
     const onHash = () => setPage(pageFromHash());
+    // Other pages can ask to open an entity: window.dispatchEvent(new CustomEvent("open-entity", { detail: id }))
+    const onOpen = (e: Event) => {
+      setFocusRequest((e as CustomEvent<string>).detail);
+      window.location.hash = "#explorer";
+    };
     window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
+    window.addEventListener("open-entity", onOpen);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener("open-entity", onOpen);
+    };
   }, []);
 
   return (

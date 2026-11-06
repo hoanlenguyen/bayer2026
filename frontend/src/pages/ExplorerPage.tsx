@@ -3,15 +3,45 @@ import { DetailsTab } from "../components/DetailsTab";
 import { EntityHeader } from "../components/EntityHeader";
 import { GraphTab } from "../components/GraphTab";
 import type { EntityType } from "../data/types";
-import { byId } from "../lib/estate";
+import { byId, loadEstate } from "../lib/estate";
 
 type Tab = "details" | "graph";
 const tabFromHash = (): Tab => (window.location.hash === "#explorer-graph" ? "graph" : "details");
 const hashFor = (t: Tab) => (t === "graph" ? "#explorer-graph" : "#explorer");
 
-/** Estate Explorer: entity details and the relationship graph ("molecular view"). */
+type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; home: string };
+
+/** Estate Explorer: entity details and the relationship graph ("molecular view") of the plant catalog. */
 export function ExplorerPage({ focusRequest }: { focusRequest: string | null }) {
-  const [focus, setFocusId] = useState("m_ns");
+  const [load, setLoad] = useState<Load>({ status: "loading" });
+
+  // Reload on every visit so reports registered from the Ask page appear.
+  useEffect(() => {
+    let alive = true;
+    loadEstate()
+      .then((d) => alive && setLoad({ status: "ready", home: d.focus }))
+      .catch((e: unknown) => alive && setLoad({ status: "error", message: e instanceof Error ? e.message : String(e) }));
+    return () => { alive = false; };
+  }, []);
+
+  if (load.status === "loading") {
+    return <main className="page"><p className="muted">Loading the plant catalog…</p></main>;
+  }
+  if (load.status === "error") {
+    return (
+      <main className="page">
+        <div className="banner" role="status">
+          The catalog could not be loaded ({load.message}). Start the backend with <code>uvicorn app.main:app --reload --port 8000</code> in <code>backend/</code>, then reload.
+        </div>
+      </main>
+    );
+  }
+  const initial = focusRequest && byId[focusRequest] ? focusRequest : load.home;
+  return <ExplorerView initialFocus={initial} home={load.home} focusRequest={focusRequest} />;
+}
+
+function ExplorerView({ initialFocus, home, focusRequest }: { initialFocus: string; home: string; focusRequest: string | null }) {
+  const [focus, setFocusId] = useState(initialFocus);
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTabState] = useState<Tab>(tabFromHash);
   const [depth, setDepth] = useState(2);
@@ -57,7 +87,7 @@ export function ExplorerPage({ focusRequest }: { focusRequest: string | null }) 
   return (
     <>
       <main className="page">
-        <EntityHeader entity={entity} onFocus={(id) => setFocus(id)} />
+        <EntityHeader entity={entity} homeId={home} onFocus={(id) => setFocus(id)} />
         <div className="tabs" role="tablist" aria-label="Entity views">
           {(["details", "graph"] as Tab[]).map((t) => (
             <button

@@ -1,13 +1,37 @@
 import { EDGES, ENTITIES, REL, TYPES } from "../data/estate";
-import type { Entity, EntityType } from "../data/types";
+import type { Edge, Entity, EntityType } from "../data/types";
 
-export const byId: Record<string, Entity> = Object.fromEntries(ENTITIES.map((e) => [e.id, e]));
+export const byId: Record<string, Entity> = {};
+const adjacency = new Map<string, string[]>();
 
-const adjacency = new Map<string, string[]>(ENTITIES.map((e) => [e.id, []]));
-EDGES.forEach((l) => {
-  adjacency.get(l.s)!.push(l.t);
-  adjacency.get(l.t)!.push(l.s);
-});
+/** Replace the estate with data from the backend and rebuild the lookups. */
+export function setEstate(entities: Entity[], edges: Edge[]) {
+  ENTITIES.splice(0, ENTITIES.length, ...entities);
+  EDGES.splice(0, EDGES.length, ...edges);
+  Object.keys(byId).forEach((k) => delete byId[k]);
+  adjacency.clear();
+  ENTITIES.forEach((e) => { byId[e.id] = e; adjacency.set(e.id, []); });
+  EDGES.forEach((l) => {
+    adjacency.get(l.s)?.push(l.t);
+    adjacency.get(l.t)?.push(l.s);
+  });
+}
+
+export interface GraphPayload {
+  entities: Entity[];
+  edges: Edge[];
+  focus: string;
+  counts: { reports: number; measures: number; datasets: number };
+}
+
+/** Fetch the plant catalog graph from the backend. */
+export async function loadEstate(): Promise<GraphPayload> {
+  const res = await fetch("/api/graph");
+  if (!res.ok) throw new Error(`/api/graph returned ${res.status}`);
+  const data = (await res.json()) as GraphPayload;
+  setEstate(data.entities, data.edges);
+  return data;
+}
 
 export const toneOf = (v: number) => (v >= 0.8 ? "ok" : v >= 0.5 ? "warn" : "bad");
 export const glyphOf = (e: Entity) => (e.type === "person" ? e.initials ?? "" : TYPES[e.type].glyph ?? "");
@@ -51,7 +75,7 @@ export function neighborhood(focus: string, depth: number, hidden: Set<EntityTyp
     const id = queue.shift()!;
     const d = dist.get(id)!;
     if (d >= depth) continue;
-    for (const n of adjacency.get(id)!) {
+    for (const n of adjacency.get(id) ?? []) {
       if (dist.has(n) || hidden.has(byId[n].type)) continue;
       dist.set(n, d + 1);
       queue.push(n);

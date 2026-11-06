@@ -41,7 +41,7 @@ export function TopBar({ page, onPick }: Props) {
           <input
             id="search"
             type="search"
-            placeholder="Search metrics, dashboards, datasets, people"
+            placeholder="Search reports, measures, datasets, owners"
             autoComplete="off"
             aria-controls="search-results"
             aria-expanded={open && !!q}

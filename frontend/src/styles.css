@@ -376,3 +376,19 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 @media (prefers-reduced-motion: reduce) {
   .st-running .flow-icon, .avatar.thinking::after { animation: none; }
 }
+
+/* ===================== Agent traces ===================== */
+.agent-trace { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.agent-trace > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 10px; cursor: pointer; list-style-position: inside; }
+.agent-name { font-weight: 600; font-size: 12.5px; }
+.mode-llm { color: var(--t-glossary); }
+.steps { list-style: none; margin: 0; padding: 4px 10px 8px; display: grid; gap: 5px; border-top: 1px solid var(--line); }
+.steps li { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; font-size: 12px; align-items: baseline; }
+.step-text { min-width: 0; overflow-wrap: anywhere; }
+.step-text code { font-size: 11.5px; }
+.step-kind { font: 600 10px var(--font-mono); text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.sk-tool { color: var(--t-dashboard); }
+.sk-model { color: var(--t-glossary); }
+.sk-check { color: var(--t-domain); }
+.step-bad .step-text { color: var(--warn); }
+.btn-ghost.small { justify-self: start; font-size: 12.5px; padding: 3px 9px; }

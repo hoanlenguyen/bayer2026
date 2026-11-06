@@ -10,7 +10,9 @@ uvicorn app.main:app --reload --port 8000
 pytest
 ```
 
-Without keys it runs with the **mock** model (rule-based) and **in-memory** storage, so the full flow works offline.
+Without keys it runs with the **mock** model (agents use their rule-based path) and **in-memory** storage, so the full flow works offline.
+
+With `MONGODB_URI` set, the catalog is seeded into MongoDB on first start. To reload it: `python -m app.seed --reset`.
 `GET /api/health` shows which provider and store are active.
 
 Generated PBIP projects are written to `backend/output/<conversation>/` (git-ignored).
