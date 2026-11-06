@@ -2,7 +2,14 @@ import { useState } from "react";
 import { ENTITIES, TYPES } from "../data/estate";
 import type { Entity } from "../data/types";
 
-export function TopBar({ onPick }: { onPick: (id: string) => void }) {
+export type Page = "ask" | "explorer";
+
+interface Props {
+  page: Page;
+  onPick: (id: string) => void;
+}
+
+export function TopBar({ page, onPick }: Props) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
@@ -21,13 +28,15 @@ export function TopBar({ onPick }: { onPick: (id: string) => void }) {
   return (
     <header className="topbar">
       <div className="topbar-inner">
-        <a className="brand" href="#details">
+        <a className="brand" href="#ask">
           <span className="brand-mark" aria-hidden="true" />
-          Curator
+          Analytics Manager
         </a>
-        <span className="crumb-sep" aria-hidden="true">/</span>
-        <span className="topbar-sub">Estate Explorer</span>
-        <div className="search">
+        <nav className="app-nav" aria-label="Main">
+          <a href="#ask" aria-current={page === "ask" ? "page" : undefined}>Ask</a>
+          <a href="#explorer" aria-current={page === "explorer" ? "page" : undefined}>Estate Explorer</a>
+        </nav>
+        {page === "explorer" && <div className="search">
           <label htmlFor="search" className="sr-only">Search entities</label>
           <input
             id="search"
@@ -64,7 +73,7 @@ export function TopBar({ onPick }: { onPick: (id: string) => void }) {
               )}
             </ul>
           )}
-        </div>
+        </div>}
         <span className="sample-tag" title="All entities on this page are fictional sample data">Sample data</span>
       </div>
     </header>

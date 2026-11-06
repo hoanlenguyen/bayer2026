@@ -1,108 +1,27 @@
-import { useCallback, useEffect, useState } from "react";
-import { DetailsTab } from "./components/DetailsTab";
-import { EntityHeader } from "./components/EntityHeader";
-import { GraphTab } from "./components/GraphTab";
-import { TopBar } from "./components/TopBar";
-import type { EntityType } from "./data/types";
-import { byId } from "./lib/estate";
+import { useEffect, useState } from "react";
+import { TopBar, type Page } from "./components/TopBar";
+import { AskPage } from "./pages/AskPage";
+import { ExplorerPage } from "./pages/ExplorerPage";
 
-type Tab = "details" | "graph";
-const tabFromHash = (): Tab => (window.location.hash === "#graph" ? "graph" : "details");
+const pageFromHash = (): Page => (window.location.hash.startsWith("#explorer") ? "explorer" : "ask");
 
 export default function App() {
-  const [focus, setFocusId] = useState("m_ns");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [tab, setTabState] = useState<Tab>(tabFromHash);
-  const [depth, setDepth] = useState(2);
-  const [hidden, setHidden] = useState<Set<EntityType>>(() => new Set());
-  const [sent, setSent] = useState<Set<string>>(() => new Set());
-
-  const entity = byId[focus];
+  const [page, setPage] = useState<Page>(pageFromHash);
+  const [focusRequest, setFocusRequest] = useState<string | null>(null);
 
   useEffect(() => {
-    const onHash = () => setTabState(tabFromHash());
+    const onHash = () => setPage(pageFromHash());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  useEffect(() => {
-    document.title = `${entity.name} · Curator Estate Explorer`;
-  }, [entity]);
-
-  const setTab = useCallback((t: Tab) => {
-    setTabState(t);
-    if (window.location.hash !== "#" + t) history.replaceState(null, "", "#" + t);
-  }, []);
-
-  const setFocus = useCallback((id: string, opts: { tab?: Tab; scroll?: boolean } = {}) => {
-    setFocusId(id);
-    setSelected(null);
-    if (opts.tab) setTab(opts.tab);
-    if (opts.scroll !== false) window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [setTab]);
-
-  const toggleType = useCallback((t: EntityType, visible: boolean) => {
-    setHidden((prev) => {
-      const next = new Set(prev);
-      if (visible) next.delete(t); else next.add(t);
-      return next;
-    });
-  }, []);
-
   return (
-    <>
-      <TopBar onPick={(id) => setFocus(id)} />
-      <main className="page">
-        <EntityHeader entity={entity} onFocus={(id) => setFocus(id)} />
-        <div className="tabs" role="tablist" aria-label="Entity views">
-          {(["details", "graph"] as Tab[]).map((t) => (
-            <button
-              key={t}
-              role="tab"
-              id={`tab-${t}`}
-              aria-controls={`panel-${t}`}
-              aria-selected={tab === t}
-              tabIndex={tab === t ? 0 : -1}
-              onClick={() => setTab(t)}
-              onKeyDown={(ev) => {
-                if (ev.key === "ArrowRight" || ev.key === "ArrowLeft") {
-                  const next: Tab = t === "details" ? "graph" : "details";
-                  setTab(next);
-                  document.getElementById(`tab-${next}`)?.focus();
-                }
-              }}
-            >
-              {t === "details" ? "Details" : "Graph"}
-            </button>
-          ))}
-        </div>
-
-        {tab === "details" ? (
-          <section id="panel-details" role="tabpanel" aria-labelledby="tab-details">
-            <DetailsTab
-              entity={entity}
-              sent={sent.has(entity.id)}
-              onFocus={(id) => setFocus(id)}
-              onSend={(id) => setSent((s) => new Set(s).add(id))}
-              onShowGraph={() => setTab("graph")}
-            />
-          </section>
-        ) : (
-          <section id="panel-graph" role="tabpanel" aria-labelledby="tab-graph">
-            <GraphTab
-              focus={focus}
-              selected={selected}
-              depth={depth}
-              hidden={hidden}
-              onSelect={setSelected}
-              onFocus={(id) => setFocus(id, { scroll: false })}
-              onOpenDetails={(id) => setFocus(id, { tab: "details" })}
-              onDepth={setDepth}
-              onToggleType={toggleType}
-            />
-          </section>
-        )}
-      </main>
-    </>
+    <div className={`app app-${page}`}>
+      <TopBar
+        page={page}
+        onPick={(id) => { setFocusRequest(id); window.location.hash = "#explorer"; }}
+      />
+      {page === "ask" ? <AskPage /> : <ExplorerPage focusRequest={focusRequest} />}
+    </div>
   );
 }

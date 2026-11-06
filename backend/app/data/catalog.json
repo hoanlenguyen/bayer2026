@@ -1,0 +1,819 @@
+{
+  "_note": "Fictional sample catalog for a pharma manufacturing plant. Replace with the Bayer synthetic dataset and a real catalog scan.",
+  "measures": {
+    "late_shipments": {
+      "name": "Late shipments",
+      "unit": "count",
+      "dataset": "shipments_fact",
+      "certified": true,
+      "default_grain": "day",
+      "definition": "Shipments whose actual delivery date is after the promised date, or not delivered by the promised date.",
+      "expression": "COUNTROWS(FILTER(shipments_fact, shipments_fact[is_late] = TRUE()))",
+      "keywords": [
+        "late deliver",
+        "late shipment",
+        "delayed deliver",
+        "delayed shipment",
+        "overdue deliver",
+        "delivery delay",
+        "late order"
+      ]
+    },
+    "days_late": {
+      "name": "Average days late",
+      "unit": "days",
+      "dataset": "shipments_fact",
+      "certified": true,
+      "default_grain": "day",
+      "definition": "Average number of days between promised and actual (or current) date for late shipments.",
+      "expression": "AVERAGEX(FILTER(shipments_fact, shipments_fact[is_late]), shipments_fact[days_late])",
+      "keywords": [
+        "days late",
+        "how late",
+        "delay days"
+      ]
+    },
+    "otif": {
+      "name": "OTIF %",
+      "unit": "%",
+      "dataset": "shipments_fact",
+      "certified": true,
+      "default_grain": "week",
+      "definition": "Share of shipments delivered on time and in full against the promised date and quantity.",
+      "expression": "DIVIDE(CALCULATE(COUNTROWS(shipments_fact), shipments_fact[on_time_in_full]), COUNTROWS(shipments_fact))",
+      "keywords": [
+        "otif",
+        "on time in full",
+        "on-time",
+        "delivery performance"
+      ]
+    },
+    "oee": {
+      "name": "OEE %",
+      "unit": "%",
+      "dataset": "line_events_fact",
+      "certified": true,
+      "default_grain": "day",
+      "definition": "Availability × performance × quality for a packaging or filling line.",
+      "expression": "[Availability] * [Performance] * [Quality rate]",
+      "keywords": [
+        "oee",
+        "overall equipment",
+        "line efficiency",
+        "equipment effectiveness"
+      ]
+    },
+    "output_vs_plan": {
+      "name": "Output vs plan %",
+      "unit": "%",
+      "dataset": "production_batches_fact",
+      "certified": true,
+      "default_grain": "day",
+      "definition": "Units produced divided by units planned in the production schedule.",
+      "expression": "DIVIDE(SUM(production_batches_fact[units_produced]), SUM(production_batches_fact[units_planned]))",
+      "keywords": [
+        "output",
+        "production volume",
+        "vs plan",
+        "against plan",
+        "schedule adherence",
+        "throughput"
+      ]
+    },
+    "downtime_hours": {
+      "name": "Unplanned downtime (h)",
+      "unit": "hours",
+      "dataset": "line_events_fact",
+      "certified": true,
+      "default_grain": "day",
+      "definition": "Hours a line was stopped outside planned maintenance and changeovers.",
+      "expression": "SUM(line_events_fact[unplanned_stop_hours])",
+      "keywords": [
+        "downtime",
+        "stoppage",
+        "line stop",
+        "breakdown"
+      ]
+    },
+    "batch_yield": {
+      "name": "Batch yield %",
+      "unit": "%",
+      "dataset": "production_batches_fact",
+      "certified": true,
+      "default_grain": "day",
+      "definition": "Good units released divided by theoretical units for the batch.",
+      "expression": "DIVIDE(SUM(production_batches_fact[good_units]), SUM(production_batches_fact[theoretical_units]))",
+      "keywords": [
+        "yield",
+        "batch yield",
+        "scrap",
+        "waste"
+      ]
+    },
+    "open_deviations": {
+      "name": "Open deviations",
+      "unit": "count",
+      "dataset": "quality_deviations",
+      "certified": true,
+      "default_grain": "day",
+      "definition": "Quality deviations not yet closed, including those past their due date.",
+      "expression": "COUNTROWS(FILTER(quality_deviations, quality_deviations[status] <> \"Closed\"))",
+      "keywords": [
+        "deviation",
+        "non-conformance",
+        "quality issue",
+        "quality event"
+      ]
+    },
+    "release_lead_time": {
+      "name": "Batch release lead time (days)",
+      "unit": "days",
+      "dataset": "quality_deviations",
+      "certified": true,
+      "default_grain": "day",
+      "definition": "Days from end of manufacturing to QA release of the batch.",
+      "expression": "AVERAGE(batch_release[lead_time_days])",
+      "keywords": [
+        "release",
+        "blocked batch",
+        "batch release",
+        "qa release",
+        "release lead"
+      ]
+    },
+    "right_first_time": {
+      "name": "Right first time %",
+      "unit": "%",
+      "dataset": "production_batches_fact",
+      "certified": true,
+      "default_grain": "week",
+      "definition": "Batches completed without deviation or rework divided by all completed batches.",
+      "expression": "DIVIDE(COUNTROWS(FILTER(production_batches_fact, production_batches_fact[rft])), COUNTROWS(production_batches_fact))",
+      "keywords": [
+        "right first time",
+        "rft",
+        "first pass"
+      ]
+    },
+    "days_of_supply": {
+      "name": "Days of supply",
+      "unit": "days",
+      "dataset": "inventory_snapshot",
+      "certified": true,
+      "default_grain": "day",
+      "definition": "On-hand quantity divided by average daily consumption over the last 28 days.",
+      "expression": "DIVIDE(SUM(inventory_snapshot[on_hand_qty]), [Avg daily consumption 28d])",
+      "keywords": [
+        "days of supply",
+        "stock cover",
+        "inventory cover",
+        "stock-out",
+        "stockout",
+        "run out",
+        "shortage",
+        "materials risk"
+      ]
+    },
+    "absenteeism": {
+      "name": "Absenteeism %",
+      "unit": "%",
+      "dataset": "hr_attendance",
+      "certified": true,
+      "default_grain": "month",
+      "definition": "Unplanned absence hours divided by scheduled hours.",
+      "expression": "DIVIDE(SUM(hr_attendance[absence_hours]), SUM(hr_attendance[scheduled_hours]))",
+      "keywords": [
+        "absence",
+        "absenteeism",
+        "sick",
+        "staffed",
+        "staffing"
+      ]
+    },
+    "gmp_training": {
+      "name": "GMP training compliance %",
+      "unit": "%",
+      "dataset": "training_records",
+      "certified": true,
+      "default_grain": "month",
+      "definition": "Employees with all mandatory GMP training current divided by employees requiring it.",
+      "expression": "DIVIDE([Employees compliant], [Employees in scope])",
+      "keywords": [
+        "training",
+        "gmp training",
+        "qualified",
+        "certification of staff"
+      ]
+    },
+    "budget_variance": {
+      "name": "Budget variance %",
+      "unit": "%",
+      "dataset": "cost_ledger",
+      "certified": true,
+      "default_grain": "month",
+      "definition": "Actual cost minus budget, divided by budget.",
+      "expression": "DIVIDE(SUM(cost_ledger[actual]) - SUM(cost_ledger[budget]), SUM(cost_ledger[budget]))",
+      "keywords": [
+        "budget",
+        "variance",
+        "against budget",
+        "overspend"
+      ]
+    },
+    "cost_per_unit": {
+      "name": "Cost per unit",
+      "unit": "EUR",
+      "dataset": "cost_ledger",
+      "certified": true,
+      "default_grain": "month",
+      "definition": "Total manufacturing cost divided by good units produced.",
+      "expression": "DIVIDE(SUM(cost_ledger[actual]), [Good units])",
+      "keywords": [
+        "cost per unit",
+        "unit cost",
+        "cost"
+      ]
+    }
+  },
+  "dimensions": {
+    "date": {
+      "name": "Date",
+      "keywords": [
+        "date",
+        "day",
+        "trend"
+      ]
+    },
+    "shift": {
+      "name": "Shift",
+      "keywords": [
+        "shift"
+      ]
+    },
+    "line": {
+      "name": "Line",
+      "keywords": [
+        "line",
+        "lines",
+        "packaging line",
+        "filling line"
+      ]
+    },
+    "product": {
+      "name": "Product",
+      "keywords": [
+        "product",
+        "sku",
+        "implant",
+        "iud"
+      ]
+    },
+    "batch": {
+      "name": "Batch",
+      "keywords": [
+        "batch",
+        "batches",
+        "lot"
+      ]
+    },
+    "customer": {
+      "name": "Customer",
+      "keywords": [
+        "customer",
+        "client",
+        "distributor"
+      ]
+    },
+    "carrier": {
+      "name": "Carrier",
+      "keywords": [
+        "carrier",
+        "transport",
+        "forwarder",
+        "logistics provider"
+      ]
+    },
+    "destination_country": {
+      "name": "Destination country",
+      "keywords": [
+        "country",
+        "market",
+        "destination"
+      ]
+    },
+    "priority": {
+      "name": "Shipment priority",
+      "keywords": [
+        "priority",
+        "urgent",
+        "need action",
+        "attention",
+        "critical"
+      ]
+    },
+    "deviation_category": {
+      "name": "Deviation category",
+      "keywords": [
+        "category",
+        "why",
+        "reason",
+        "root cause"
+      ]
+    },
+    "material": {
+      "name": "Material",
+      "keywords": [
+        "material",
+        "component",
+        "raw material"
+      ]
+    },
+    "supplier": {
+      "name": "Supplier",
+      "keywords": [
+        "supplier",
+        "vendor"
+      ]
+    },
+    "department": {
+      "name": "Department",
+      "keywords": [
+        "department",
+        "team"
+      ]
+    },
+    "cost_center": {
+      "name": "Cost center",
+      "keywords": [
+        "cost center",
+        "cost centre"
+      ]
+    }
+  },
+  "datasets": {
+    "shipments_fact": {
+      "table": "supply.shipments_fact",
+      "rows": 284310,
+      "refresh_age_hours": 5,
+      "tests_passed": 14,
+      "tests_total": 14,
+      "owner": "Supply Chain Data Team",
+      "dimensions": [
+        "date",
+        "customer",
+        "carrier",
+        "destination_country",
+        "product",
+        "priority"
+      ],
+      "columns": [
+        "shipment_id",
+        "order_id",
+        "customer_id",
+        "carrier_id",
+        "product_id",
+        "promised_date",
+        "actual_date",
+        "qty_ordered",
+        "qty_delivered",
+        "is_late",
+        "days_late",
+        "on_time_in_full",
+        "priority"
+      ]
+    },
+    "production_batches_fact": {
+      "table": "mfg.production_batches_fact",
+      "rows": 41220,
+      "refresh_age_hours": 2,
+      "tests_passed": 22,
+      "tests_total": 22,
+      "owner": "Manufacturing IT",
+      "dimensions": [
+        "date",
+        "shift",
+        "line",
+        "product",
+        "batch"
+      ],
+      "columns": [
+        "batch_id",
+        "line_id",
+        "product_id",
+        "shift",
+        "start_ts",
+        "end_ts",
+        "units_planned",
+        "units_produced",
+        "good_units",
+        "theoretical_units",
+        "rft"
+      ]
+    },
+    "line_events_fact": {
+      "table": "mfg.line_events_fact",
+      "rows": 1920455,
+      "refresh_age_hours": 1,
+      "tests_passed": 17,
+      "tests_total": 18,
+      "owner": "Manufacturing IT",
+      "dimensions": [
+        "date",
+        "shift",
+        "line"
+      ],
+      "columns": [
+        "event_id",
+        "line_id",
+        "shift",
+        "start_ts",
+        "end_ts",
+        "event_type",
+        "unplanned_stop_hours",
+        "availability",
+        "performance",
+        "quality_rate"
+      ]
+    },
+    "quality_deviations": {
+      "table": "qa.quality_deviations",
+      "rows": 6830,
+      "refresh_age_hours": 30,
+      "tests_passed": 9,
+      "tests_total": 9,
+      "owner": "QA Systems",
+      "dimensions": [
+        "date",
+        "batch",
+        "product",
+        "deviation_category",
+        "line"
+      ],
+      "columns": [
+        "deviation_id",
+        "batch_id",
+        "product_id",
+        "category",
+        "opened_date",
+        "due_date",
+        "closed_date",
+        "status",
+        "severity"
+      ]
+    },
+    "inventory_snapshot": {
+      "table": "supply.inventory_snapshot",
+      "rows": 512004,
+      "refresh_age_hours": 7,
+      "tests_passed": 11,
+      "tests_total": 11,
+      "owner": "Supply Chain Data Team",
+      "dimensions": [
+        "date",
+        "material",
+        "supplier",
+        "product"
+      ],
+      "columns": [
+        "snapshot_date",
+        "material_id",
+        "supplier_id",
+        "on_hand_qty",
+        "reserved_qty",
+        "safety_stock",
+        "avg_daily_consumption_28d"
+      ]
+    },
+    "hr_attendance": {
+      "table": "hr.attendance",
+      "rows": 220110,
+      "refresh_age_hours": 20,
+      "tests_passed": 6,
+      "tests_total": 6,
+      "owner": "HR Analytics",
+      "dimensions": [
+        "date",
+        "department",
+        "shift"
+      ],
+      "columns": [
+        "employee_key",
+        "department",
+        "shift",
+        "date",
+        "scheduled_hours",
+        "absence_hours"
+      ]
+    },
+    "training_records": {
+      "table": "hr.training_records",
+      "rows": 18400,
+      "refresh_age_hours": 22,
+      "tests_passed": 5,
+      "tests_total": 5,
+      "owner": "HR Analytics",
+      "dimensions": [
+        "date",
+        "department"
+      ],
+      "columns": [
+        "employee_key",
+        "department",
+        "course_id",
+        "required",
+        "completed_date",
+        "expires_date"
+      ]
+    },
+    "cost_ledger": {
+      "table": "fin.cost_ledger",
+      "rows": 98120,
+      "refresh_age_hours": 26,
+      "tests_passed": 12,
+      "tests_total": 12,
+      "owner": "Plant Controlling",
+      "dimensions": [
+        "date",
+        "cost_center",
+        "product",
+        "department"
+      ],
+      "columns": [
+        "posting_date",
+        "cost_center",
+        "product_id",
+        "account",
+        "actual",
+        "budget"
+      ]
+    }
+  },
+  "relationships": [
+    {
+      "from": "shipments_fact.customer_id",
+      "to": "dim_customer.customer_id",
+      "cardinality": "many-to-one"
+    },
+    {
+      "from": "shipments_fact.carrier_id",
+      "to": "dim_carrier.carrier_id",
+      "cardinality": "many-to-one"
+    },
+    {
+      "from": "shipments_fact.product_id",
+      "to": "dim_product.product_id",
+      "cardinality": "many-to-one"
+    },
+    {
+      "from": "production_batches_fact.line_id",
+      "to": "dim_line.line_id",
+      "cardinality": "many-to-one"
+    },
+    {
+      "from": "production_batches_fact.product_id",
+      "to": "dim_product.product_id",
+      "cardinality": "many-to-one"
+    },
+    {
+      "from": "line_events_fact.line_id",
+      "to": "dim_line.line_id",
+      "cardinality": "many-to-one"
+    },
+    {
+      "from": "quality_deviations.batch_id",
+      "to": "production_batches_fact.batch_id",
+      "cardinality": "many-to-one"
+    },
+    {
+      "from": "inventory_snapshot.material_id",
+      "to": "dim_material.material_id",
+      "cardinality": "many-to-one"
+    },
+    {
+      "from": "inventory_snapshot.supplier_id",
+      "to": "dim_supplier.supplier_id",
+      "cardinality": "many-to-one"
+    },
+    {
+      "from": "cost_ledger.product_id",
+      "to": "dim_product.product_id",
+      "cardinality": "many-to-one"
+    }
+  ],
+  "assets": [
+    {
+      "id": "rpt_delivery_perf",
+      "name": "Delivery Performance",
+      "workspace": "Supply Chain · Certified",
+      "grain": "day",
+      "measures": [
+        "otif",
+        "late_shipments",
+        "days_late"
+      ],
+      "dimensions": [
+        "date",
+        "customer",
+        "destination_country",
+        "product"
+      ],
+      "datasets": [
+        "shipments_fact"
+      ],
+      "certified": true,
+      "owner": "S. Virtanen",
+      "owner_status": "active",
+      "backup_owner": "M. Laine",
+      "refresh_age_hours": 5,
+      "last_review": "2026-06-18",
+      "documented": true,
+      "tests_passing": true,
+      "conflicts": {},
+      "restricted": false,
+      "views_90d": 1480
+    },
+    {
+      "id": "rpt_logistics_weekly",
+      "name": "Logistics Weekly KPI (copy)",
+      "workspace": "Personal · J. Kovac",
+      "grain": "week",
+      "measures": [
+        "otif",
+        "late_shipments"
+      ],
+      "dimensions": [
+        "date",
+        "carrier",
+        "customer"
+      ],
+      "datasets": [
+        "logistics_extract_xlsx"
+      ],
+      "certified": false,
+      "owner": "J. Kovac",
+      "owner_status": "left",
+      "backup_owner": null,
+      "refresh_age_hours": 230,
+      "last_review": "2024-11-02",
+      "documented": false,
+      "tests_passing": false,
+      "conflicts": {
+        "otif": "Counts on-time only and ignores quantity (not 'in full')."
+      },
+      "restricted": false,
+      "views_90d": 37
+    },
+    {
+      "id": "rpt_daily_production",
+      "name": "Daily Production Overview",
+      "workspace": "Manufacturing · Certified",
+      "grain": "hour",
+      "measures": [
+        "oee",
+        "output_vs_plan",
+        "downtime_hours",
+        "batch_yield"
+      ],
+      "dimensions": [
+        "date",
+        "shift",
+        "line",
+        "product"
+      ],
+      "datasets": [
+        "production_batches_fact",
+        "line_events_fact"
+      ],
+      "certified": true,
+      "owner": "A. Nieminen",
+      "owner_status": "active",
+      "backup_owner": "P. Koski",
+      "refresh_age_hours": 1,
+      "last_review": "2026-09-02",
+      "documented": true,
+      "tests_passing": true,
+      "conflicts": {},
+      "restricted": false,
+      "views_90d": 3120
+    },
+    {
+      "id": "rpt_line_oee",
+      "name": "Line OEE Monitor",
+      "workspace": "Packaging Team",
+      "grain": "hour",
+      "measures": [
+        "oee",
+        "downtime_hours"
+      ],
+      "dimensions": [
+        "line",
+        "shift",
+        "date"
+      ],
+      "datasets": [
+        "line_events_fact"
+      ],
+      "certified": false,
+      "owner": "R. Salo",
+      "owner_status": "active",
+      "backup_owner": null,
+      "refresh_age_hours": 1,
+      "last_review": "2025-03-14",
+      "documented": false,
+      "tests_passing": false,
+      "conflicts": {},
+      "restricted": false,
+      "views_90d": 210
+    },
+    {
+      "id": "rpt_batch_release",
+      "name": "Batch Release Tracker",
+      "workspace": "Quality · Certified",
+      "grain": "day",
+      "measures": [
+        "release_lead_time",
+        "open_deviations",
+        "right_first_time"
+      ],
+      "dimensions": [
+        "batch",
+        "product",
+        "date",
+        "deviation_category"
+      ],
+      "datasets": [
+        "quality_deviations",
+        "production_batches_fact"
+      ],
+      "certified": true,
+      "owner": "H. Lehto",
+      "owner_status": "active",
+      "backup_owner": "T. Mäkelä",
+      "refresh_age_hours": 30,
+      "last_review": "2026-04-21",
+      "documented": true,
+      "tests_passing": true,
+      "conflicts": {},
+      "restricted": false,
+      "views_90d": 640
+    },
+    {
+      "id": "rpt_hr_monthly",
+      "name": "HR Monthly Dashboard",
+      "workspace": "HR · Certified",
+      "grain": "month",
+      "measures": [
+        "absenteeism",
+        "gmp_training"
+      ],
+      "dimensions": [
+        "department",
+        "date"
+      ],
+      "datasets": [
+        "hr_attendance",
+        "training_records"
+      ],
+      "certified": true,
+      "owner": "E. Heikkinen",
+      "owner_status": "active",
+      "backup_owner": "K. Rantanen",
+      "refresh_age_hours": 20,
+      "last_review": "2026-08-11",
+      "documented": true,
+      "tests_passing": true,
+      "conflicts": {},
+      "restricted": false,
+      "views_90d": 95
+    },
+    {
+      "id": "rpt_plant_cost",
+      "name": "Plant Cost Report",
+      "workspace": "Finance · Certified",
+      "grain": "month",
+      "measures": [
+        "budget_variance",
+        "cost_per_unit"
+      ],
+      "dimensions": [
+        "cost_center",
+        "date",
+        "product"
+      ],
+      "datasets": [
+        "cost_ledger"
+      ],
+      "certified": true,
+      "owner": "L. Kallio",
+      "owner_status": "active",
+      "backup_owner": "V. Järvinen",
+      "refresh_age_hours": 26,
+      "last_review": "2026-07-30",
+      "documented": true,
+      "tests_passing": true,
+      "conflicts": {},
+      "restricted": false,
+      "views_90d": 410
+    }
+  ]
+}

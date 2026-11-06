@@ -1,6 +1,6 @@
-# Curator frontend
+# Frontend
 
-React + TypeScript + Vite app for the Curator prototype. It currently contains the **Estate Explorer**: an entity page with a Details tab and an interactive relationship graph.
+React + TypeScript + Vite app. Pages: **Ask** (`#ask`, chat with a live processing-flow panel) and **Estate Explorer** (`#explorer`, entity details and relationship graph). In development, `/api` is proxied to the backend on port 8000.
 
 ## Run
 
@@ -10,7 +10,7 @@ npm run dev        # http://localhost:5173
 npm run build      # type-check and production build into dist/
 ```
 
-Open `http://localhost:5173/#graph` to land on the Graph tab.
+Start the backend first (see `../backend/README.md`). Open `http://localhost:5173/#explorer-graph` to land on the graph.
 
 ## Structure
 
