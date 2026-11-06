@@ -112,6 +112,7 @@ cd frontend && npm install && npm run dev
 - Commit messages: imperative mood, explain why.
 
 ## Status
+- [x] Build plan page: https://claude.ai/artifact/NWgjoee8m5ZYAYoBkDmYCC
 - [x] Proposal draft (`docs/PROPOSAL.md`, earlier "Curator" concept, partly superseded by this file)
 - [x] Estate Explorer prototype (frontend)
 - [x] Backend: pipeline, decision formula (unit tested), mock + OpenAI provider, MongoDB/in-memory store, PBIP skeleton

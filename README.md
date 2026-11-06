@@ -8,6 +8,7 @@ An AI workspace for a pharma manufacturing plant. Before anything is built it ch
 - `backend/`: FastAPI pipeline, decision rules, PBIP generator. See `backend/README.md`
 - `frontend/`: React app with the Ask page (chat + live processing flow) and the Estate Explorer. See `frontend/README.md`
 - `docs/PROPOSAL.md`: earlier concept write-up
+- Build plan (published page): https://claude.ai/artifact/NWgjoee8m5ZYAYoBkDmYCC
 
 ## Quick start
 
