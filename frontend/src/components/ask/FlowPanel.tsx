@@ -8,6 +8,7 @@ const STAGE_KIND: Record<StageId, { label: string; cls: string }> = {
   discovery: { label: "Catalog + Python", cls: "kind-state" },
   governance: { label: "Python", cls: "kind-py" },
   decision: { label: "Python", cls: "kind-py" },
+  actions: { label: "Python + human", cls: "kind-human" },
   deliver: { label: "Python", cls: "kind-py" },
   evidence: { label: "Evidence agent", cls: "kind-ai" },
   spec: { label: "Spec agent", cls: "kind-ai" },
@@ -21,6 +22,7 @@ const TITLES: Record<StageId, string> = {
   discovery: "Find existing analytics",
   governance: "Check governance",
   decision: "Decide: reuse, extend or create",
+  actions: "Propose follow-up actions",
   deliver: "Open the existing report",
   evidence: "Gather evidence",
   spec: "Write the specification",
@@ -34,8 +36,9 @@ const BUILD: StageId[] = ["evidence", "spec", "approval", "render", "register"];
 const AUTO_OPEN: StageId[] = ["intent", "decision", "spec", "render", "register", "deliver"];
 
 function stagesFor(decision: DecisionType | null): StageId[] {
-  if (decision === "reuse") return [...BASE, "deliver"];
-  if (decision === "extend" || decision === "create") return [...BASE, ...BUILD];
+  if (decision === "reuse") return [...BASE, "actions", "deliver"];
+  if (decision === "extend" || decision === "create") return [...BASE, "actions", ...BUILD];
+  if (decision === "not_feasible") return [...BASE, "actions"];
   return BASE;
 }
 

@@ -53,7 +53,6 @@ function governanceRows(e: Entity, onFocus: (id: string) => void): [string, Reac
 export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Props) {
   const groups = relGroups(e.id);
   const total = groups.reduce((a, g) => a + g.items.length, 0);
-  const owner = ownerOf(e.id);
 
   return (
     <div className="details-grid">
@@ -102,11 +101,9 @@ export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Pr
               <span className="k">Recommended action</span>
               <p>{e.action}</p>
               {sent ? (
-                <span className="done">
-                  Sent to {owner?.name ?? "the owner"} for approval. Nothing changes until they approve.
-                </span>
+                <span className="done">Added to the action tracker. <a href="#actions">View actions</a></span>
               ) : (
-                <div><button type="button" className="btn" onClick={() => onSend(e.id)}>Send to owner for approval</button></div>
+                <div><button type="button" className="btn" onClick={() => onSend(e.id)}>Add to action tracker</button></div>
               )}
             </div>
           )}

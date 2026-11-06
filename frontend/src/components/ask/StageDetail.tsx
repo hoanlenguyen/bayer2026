@@ -176,6 +176,16 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
       );
     }
 
+    case "actions":
+      return (
+        <ul className="checks">
+          {(data.proposals ?? []).map((p: { key: string; kind: string; title: string; owner: string }) => (
+            <li key={p.key}><span className={`kind ${p.kind === "business" ? "kind-biz" : "kind-maint"}`}>{p.kind === "business" ? "Business" : "Maintenance"}</span> {p.title} <span className="muted">· {p.owner}</span></li>
+          ))}
+          {!(data.proposals ?? []).length && <li className="muted">No follow-up needed.</li>}
+        </ul>
+      );
+
     case "deliver": {
       const a = data.asset;
       return (

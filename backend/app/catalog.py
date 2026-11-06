@@ -44,6 +44,12 @@ async def init(store: Any) -> str:
         CATALOG.update(loaded)
     if presets:
         PRESETS[:] = presets
+    # Example actions so the tracker opens in a realistic state (marked as sample data).
+    if await store.count_artifacts("actions") == 0:
+        from .actions import sample_actions
+
+        for a in sample_actions():
+            await store.save_artifact("actions", a)
     return store.name
 
 

@@ -6,6 +6,7 @@ Collections
   evidence             verified evidence records
   specs                DashboardSpec versions with status draft / approved / rejected
   agent_runs           audit log: agent, mode, model, steps, duration
+  actions              follow-up actions with owner, due date, status history and verification
   catalog_measures, catalog_dimensions, catalog_datasets, catalog_assets, catalog_relationships
                        the analytics catalog (seeded from app/data/catalog.json when empty)
   presets              department presets
@@ -20,7 +21,7 @@ from .settings import settings
 
 log = logging.getLogger(__name__)
 
-ARTIFACTS = ("intents", "evidence", "specs", "agent_runs")
+ARTIFACTS = ("intents", "evidence", "specs", "agent_runs", "actions")
 CATALOG_MAPS = ("measures", "dimensions", "datasets")
 
 
@@ -52,6 +53,13 @@ class MemoryStore:
     async def update_artifact(self, kind: str, doc_id: str, fields: dict[str, Any]) -> None:
         if doc_id in self.artifacts[kind]:
             self.artifacts[kind][doc_id].update(copy.deepcopy(fields))
+
+    async def get_artifact(self, kind: str, doc_id: str) -> dict[str, Any] | None:
+        doc = self.artifacts[kind].get(doc_id)
+        return copy.deepcopy(doc) if doc else None
+
+    async def count_artifacts(self, kind: str) -> int:
+        return len(self.artifacts[kind])
 
     async def list_artifacts(self, kind: str, conv_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         docs = [d for d in self.artifacts[kind].values() if conv_id is None or d.get("conversation_id") == conv_id]
@@ -106,6 +114,8 @@ class MongoStore:
         for kind in ARTIFACTS:
             await self.db[kind].create_index([("conversation_id", 1), ("created_at", -1)])
         await self.db["specs"].create_index([("status", 1)])
+        await self.db["actions"].create_index([("status", 1), ("due_date", 1)])
+        await self.db["actions"].create_index([("owner", 1)])
 
     # conversations
     async def get(self, conv_id: str) -> dict[str, Any] | None:
@@ -124,6 +134,12 @@ class MongoStore:
 
     async def update_artifact(self, kind: str, doc_id: str, fields: dict[str, Any]) -> None:
         await self.db[kind].update_one({"_id": doc_id}, {"$set": fields})
+
+    async def get_artifact(self, kind: str, doc_id: str) -> dict[str, Any] | None:
+        return await self.db[kind].find_one({"_id": doc_id})
+
+    async def count_artifacts(self, kind: str) -> int:
+        return await self.db[kind].count_documents({})
 
     async def list_artifacts(self, kind: str, conv_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         query = {"conversation_id": conv_id} if conv_id else {}

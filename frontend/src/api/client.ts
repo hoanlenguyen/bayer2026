@@ -1,4 +1,4 @@
-import type { CatalogMeta, Health, PipelineEvent, Preset } from "./types";
+import type { Action, ActionSummary, CatalogMeta, Health, PipelineEvent, Preset } from "./types";
 
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -6,8 +6,18 @@ async function getJSON<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function sendJSON<T>(method: string, path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { detail?: string }).detail ?? `${path} returned ${res.status}`);
+  return data as T;
+}
+
 export const api = {
   health: () => getJSON<Health>("/api/health"),
+  actions: () => getJSON<{ items: Action[]; summary: ActionSummary }>("/api/actions"),
+  createAction: (body: Record<string, unknown>) => sendJSON<Action>("POST", "/api/actions", body),
+  updateAction: (id: string, body: Record<string, unknown>) => sendJSON<Action>("PATCH", `/api/actions/${id}`, body),
   presets: () => getJSON<Preset[]>("/api/presets"),
   catalog: () => getJSON<CatalogMeta>("/api/catalog"),
 };

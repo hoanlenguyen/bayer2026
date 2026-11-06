@@ -3,7 +3,8 @@ import { DetailsTab } from "../components/DetailsTab";
 import { EntityHeader } from "../components/EntityHeader";
 import { GraphTab } from "../components/GraphTab";
 import type { EntityType } from "../data/types";
-import { byId, loadEstate } from "../lib/estate";
+import { api } from "../api/client";
+import { byId, loadEstate, ownerOf } from "../lib/estate";
 
 type Tab = "details" | "graph";
 const tabFromHash = (): Tab => (window.location.hash === "#explorer-graph" ? "graph" : "details");
@@ -76,6 +77,22 @@ function ExplorerView({ initialFocus, home, focusRequest }: { initialFocus: stri
     if (focusRequest && byId[focusRequest]) setFocus(focusRequest);
   }, [focusRequest, setFocus]);
 
+  /** The recommended action on a report becomes a maintenance task in the action tracker. */
+  const trackAction = async (id: string) => {
+    const e = byId[id];
+    const o = ownerOf(id);
+    try {
+      await api.createAction({
+        kind: "maintenance", title: e.action, owner: o && o.status !== "left" ? o.name : "Data steward",
+        asset_id: id, asset_name: e.name, reason: e.flags[0]?.text ?? "", key: `maint:retire:${id}`, by: "You",
+      });
+    } catch (err) {
+      // An open action for the same finding already exists: treat it as tracked.
+      if (!String(err).includes("already covers")) throw err;
+    }
+    setSent((s) => new Set(s).add(id));
+  };
+
   const toggleType = useCallback((t: EntityType, visible: boolean) => {
     setHidden((prev) => {
       const next = new Set(prev);
@@ -117,7 +134,7 @@ function ExplorerView({ initialFocus, home, focusRequest }: { initialFocus: stri
               entity={entity}
               sent={sent.has(entity.id)}
               onFocus={(id) => setFocus(id)}
-              onSend={(id) => setSent((s) => new Set(s).add(id))}
+              onSend={(id) => void trackAction(id)}
               onShowGraph={() => setTab("graph")}
             />
           </section>

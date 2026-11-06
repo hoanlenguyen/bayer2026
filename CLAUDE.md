@@ -54,6 +54,15 @@ Rules:
 
 Preset = starting intent mapped to certified KPIs. Grill-me then asks only for missing details (line, shift, horizon). Time-based presets (shift start, weekly review, month-end) are in scope.
 
+## Action tracker (`backend/app/actions.py`, `#actions` page)
+
+- After every decision, Python proposes follow-up actions (stage "Propose follow-up actions"). Nothing is tracked until a person accepts a proposal and confirms owner and due date.
+- **Business** actions act on what the analytics show (from the request's decision, with a metric to verify and its good direction). **Maintenance** actions fix the analytics: assign an owner when one left, merge or retire flagged overlaps, fix refresh schedules, fix failing quality tests, add a missing data source.
+- Statuses: open → in progress → blocked → done → verified (or dismissed). Allowed moves live in `TRANSITIONS`. Blocked needs a blocker note, done needs an outcome note, verified needs a result (improved / not improved / confirmed). **Done is not verified**: finishing the work and checking the outcome are separate steps, possibly by different people.
+- Every change is written to the action's history. Proposals carry a stable `key`; an open action with the same key is linked instead of duplicated (API returns 409).
+- Four sample actions are seeded when the collection is empty (marked `sample`).
+- Estate Explorer "Add to action tracker" creates the same maintenance action for a flagged report.
+
 ## Agents (`backend/app/agents/`)
 
 Each agent has `run_llm` (OpenAI) and `run_rules` (offline, deterministic). Same output shape. If the model call fails, the agent falls back to rules and records why. Every run returns a trace (steps: tool / model / rule / check / note) that is shown in the flow panel and saved to `agent_runs`.
@@ -69,6 +78,7 @@ Each agent has `run_llm` (OpenAI) and `run_rules` (offline, deterministic). Same
 ```
 frontend/  React + TypeScript + Vite
   #ask       Ask page: chat, department presets, live processing-flow panel
+  #actions   Action tracker: board by status, detail panel with status moves, verification, history
   #explorer  Estate Explorer: entity details + relationship graph ("molecular view"),
              loaded from GET /api/graph (live plant catalog, same governance scoring as the Ask flow)
 backend/   Python 3.12+, FastAPI
@@ -94,6 +104,9 @@ backend/   Python 3.12+, FastAPI
 - `GET  /api/graph` – Estate Explorer entities and edges from the live catalog
 - `GET  /api/specs?conversation_id=` – DashboardSpec versions with status (draft / approved / rejected / superseded)
 - `GET  /api/agent-runs?conversation_id=` – audit log of agent runs
+- `GET  /api/actions?status=&kind=&owner=&conversation_id=` – actions with `overdue`, `allowed` moves, and a summary
+- `POST /api/actions` – accept a proposal or create an action (409 if an open action has the same key)
+- `GET  /api/actions/{id}`, `PATCH /api/actions/{id}` – update owner, due date, status, blocker, outcome, verification (400 with a plain message on an invalid move)
 
 ### Models
 - OpenAI GPT-6 family. `MODEL_REASONING` (default `gpt-6-astra`) for discovery reasoning and spec; `MODEL_FAST` (default `gpt-6-luna`) for grill-me and summaries. Verify exact IDs in the OpenAI dashboard.
@@ -103,7 +116,7 @@ backend/   Python 3.12+, FastAPI
 ### Database
 - MongoDB when `MONGODB_URI` is set, otherwise in-memory (data lost on restart). Database name: `MONGODB_DB` (default `analytics_manager`).
 - The catalog lives in MongoDB. On startup an empty database is seeded from `app/data/*.json`; `python -m app.seed --reset` reloads it.
-- Collections: `conversations`, `intents`, `evidence`, `specs`, `agent_runs`, `catalog_measures`, `catalog_dimensions`, `catalog_datasets`, `catalog_assets`, `catalog_relationships`, `presets`.
+- Collections: `conversations`, `intents`, `evidence`, `specs`, `agent_runs`, `actions`, `catalog_measures`, `catalog_dimensions`, `catalog_datasets`, `catalog_assets`, `catalog_relationships`, `presets`.
 - Registered or extended reports are written back to `catalog_assets`, so they survive restarts and are reused.
 - Tests use `mongomock` through an async adapter (`tests/fakes.py`); the real Atlas connection has not been exercised yet.
 - The MongoDB MCP connector is not usable: Atlas reports MCP access disabled for the organization (an Organization Owner must enable AI client access).
@@ -119,7 +132,7 @@ backend/   Python 3.12+, FastAPI
 cd backend && python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
-pytest                 # 28 tests: decision rules, agents (incl. scripted OpenAI tool calls), MongoDB store, graph, API flows
+pytest                 # 34 tests: decision rules, agents (incl. scripted OpenAI tool calls), MongoDB store, graph, actions, API flows
 python -m app.seed     # load catalog into MongoDB (needs MONGODB_URI)
 
 # frontend (proxies /api to :8000)
@@ -145,5 +158,5 @@ cd frontend && npm install && npm run dev
 - [ ] Test the OpenAI provider with a real key (model path tested only with a scripted fake client)
 - [ ] Connect to the team's MongoDB Atlas (code tested with mongomock only)
 - [ ] Load Bayer synthetic dataset into the catalog
-- [ ] Action tracker (follow-up actions with owners)
+- [x] Action tracker: proposals from findings, owners, due dates, blockers, done vs verified, history
 - [ ] Validate generated PBIP in Power BI Desktop

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, streamPost } from "../api/client";
-import type { CatalogMeta, DecisionType, Health, PipelineEvent, Preset, StageEvent, StageId } from "../api/types";
+import type { ActionProposal, CatalogMeta, DecisionType, Health, PipelineEvent, Preset, StageEvent, StageId } from "../api/types";
 import { FlowPanel } from "../components/ask/FlowPanel";
+import { ProposedActions } from "../components/ask/ProposedActions";
 
 interface ChatMessage {
   id: number;
@@ -63,7 +64,7 @@ function Composer({ onSend, disabled, autoFocus, placeholder }: {
   );
 }
 
-export function AskPage() {
+export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) {
   const [health, setHealth] = useState<Health | null>(null);
   const [offline, setOffline] = useState(false);
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -77,6 +78,7 @@ export function AskPage() {
   const [decision, setDecision] = useState<DecisionType | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [proposals, setProposals] = useState<{ runKey: number; items: ActionProposal[] } | null>(null);
   const nextId = useRef(1);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -98,6 +100,7 @@ export function AskPage() {
       case "stage":
         setStages((s) => ({ ...s, [e.stage]: e }));
         if (e.stage === "decision" && e.status === "done") setDecision(e.data.decision);
+        if (e.stage === "actions" && e.status === "done") setProposals({ runKey: Date.now(), items: e.data.proposals });
         break;
       case "message":
         setMessages((m) => [...m, { id: nextId.current++, role: "assistant", content: e.content, kind: e.kind, suggestions: e.suggestions }]);
@@ -129,6 +132,7 @@ export function AskPage() {
     if (convState !== "clarifying") {
       setStages({});
       setDecision(null);
+      setProposals(null);
     }
     setMessages((m) => [...m, { id: nextId.current++, role: "user", content: text }]);
     void run("/api/chat", { conversation_id: convId, message: text, preset_id: presetId ?? null });
@@ -141,7 +145,7 @@ export function AskPage() {
   };
 
   const newChat = () => {
-    setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null);
+    setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null); setProposals(null);
   };
 
   const shownPresets = useMemo(() => presets.filter((p) => dept === "All" || p.department === dept), [presets, dept]);
@@ -210,6 +214,9 @@ export function AskPage() {
               </div>
             </div>
           ))}
+          {proposals && proposals.items.length > 0 && !busy && (
+            <ProposedActions key={proposals.runKey} proposals={proposals.items} conversationId={convId} onAdded={onActionsChanged} />
+          )}
           {busy && (
             <div className="msg msg-assistant">
               <span className="avatar thinking" aria-hidden="true" />

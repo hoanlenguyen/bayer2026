@@ -1,5 +1,5 @@
 export type StageId =
-  | "intent" | "discovery" | "governance" | "decision" | "deliver"
+  | "intent" | "discovery" | "governance" | "decision" | "actions" | "deliver"
   | "evidence" | "spec" | "approval" | "render" | "register";
 
 export type StageStatus = "pending" | "running" | "waiting" | "done" | "rejected";
@@ -70,4 +70,59 @@ export interface Candidate {
   gates_failed: string[];
   gates_pass: boolean;
   checks: { id: string; label: string; passed: boolean; weight: number }[];
+}
+
+export type ActionStatus = "open" | "in_progress" | "blocked" | "done" | "verified" | "dismissed";
+export type ActionKind = "business" | "maintenance";
+
+export interface VerifyTarget {
+  metric_id: string | null;
+  metric_name: string;
+  direction: "increase" | "decrease";
+  result: "improved" | "not_improved" | "confirmed" | null;
+  note: string;
+  checked_at: string | null;
+  checked_by: string | null;
+}
+
+export interface ActionProposal {
+  key: string;
+  kind: ActionKind;
+  title: string;
+  reason: string;
+  owner: string;
+  due_date: string;
+  asset_id: string | null;
+  asset_name: string | null;
+  verify: VerifyTarget | null;
+  existing_action_id: string | null;
+}
+
+export interface Action {
+  _id: string;
+  key: string | null;
+  kind: ActionKind;
+  title: string;
+  reason: string;
+  owner: string;
+  due_date: string | null;
+  status: ActionStatus;
+  asset_id: string | null;
+  asset_name: string | null;
+  conversation_id: string | null;
+  blocker: string;
+  outcome: string;
+  verify: VerifyTarget | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+  sample: boolean;
+  overdue: boolean;
+  allowed: ActionStatus[];
+  history: { at: string; by: string; change: string; from?: string | null; to?: string | null; note?: string | null }[];
+}
+
+export interface ActionSummary {
+  open: number; in_progress: number; blocked: number; done: number; verified: number; dismissed: number;
+  overdue: number; awaiting_verification: number; active: number;
 }

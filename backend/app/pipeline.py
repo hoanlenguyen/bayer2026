@@ -16,6 +16,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any, AsyncIterator
 
+from . import actions as act
 from . import catalog as cat
 from .agents import AgentRun, EvidenceAgent, IntentAgent, SpecAgent
 from .agents.intent import sanitize_intent
@@ -30,6 +31,7 @@ STAGES = {
     "discovery": "Find existing analytics",
     "governance": "Check governance",
     "decision": "Decide: reuse, extend or create",
+    "actions": "Propose follow-up actions",
     "deliver": "Open the existing report",
     "evidence": "Gather evidence",
     "spec": "Write the specification",
@@ -212,6 +214,15 @@ class Pipeline:
         explanation = await explain(self.llm, {"decision": decision, "intent": public(intent),
                                                "missing_text": ("Missing: " + ", ".join(missing) + ".") if missing else ""})
         await self._pause()
+
+        # ---- 4b. Follow-up actions (proposed by Python, accepted by a person)
+        existing = await self.store.list_artifacts("actions", limit=500)
+        proposals = act.propose({**intent, "preset_id": conv.get("preset_id")}, decision, existing)
+        conv["plan"]["proposed_actions"] = proposals
+        n_biz = sum(1 for p in proposals if p["kind"] == "business")
+        yield self._stage(conv, "actions", "done",
+                          f"{n_biz} business, {len(proposals) - n_biz} maintenance proposal(s). Nothing is assigned until you accept.",
+                          {"proposals": proposals})
 
         if result.decision == Decision.REUSE:
             c = result.candidate
