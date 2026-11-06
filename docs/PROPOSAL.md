@@ -109,7 +109,7 @@ Background job: **Estate Janitor** runs nightly over the full catalog to populat
 | Search | Postgres + pgvector (or DuckDB + embeddings) with BM25 hybrid | Hybrid lexical/semantic retrieval |
 | Graph | NetworkX (demo) / Neo4j (stretch) | Lineage and metric relationships |
 | Semantic layer | dbt-style metric YAML | "Metrics as code", certifiable and diffable |
-| Frontend | Next.js + Tailwind + shadcn/ui, Recharts | Polished UI quickly |
+| Frontend | React + TypeScript + Vite, d3 for the graph | Simple SPA next to a Python API; d3-force for the estate graph |
 | Connectors | MCP servers wrapping catalog/BI APIs | Shows a realistic enterprise integration path |
 
 ### Demo data
