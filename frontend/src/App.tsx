@@ -1,3 +1,4 @@
+import { WorkbookPage } from "./pages/WorkbookPage";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api/client";
 import { TopBar, type Page } from "./components/TopBar";
@@ -10,7 +11,7 @@ const pageFromHash = (): Page =>
     ? "explorer"
     : window.location.hash.startsWith("#actions")
       ? "actions"
-      : "ask";
+      : window.location.hash.startsWith("#source") ? "source" : "ask";
 
 export default function App() {
   const [page, setPage] = useState<Page>(pageFromHash);
@@ -38,7 +39,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (page === "ask") document.title = "Investigations · Analytics Manager";
+    if (page === "ask") document.title = "Dashboard requests · Analytics Manager";
     if (page === "actions") document.title = "Actions · Analytics Manager";
   }, [page]);
 
@@ -57,6 +58,7 @@ export default function App() {
         <AskPage onActionsChanged={refreshActions} />
       </div>
       {page === "explorer" && <ExplorerPage focusRequest={focusRequest} />}
+      {page === "source" && <WorkbookPage />}
       {page === "actions" && <ActionsPage onChanged={refreshActions} />}
     </div>
   );

@@ -59,13 +59,11 @@ def propose(intent: dict[str, Any], decision: dict[str, Any], existing: list[dic
     def steward(asset: dict[str, Any] | None) -> str:
         return asset["owner"] if asset and asset.get("owner_status") == "active" else "Data steward"
 
-    # Business: act on the decision the request supports, then check the number moved.
-    if dec != "not_feasible" and intent.get("measures"):
-        m0 = next((m for m in intent["measures"] if C["measures"].get(m, {}).get("fact_column")), intent["measures"][0])
-        target = verify_target(m0)
-        add(f"biz:{intent.get('preset_id') or '-'}:{intent['decision']}", "business", intent["decision"].rstrip(". "),
-            f"From your request. Afterwards, {target['metric_name']} should {'go down' if target['direction'] == 'decrease' else 'go up'}.",
-            "You (requester)", 30, cand.get("asset_id") if dec == "reuse" else None, target)
+    # Request fulfilment, not an assumed business KPI intervention.
+    if dec != "not_feasible":
+        add(f"request:{intent.get('preset_id') or '-'}:{intent['decision']}", "maintenance",
+            "Confirm dashboard requirements and acceptance", "Review coverage, scope and the proposed delivery path.",
+            "Unassigned: select an active owner", 7, cand.get("asset_id"))
 
     # Maintenance: overlapping, legacy or poorly governed reports flagged by the decision.
     for f in decision.get("flags", []):
@@ -202,7 +200,7 @@ def sample_actions() -> list[dict[str, Any]]:
     legacy = next(a for a in assets if a["platform"] == "Tableau" and (a.get("migration") or {}).get("recommended_path_candidate") == "RETIRE")
     samples = [
         {"kind": "maintenance", "title": f"Assign a new owner for {no_owner['name']}", "owner": "Data steward",
-         "reason": f"{no_owner['owner']} is {no_owner['owner_status']}; {no_owner['views_90d']:,} views in 90 days (RULE-003).",
+         "reason": f"{no_owner['owner']} is {no_owner['owner_status']}; {no_owner['views_90d']:,} views in Aug–Oct 2026 (RULE-003).",
          "asset_id": no_owner["id"], "due": 3, "status": "open", "key": f"maint:owner:{no_owner['id']}"},
         {"kind": "business", "title": "Review Nubeqa forecast variance in Germany with the country team", "owner": "Commercial Analytics Lead",
          "reason": "Forecast variance moved from -8.4% to +11.8% between September and October (synthetic).",
@@ -212,7 +210,7 @@ def sample_actions() -> list[dict[str, Any]]:
          "status": "blocked", "blocker": "Waiting for the source system team to restore the gateway credentials.",
          "key": f"maint:refresh:{failed['id']}"},
         {"kind": "maintenance", "title": f"Retire {legacy['name']}", "owner": "BI Platform Owner",
-         "reason": f"Tableau, backlog path RETIRE, {legacy['views_90d']:,} views in 90 days (RULE-006).", "asset_id": legacy["id"],
+         "reason": f"Tableau, backlog path RETIRE, {legacy['views_90d']:,} views in Aug–Oct 2026 (RULE-006).", "asset_id": legacy["id"],
          "due": -1, "status": "done", "outcome": "Users redirected to the governed Power BI report; workbook archived.",
          "key": f"maint:retire:{legacy['id']}"},
     ]

@@ -18,4 +18,4 @@ def test_catalog_mapping():
     a1 = cat.asset_by_id("AST-0001")
     assert "demand_forecast_accuracy" in a1["conflicts"] and a1["views_90d"] > 0
     assert cat.model_by_id("SM-001")["measures"]
-    assert len(cat.PRESETS) == 14 and sum(1 for p in cat.PRESETS if p["id"].startswith("req_")) == 10
+    assert len(cat.PRESETS) == 17 and sum(1 for p in cat.PRESETS if p["id"].startswith("req_")) == 10

@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { ENTITIES, TYPES } from "../data/estate";
 import type { Entity } from "../data/types";
+import { DemoIdentity } from "./DemoIdentity";
 
-export type Page = "ask" | "explorer" | "actions";
+export type Page = "ask" | "explorer" | "actions" | "source";
 
 interface Props {
   page: Page;
@@ -34,11 +35,12 @@ export function TopBar({ page, onPick, activeActions }: Props) {
           Analytics Manager
         </a>
         <nav className="app-nav" aria-label="Main">
-          <a href="#ask" aria-current={page === "ask" ? "page" : undefined}>Investigations</a>
-          <a href="#explorer" aria-current={page === "explorer" ? "page" : undefined}>Asset index</a>
+          <a href="#ask" aria-current={page === "ask" ? "page" : undefined}>Dashboard requests</a>
+          <a href="#explorer" aria-current={page === "explorer" ? "page" : undefined}>Molecular view</a>
           <a href="#actions" aria-current={page === "actions" ? "page" : undefined}>
             Actions{activeActions ? <span className="nav-count" aria-label={`${activeActions} active`}>{activeActions}</span> : null}
           </a>
+          <a href="#source" aria-current={page === "source" ? "page" : undefined}>Workbook</a>
         </nav>
         {page === "explorer" && <div className="search">
           <label htmlFor="search" className="sr-only">Search entities</label>
@@ -78,7 +80,7 @@ export function TopBar({ page, onPick, activeActions }: Props) {
             </ul>
           )}
         </div>}
-        <span className="sample-tag" title="Synthetic Bayer Pharmaceuticals × Since AI data pack">Synthetic data</span>
+        <DemoIdentity />
       </div>
     </header>
   );

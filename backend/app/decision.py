@@ -217,6 +217,17 @@ def score_asset(intent: dict[str, Any], asset: dict[str, Any], catalog: dict[str
     cov, det = coverage(intent, asset, catalog)
     gov, checks = governance(asset, intent)
     failed, repairable = gates(asset, intent)
+    model = catalog.get("models", {}).get(asset.get("model_id"))
+    if model:
+        region = catalog.get("markets", {}).get(asset.get("market_scope"), {}).get("region")
+        product_ok = model["product_scope"] == "All Pharma" or model["product_scope"] == asset["product_scope"]
+        market_ok = model["region_scope"] == "Global" or (region is not None and model["region_scope"] == region)
+        if not product_ok or not market_ok:
+            issue = f"Source scope conflict: report {asset['product_scope']} / {asset['market_scope']}, model {model['product_scope']} / {model['region_scope']}. Steward must verify the mapping."
+            failed.append(issue)
+            repairable.append(issue)
+    else:
+        failed.append("Semantic model record is missing; verify the source mapping.")
     return AssetScore(asset_id=asset["id"], name=asset["name"], platform=asset["platform"], coverage=cov,
                       freshness=freshness(asset), governance=gov, views_90d=asset.get("views_90d", 0),
                       lifecycle=asset.get("lifecycle", ""), checks=checks, gates_failed=failed,
@@ -224,7 +235,10 @@ def score_asset(intent: dict[str, Any], asset: dict[str, Any], catalog: dict[str
 
 
 def rank_candidates(intent: dict[str, Any], catalog: dict[str, Any]) -> list[AssetScore]:
-    scored = [score_asset(intent, a, catalog) for a in catalog["assets"]]
+    eligible = [a for a in catalog["assets"] if not a.get("created_from_spec") or
+                (a.get("artifact_state") == "published" and a.get("validated_in_power_bi")
+                 and a.get("endorsement") in ("promoted", "certified"))]
+    scored = [score_asset(intent, a, catalog) for a in eligible]
     scored = [s for s in scored if s.measures_found]
     return sorted(scored, key=lambda s: (s.coverage, s.governance, s.freshness, s.views_90d), reverse=True)
 
@@ -235,6 +249,7 @@ def data_availability(intent: dict[str, Any], catalog: dict[str, Any]) -> dict[s
     measures = catalog["measures"]
     req = intent.get("measures", [])
     missing_terms = list(intent.get("unmatched_terms", []))
+    missing_terms += [m for m in req if m not in measures]
     uncertified = [m for m in req if m in measures and not measures[m]["certified"]]
     models = rank_models(intent, catalog)
     best = models[0] if models else None
@@ -284,7 +299,7 @@ def _flags(candidates: list[AssetScore], chosen: AssetScore | None) -> list[dict
         if c.lifecycle == "candidate_retire":
             reasons.append("already marked for retirement")
         if c.views_90d < t["low_usage_views_90d"]:
-            reasons.append(f"low usage ({c.views_90d} views in 90 days)")
+            reasons.append(f"low usage ({c.views_90d} views in Aug–Oct 2026)")
         if c.governance < t["flag_governance_below"]:
             reasons.append(f"poorly governed ({c.governance:.2f})")
         if any(g.startswith("Metric conflict") for g in c.gates_failed):
@@ -300,6 +315,21 @@ def decide(candidates: list[AssetScore], availability: dict[str, Any], intent: d
     t = THRESHOLDS
     intent = intent or {}
     best_model = availability.get("best_model")
+
+    if availability.get("missing_terms") or availability.get("uncertified_measures"):
+        return DecisionResult(Decision.NOT_FEASIBLE, "unresolved requirements block fulfilment",
+                              "Resolve the unsupported or conflicting requirements before reusing or generating a dashboard.", None)
+    if intent.get("source_asset_id") and catalog is not None:
+        source = next((c for c in candidates if c.asset_id == intent["source_asset_id"]), None)
+        if not source or source.scope_score < t["min_scope"]:
+            return DecisionResult(Decision.NOT_FEASIBLE, "specified asset does not cover this scope",
+                "The specified source asset cannot be safely adapted to this scope without a steward review.", source)
+        if source.coverage < t["reuse_coverage"]:
+            asset = next(a for a in catalog["assets"] if a["id"] == source.asset_id)
+            return DecisionResult(Decision.CONSOLIDATE, "explicit request to extend an identified asset",
+                f"Extend '{source.name}' with the missing requirements after resolving its prerequisites.", source,
+                change_type="business", target_model_id=asset.get("model_id"))
+        candidates = [source]
 
     # Migration requests: never migrate 1:1 without checking for reuse first (RULE-006).
     if intent.get("migration") and catalog is not None:
@@ -327,7 +357,10 @@ def decide(candidates: list[AssetScore], availability: dict[str, Any], intent: d
             if c.freshness < t["reuse_freshness"]:
                 fixes.append("fix the failing or unstable refresh")
             if c.repairable:
-                fixes.append("assign an active owner")
+                if any("Owner " in g for g in c.repairable):
+                    fixes.append("assign an active owner")
+                if any("Source scope conflict" in g for g in c.repairable):
+                    fixes.append("resolve conflicting report/model scope metadata with the steward")
             if "definitions_match" in failed:
                 fixes.append("switch local KPI variants to the approved definitions")
             if "endorsed" in failed:
@@ -336,7 +369,7 @@ def decide(candidates: list[AssetScore], availability: dict[str, Any], intent: d
                 fixes.append("make the model AI-ready (clear names, explicit measures)")
             return DecisionResult(
                 Decision.REPAIR,
-                f"coverage {c.coverage:.2f} ≥ {t['reuse_coverage']}, {c.views_90d} views in 90 days, governance {c.governance:.2f}: repair before reuse",
+                f"coverage {c.coverage:.2f} ≥ {t['reuse_coverage']}, {c.views_90d} views in Aug–Oct 2026, governance {c.governance:.2f}: repair before reuse",
                 f"'{c.name}' covers the request. Repair it ({'; '.join(fixes)}) instead of building a copy.",
                 c, change_type="maintenance", flags=_flags(candidates, c))
 
@@ -394,7 +427,7 @@ def _decide_migration(candidates: list[AssetScore], availability: dict[str, Any]
         else:
             verdict = "fold into the new Power BI report"
         flags.append({"asset_id": a["id"], "name": a["name"], "coverage": 0, "views_90d": a["views_90d"],
-                      "message": f"Tableau, {a['views_90d']} views in 90 days, backlog path {path(a)}: {verdict}."})
+                      "message": f"Tableau, {a['views_90d']} views in Aug–Oct 2026, backlog path {path(a)}: {verdict}."})
     flags = flags[: t["max_flags"] + 3]
 
     if pbi:

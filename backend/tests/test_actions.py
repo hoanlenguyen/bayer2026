@@ -5,7 +5,7 @@ from app import actions as act
 from app import catalog as cat
 from app.main import app
 
-from .helpers import plan, sse, stage
+from .helpers import plan, sse, stage, login
 
 
 @pytest.fixture(autouse=True)
@@ -17,7 +17,8 @@ def test_new_build_proposals():
     intent, d = plan("req_finance_gtn")
     props = act.propose(intent, d, [])
     biz = [p for p in props if p["kind"] == "business"]
-    assert len(biz) == 1 and biz[0]["verify"]["metric_id"] == "net_sales" and biz[0]["verify"]["direction"] == "increase"
+    assert not biz
+    assert any("requirements" in p["title"].lower() for p in props)
     assert any(p["key"].startswith("maint:retire:") for p in props)
 
 
@@ -49,12 +50,13 @@ def test_samples_link_to_live_proposals():
 
 def test_actions_api_flow():
     with TestClient(app) as c:
+        login(c)
         start = c.get("/api/actions").json()
         assert start["summary"]["active"] >= 3 and any(a["overdue"] for a in start["items"])
         evs = sse(c.post("/api/chat", json={"preset_id": "req_finance_gtn"}))
-        prop = next(p for p in stage(evs, "actions")["data"]["proposals"] if p["kind"] == "business")
-        r = c.post("/api/actions", json={**prop, "conversation_id": evs[0]["id"], "by": "Planner"})
+        prop = next(p for p in stage(evs, "actions")["data"]["proposals"] if "requirements" in p["title"].lower())
+        r = c.post("/api/actions", json={**prop, "conversation_id": evs[0]["id"], "owner_id": "OWN-022"})
         assert r.status_code == 201 and r.json()["allowed"]
-        assert c.post("/api/actions", json=prop).status_code == 409
-        bad = c.patch(f"/api/actions/{r.json()['_id']}", json={"status": "verified"})
+        assert c.post("/api/actions", json={**prop, "owner_id": "OWN-022"}).status_code == 409
+        bad = c.patch(f"/api/actions/{r.json()['_id']}", json={"status": "verified", "version": 1})
         assert bad.status_code == 400

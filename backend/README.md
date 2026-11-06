@@ -4,6 +4,12 @@ FastAPI service for the Agentic Analytics Manager. It reads Bayer's synthetic da
 
 All data is synthetic (Bayer Pharmaceuticals × Since AI 2026 Builder Data Pack). There is no patient or HCP data, and figures are not Bayer performance.
 
+## Current lifecycle
+
+Read [the implementation handover](../docs/IMPLEMENTATION_HANDOVER.md) for the authoritative flow. All `/api` routes except health and demo-session setup require a signed bearer session. Approval requires a distinct configured reviewer and the exact spec hash. Request edits require `expected_revision`; optional `submission_id` makes network retries idempotent. Action creation requires an active `owner_id`, and updates require the current `version`.
+
+SQLite and generated files persist under `data/` and `output/`. Mount both in containers. Use one application worker. `STORE_MODE=memory` is explicitly disposable; `DEMO_MODE=false` disables the demo identity entry point and fails closed pending a production adapter.
+
 ## Quick start
 
 ### macOS / Linux
@@ -36,7 +42,7 @@ Other commands follow the same pattern on Windows, for example `.venv\Scripts\py
 
 ### Check it runs
 
-Wait for `Application startup complete.`, then open http://localhost:8000/api/health. It should report `"provider": "mock"` and `"store": "memory"` until you add keys.
+Wait for `Application startup complete.`, then open http://localhost:8000/api/health. It should report `"provider": "mock"` and `"store": "sqlite"` until you add keys.
 
 Then start the frontend (`../frontend`, `npm run dev`) and open http://localhost:5173.
 
@@ -51,7 +57,7 @@ Copy `.env.example` to `.env`. Every setting is optional; without any, the app r
 | `OPENAI_BASE_URL` | empty | OpenAI-compatible endpoint, for example an Azure-hosted deployment |
 | `MODEL_REASONING` | `gpt-6-astra` | Evidence and spec agents. Check the exact ID in your OpenAI dashboard |
 | `MODEL_FAST` | `gpt-6-luna` | Intent agent and explanations |
-| `MONGODB_URI` | empty | MongoDB connection string. Empty = in-memory storage (lost on restart) |
+| `MONGODB_URI` | empty | MongoDB connection string. Empty = durable single-worker SQLite |
 | `MONGODB_DB` | `analytics_manager` | Database name |
 | `DATAPACK_PATH` | `../materials/…Builder_Data_Pack.xlsx` | Workbook to load |
 | `OUTPUT_DIR` | `output` | Where generated PBIP projects are written (git-ignored) |
@@ -74,8 +80,8 @@ Conversations, specs and actions are kept on reset. For MongoDB Atlas, add your 
 | Collections | Contents |
 |---|---|
 | `datapack_<sheet>` | Every table sheet of the workbook, row for row (22 sheets) |
-| `catalog_measures`, `catalog_models`, `catalog_assets`, `catalog_owners`, `catalog_workspaces`, `catalog_products`, `catalog_markets`, `catalog_lineage`, `catalog_rules`, `catalog_dimensions`, `catalog_meta` | The catalog the pipeline reasons over. Approved and repaired reports are written back to `catalog_assets` |
-| `presets` | 10 Bayer business requests + 4 estate scenarios |
+| `catalog_measures`, `catalog_models`, `catalog_assets`, `catalog_owners`, `catalog_workspaces`, `catalog_products`, `catalog_markets`, `catalog_lineage`, `catalog_rules`, `catalog_dimensions`, `catalog_meta` | The catalog the pipeline reasons over. Generated draft overlays are stored; source repairs are never simulated as resolved |
+| `presets` | 10 Bayer templates + 7 labelled estate/demo scenarios |
 | `conversations` | Messages, intent and every streamed event per run |
 | `intents`, `evidence`, `specs` | Pipeline outputs; specs carry status draft / approved / rejected / superseded |
 | `agent_runs` | Audit log: agent, mode, model, steps, duration |
@@ -93,9 +99,9 @@ request ─▶ intent agent ─▶ discovery ─▶ governance ─▶ decision �
 ```
 
 - **The AI extracts, Python decides.** Agents turn words into a structured intent, gather evidence and design the page. Scores, gates and the decision are plain functions in `app/decision.py`, so the same input always gives the same decision.
-- **Agents propose, Python verifies.** Unknown KPIs, products, markets and models are removed; proof lines come from catalog facts, never from the model.
+- **Agents propose, Python verifies.** Unknown KPIs, products and markets are retained as unresolved; invented model references are rejected; proof lines come from catalog facts, never from the model.
 - Each decision cites the Bayer rules it applies (RULE-001 to RULE-008). The full rules and thresholds are in `../CLAUDE.md`.
-- New reports are **thin reports** that connect to an existing shared semantic model (RULE-001), so a PBIP has a `.pbip` file and a `.Report` folder only. A repair is a maintenance change with no files.
+- Supported new builds contain enhanced PBIR plus a self-contained synthetic demo model. Catalogue model metadata is only a proposal; it is not an executable connection. Repairs and unsupported bindings create pending external tasks. See the current handover for the exact contract.
 
 ## Code map
 
@@ -113,7 +119,7 @@ request ─▶ intent agent ─▶ discovery ─▶ governance ─▶ decision �
 | `app/pbip.py` | Approved spec → thin-report PBIP folder (plain Python) |
 | `app/actions.py` | Follow-up action proposals, status rules, sample actions |
 | `app/graph.py` | Catalog → asset index graph for the frontend |
-| `app/store.py` | MongoDB or in-memory storage |
+| `app/store.py` | SQLite default, optional MongoDB, explicit test memory |
 | `app/load_datapack.py` | CLI to load the workbook into MongoDB |
 
 ## API
@@ -127,7 +133,7 @@ request ─▶ intent agent ─▶ discovery ─▶ governance ─▶ decision �
 | `GET /api/catalog` | Full catalog (measures, models, assets, …) |
 | `GET /api/graph` | Entities and edges for the asset index |
 | `POST /api/chat` | `{conversation_id?, message, preset_id?}` → SSE stream of `stage`, `message`, `done`, `error` events |
-| `POST /api/approve` | `{conversation_id, approved, approver}` → SSE stream of approval, PBIP and register stages |
+| `POST /api/approve` | `{conversation_id, approved, spec_hash}` → SSE stream of approval, PBIP and register stages |
 | `GET /api/conversations`, `GET /api/conversations/{id}` | Stored conversations |
 | `GET /api/specs`, `GET /api/agent-runs` | Specs with status; agent audit log (`?conversation_id=` to filter) |
 | `GET/POST /api/actions`, `GET/PATCH /api/actions/{id}` | Action tracker. POST returns 409 if an open action already covers the finding; PATCH returns 400 with a plain message for an invalid move |
@@ -135,13 +141,14 @@ request ─▶ intent agent ─▶ discovery ─▶ governance ─▶ decision �
 Try it without the frontend:
 
 ```bash
-curl -N -X POST localhost:8000/api/chat -H "Content-Type: application/json" -d '{"preset_id":"scn_reuse_eylea_jp"}'
+# First obtain a demo session using POST /api/session {"actor_id":"OWN-008"}.
+# Send its token in Authorization: Bearer <token> on every protected API request.
 ```
 
 ## Tests
 
 ```bash
-pytest                 # 41 tests
+pytest
 ```
 
 They cover the data pack mapping, every decision outcome, the migration rules, all three agents (including tool calls against a scripted fake OpenAI client), MongoDB storage (through mongomock), the graph, the action tracker and the full API flows including approval. The frontend's `npm run test:workbench` also replays real backend events through the UI.
@@ -186,7 +193,7 @@ For MongoDB Atlas, also allow the host's outgoing IP addresses under Network Acc
 - **Windows: "uvicorn is not recognized":** the virtual environment is not active, or the requirements are not installed in it. Use `.venv\Scripts\python.exe -m uvicorn …` as shown in Quick start.
 - **"localhost refused to connect" (ERR_CONNECTION_REFUSED):** the backend is not running. Start it again and read the terminal output; if it exits on startup, run the requirements install again (new packages are added over time, for example `openpyxl`).
 
-- **`/api/health` shows `memory` although `MONGODB_URI` is set:** the connection failed; the log says why. Check the Atlas IP access list and the password.
+- **Startup fails with a configured MongoDB URI:** inspect the connection settings and access list. The app deliberately refuses to fall back to volatile storage.
 - **Agents show "rules, offline":** no `OPENAI_API_KEY`, or the model call failed. The trace in the processing record shows the reason.
 - **Asset index says "/api/graph returned 500", or requests fail after updating the code:** MongoDB still holds an older catalog. The backend now reloads an outdated catalog automatically on start; to force it, run `python -m app.load_datapack --reset` and restart.
 - **Changes to the workbook are not picked up:** with MongoDB, run `python -m app.load_datapack --reset`; in-memory storage reloads on restart.

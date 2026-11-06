@@ -7,12 +7,12 @@ import { api } from "../api/client";
 import { byId, loadEstate, ownerOf } from "../lib/estate";
 
 type Tab = "details" | "graph";
-const tabFromHash = (): Tab => (window.location.hash === "#explorer-graph" ? "graph" : "details");
-const hashFor = (t: Tab) => (t === "graph" ? "#explorer-graph" : "#explorer");
+const tabFromHash = (): Tab => (window.location.hash === "#explorer-details" ? "details" : "graph");
+const hashFor = (t: Tab) => (t === "graph" ? "#explorer-graph" : "#explorer-details");
 
 type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; home: string };
 
-/** Estate Explorer: entity details and the relationship graph ("molecular view") of the plant catalog. */
+/** Estate Explorer: entity details and the relationship graph ("molecular view") of the Bayer analytics estate. */
 export function ExplorerPage({ focusRequest }: { focusRequest: string | null }) {
   const [load, setLoad] = useState<Load>({ status: "loading" });
 
@@ -26,7 +26,7 @@ export function ExplorerPage({ focusRequest }: { focusRequest: string | null }) 
   }, []);
 
   if (load.status === "loading") {
-    return <main className="page"><p className="muted">Loading the plant catalog…</p></main>;
+    return <main className="page"><p className="muted">Loading the Bayer analytics estate…</p></main>;
   }
   if (load.status === "error") {
     return (
@@ -83,7 +83,7 @@ function ExplorerView({ initialFocus, home, focusRequest }: { initialFocus: stri
     const o = ownerOf(id);
     try {
       await api.createAction({
-        kind: "maintenance", title: e.action, owner: o && o.status !== "left" ? o.name : "Data steward",
+        kind: "maintenance", title: e.action, owner: o && o.status === "active" ? o.name : "Data steward",
         asset_id: id, asset_name: e.name, reason: e.flags[0]?.text ?? "", key: `maint:retire:${id}`, by: "You",
       });
     } catch (err) {

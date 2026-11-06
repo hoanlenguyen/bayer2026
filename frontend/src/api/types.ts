@@ -55,7 +55,7 @@ export interface MessageEvent {
 }
 
 export type PipelineEvent =
-  | { type: "conversation"; id: string; provider: string; store: string }
+  | { type: "conversation"; id: string; provider: string; store: string; revision?: number }
   | { type: "user_message"; content: string; ts: string }
   | StageEvent
   | MessageEvent
@@ -65,11 +65,12 @@ export type PipelineEvent =
 export interface Health {
   ok: boolean;
   provider: "mock" | "openai";
-  store: "memory" | "mongodb";
+  store: "memory" | "mongodb" | "sqlite";
   models: { reasoning: string; fast: string } | null;
 }
 
 export interface CatalogMeta {
+  owners?: Record<string, { owner_name: string; status: string }>;
   measures: Record<string, { name: string; unit: string; definition: string }>;
   dimensions: Record<string, { name: string }>;
 }
@@ -122,6 +123,8 @@ export interface ActionProposal {
 }
 
 export interface Action {
+  owner_id?: string;
+  version?: number;
   _id: string;
   key: string | null;
   kind: ActionKind;

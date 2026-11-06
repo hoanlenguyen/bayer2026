@@ -13,7 +13,7 @@ const capture = spawnSync(
 );
 assert.equal(capture.status, 0, capture.stderr || capture.error?.message);
 const { catalog, runs } = JSON.parse(capture.stdout);
-const server = await createServer({
+const server = await createServer({ optimizeDeps: { noDiscovery: true, include: [] },
   server: { middlewareMode: true },
   appType: "custom",
 });

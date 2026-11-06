@@ -56,7 +56,7 @@ export function EntityHeader({ entity: e, homeId, onFocus }: Props) {
         <div className="head-stats">
           <div className="head-stat">
             <span className="k">Trust</span>
-            <span className="v" style={{ color: `var(--${toneOf(e.trust)})` }}>{e.trust.toFixed(2)}</span>
+            <span className="v" style={{ color: `var(--${toneOf(e.trust)})` }}>{e.trust === null ? "Unknown" : e.trust.toFixed(2)}</span>
           </div>
           <div className="head-stat">
             <span className="k">Relations</span>

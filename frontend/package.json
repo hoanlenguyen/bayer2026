@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b",
-    "test:workbench": "node --test tests/workbench.test.mjs"
+    "test:workbench": "node --test tests/workbench.test.mjs",
+    "test": "node --test tests/workbench.test.mjs tests/graph.test.mjs"
   },
   "dependencies": {
     "d3": "^7.9.0",

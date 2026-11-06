@@ -1,5 +1,6 @@
+import { StageDetail } from "../components/ask/StageDetail";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, streamPost } from "../api/client";
+import { api, streamPost, getJSON, ensureSession, type DemoActor } from "../api/client";
 import type {
   ActionProposal,
   CatalogMeta,
@@ -70,7 +71,7 @@ function Composer({
       }}
     >
       <label htmlFor="ask-input" className="sr-only">
-        Your question
+        Dashboard request
       </label>
       <textarea
         id="ask-input"
@@ -117,6 +118,7 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
   const [dept, setDept] = useState("All");
 
   const [question, setQuestion] = useState("");
+  const [revision, setRevision] = useState(0);
   const [convId, setConvId] = useState<string | null>(null);
   const [convState, setConvState] = useState<ConvState>("idle");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -127,6 +129,9 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
   const [proposals, setProposals] = useState<{ runKey: number; items: ActionProposal[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actor, setActor] = useState<DemoActor | null>(null);
+  const [history, setHistory] = useState<{_id: string; title: string; request_state: string}[]>([]);
+  const [editText, setEditText] = useState("");
   const nextId = useRef(1);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -146,6 +151,35 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
   }, []);
 
   useEffect(() => {
+    const update = (e: Event) => setActor((e as CustomEvent<DemoActor>).detail);
+    ensureSession().then(s => setActor(s.actor)).catch(() => undefined);
+    window.addEventListener("demo-actor", update);
+    return () => window.removeEventListener("demo-actor", update);
+  }, []);
+  useEffect(() => {
+    if (!busy) getJSON<typeof history>("/api/conversations").then(setHistory).catch(() => undefined);
+  }, [busy, actor, convId]);
+  const restore = async (id: string) => {
+    try {
+      const c = await getJSON<any>(`/api/conversations/${id}`);
+      setConvId(id); setRevision(c.revision ?? 1); setConvState(c.state); setQuestion(c.intent?.question ?? c.title);
+      setMessages(c.messages.map((m: ChatMessage) => ({ ...m, id: nextId.current++ })));
+      const events: StageEvent[] = (c.runs.at(-1)?.events ?? []).filter((e: PipelineEvent) => e.type === "stage");
+      const restored: Partial<Record<StageId, StageEvent>> = {};
+      events.forEach(e => { restored[e.stage] = e; });
+      setStages(restored); setDecision(restored.decision?.data?.decision ?? null);
+      setProposals(restored.actions?.data ? {runKey: Date.now(), items: restored.actions.data.proposals} : null);
+      setError(null);
+    } catch (e) { setError(String(e)); }
+  };
+  const savedRequests = <label className="request-history">Saved requests
+    <select aria-label="Saved requests" value={convId ?? ""} disabled={busy} onChange={e => { if (e.target.value) void restore(e.target.value); }}>
+      <option value="">Select a request to resume</option>
+      {history.map(c => <option key={c._id} value={c._id}>{c.title} · {c.request_state.replaceAll("_", " ")}</option>)}
+    </select>
+  </label>;
+
+  useEffect(() => {
     listRef.current?.scrollTo({
       top: listRef.current.scrollHeight,
       behavior: "smooth",
@@ -156,6 +190,7 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
     switch (e.type) {
       case "conversation":
         setConvId(e.id);
+        if (e.revision !== undefined) setRevision(e.revision);
         break;
       case "stage":
         setStages((s) => ({ ...s, [e.stage]: e }));
@@ -194,7 +229,7 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
         setOffline(false);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
-        setOffline(true);
+        setOffline(err instanceof TypeError);
       } finally {
         setBusy(false);
       }
@@ -216,15 +251,17 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
       ]);
       void run("/api/chat", {
         conversation_id: convId,
+        expected_revision: convId ? revision : null,
+        submission_id: crypto.randomUUID(),
         message: text,
         preset_id: presetId ?? null,
       });
     },
-    [convId, convState, run],
+    [convId, convState, run, revision],
   );
 
   const approve = (approved: boolean) => {
-    const approver = stages.approval?.data?.approver ?? "Report owner";
+    const approver = actor?.name ?? "Reviewer";
     setMessages((m) => [
       ...m,
       {
@@ -233,12 +270,13 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
         content: approved ? `Approved as ${approver}` : "Rejected",
       },
     ]);
-    void run("/api/approve", { conversation_id: convId, approved, approver });
+    void run("/api/approve", { conversation_id: convId, approved, spec_hash: stages.approval?.data?.spec_hash });
   };
 
   const newChat = () => {
     setQuestion("");
     setConvId(null);
+    setRevision(0);
     setConvState("idle");
     setMessages([]);
     setStages({});
@@ -271,33 +309,34 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
     return (
       <div className="ask-empty">
         {offlineBanner}
+        {savedRequests}
+        {error && <p role="alert">{error}</p>}
         <div className="entry-heading">
-          <span className="folio">ANALYTICS WORKBENCH / NEW INVESTIGATION</span>
+          <span className="folio">ANALYTICS WORKBENCH / DASHBOARD REQUEST</span>
           <span className="folio">01</span>
         </div>
         <div className="hello">
           <h1>
-            Good decisions start
+            What dashboard
             <br />
-            with the right question.
+            does your team need?
           </h1>
           <p>
-            Find the analysis you need. Reuse what works. Build only what is
-            missing.
+            Describe what you need to track. We will check existing dashboards and prepare any necessary changes.
           </p>
         </div>
         <div className="entry-label">
-          <span className="folio">YOUR QUESTION</span>
-          <span>Describe the decision you need to make</span>
+          <span className="folio">YOUR REQUEST</span>
+          <span>Tell us the purpose, audience and scope</span>
         </div>
         <Composer
           onSend={(t) => send(t)}
           disabled={busy}
           autoFocus
-          placeholder="For example: Nubeqa net sales and market access by country"
+          placeholder="Build a dashboard of Eylea net sales and digital engagement in Japan, with monthly trends."
         />
         <div className="preset-heading">
-          <h2>Or start with a familiar decision</h2>
+          <h2>Or start with a dashboard request</h2>
           <span className="folio">DEPARTMENT INDEX</span>
         </div>
         <div
@@ -345,7 +384,7 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
         </div>
         {scenarioPresets.length > 0 && (
           <div className="preset-subheading">
-            <h3>Estate scenarios, built from real assets to show each outcome</h3>
+            <h3>Demo scenarios grounded in workbook records</h3>
             <span className="folio">SCENARIOS</span>
           </div>
         )}
@@ -381,7 +420,7 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
   return (
     <main className="investigation">
       <header className="question-strip">
-        <span className="folio">INVESTIGATION</span>
+        <span className="folio">DASHBOARD REQUEST</span>
         <h1>{question || messages[0]?.content}</h1>
         <button
           type="button"
@@ -389,9 +428,27 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
           disabled={busy}
           onClick={newChat}
         >
-          New question ↗
+          New request ↗
         </button>
       </header>
+      {savedRequests}
+      <section className="request-brief" aria-label="Request brief">
+        <div><span className="folio">CURRENT BRIEF</span><h2>{stages.intent?.data?.decision || "Clarifying the dashboard requirements"}</h2></div>
+        <p>KPIs: {(stages.intent?.data?.measures ?? []).map((id: string) => catalog?.measures[id]?.name ?? id).join(", ") || "Not yet specified"}</p>
+        <p>Scope: {Object.entries(stages.intent?.data?.filters ?? {}).map(([k,v]) => `${k}: ${(v as string[]).join(", ")}`).join(" · ") || (stages.intent?.data?.scope_global ? "All products" : "To confirm")}{stages.intent?.data?.scope_global ? " · All markets" : ""}</p>
+        <p>Period: January–October 2026 · monthly synthetic workbook data. Other periods require a revised binding.</p>
+        <p>Requester: {stages.intent?.data?.requester_id ?? actor?.id} · Version {stages.intent?.data?.request_revision ?? 1} · {(stages.intent?.data?.dimensions ?? []).join(", ") || "No breakdown selected"}</p>
+        {!!stages.intent?.data?.unmatched_terms?.length && <p className="bad-text">Unresolved: {stages.intent.data.unmatched_terms.join(", ")}</p>}
+        <details><summary onClick={() => { if (!editText) setEditText(question); }}>Edit requirements and reassess</summary>
+          <label>Describe the full revised request<textarea aria-label="Revised dashboard request" value={editText} onChange={e => setEditText(e.target.value)} /></label>
+          <button className="btn" type="button" disabled={busy || !editText.trim()} onClick={() => { send(editText); setEditText(""); }}>Reassess this request</button>
+          <p className="muted small">A new assessment supersedes the previous pending specification and requires a fresh review.</p>
+        </details>
+      </section>
+      <div className="processing-strip" aria-label="Processing status" aria-live="polite">
+        {Object.values(stages).filter(e => ["intent", "discovery", "governance", "evidence", "spec", "render"].includes(e.stage)).map(e => <span key={e.stage} className={`process-${e.status}`}>{e.status === "running" ? "◌" : e.status === "waiting" ? "!" : "✓"} {e.title}{e.data?.agent ? ` · ${e.data.agent.mode === "llm" ? "Live model" : "Offline rules"}` : ""}</span>)}
+      </div>
+      {stages.render?.status === "done" && <section className="request-brief"><h2>{stages.render.summary}</h2><StageDetail stage="render" data={stages.render.data} catalog={catalog} /></section>}
       <Workbench
         key={question}
         stages={stages}
@@ -400,7 +457,7 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
       >
         <section className="chat" aria-label="Conversation">
           <div className="conversation-label">
-            <h2>Investigation notes</h2>
+            <h2>Request notes</h2>
             <span className="folio">
               {busy
                 ? "PROCESSING"
@@ -414,7 +471,7 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
             {messages.map((m) => (
               <div key={m.id} className={`msg msg-${m.role}`}>
                 <span className="note-author">
-                  {m.role === "user" ? "YOU" : "ANALYSIS"}
+                  {m.role === "user" ? "YOU" : "WORKBENCH"}
                 </span>
                 <div className="msg-body">
                   <p>
@@ -436,12 +493,12 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
               </div>
             ))}
             {proposals && proposals.items.length > 0 && !busy && (
-              <ProposedActions
+              <details className="follow-up-drawer"><summary>{proposals.items.length} proposed follow-up actions</summary><ProposedActions
                 key={proposals.runKey}
                 proposals={proposals.items}
                 conversationId={convId}
                 onAdded={onActionsChanged}
-              />
+              /></details>
             )}
             {busy && (
               <div className="msg msg-assistant">
@@ -456,13 +513,13 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
           <div className="chat-composer">
             <Composer
               onSend={(t) => send(t)}
-              disabled={busy || convState === "awaiting_approval"}
+              disabled={busy}
               placeholder={
                 convState === "awaiting_approval"
-                  ? "Review the specification, then approve or reject below"
+                  ? "Add a clarification to reassess the request"
                   : convState === "clarifying"
                     ? "Answer the question, or pick a suggestion"
-                    : "Ask another question"
+                    : "Describe a revised dashboard request"
               }
             />
           </div>
@@ -476,26 +533,28 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
             {stages.decision?.data?.reason ??
               (busy
                 ? "Checking the catalog and your requirements…"
-                : "Clarify your question to continue.")}
+                : "Clarify the dashboard requirements to continue.")}
           </span>
         </div>
         {convState === "awaiting_approval" ? (
           <div className="approve-row">
+            {!actor?.can_review && <span className="small">Switch to the demo reviewer to review this plan.</span>}
             <button
               type="button"
               className="btn-ghost"
-              disabled={busy}
+              disabled={busy || !actor?.can_review}
               onClick={() => approve(false)}
+              title="Reviewer permission is checked on the server"
             >
               Reject
             </button>
             <button
               type="button"
               className="btn"
-              disabled={busy}
+              disabled={busy || !actor?.can_review}
               onClick={() => approve(true)}
             >
-              Approve as {stages.approval?.data?.approver ?? "owner"} →
+              Approve plan →
             </button>
           </div>
         ) : stages.deliver?.data?.asset ? (
@@ -517,7 +576,7 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
             {busy
               ? "In progress"
               : stages.register?.status === "done"
-                ? "Registered in catalog"
+                ? "Draft · validation pending"
                 : stages.approval?.status === "rejected"
                   ? "Proposal rejected"
                   : convState === "clarifying"

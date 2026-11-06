@@ -24,7 +24,7 @@ const labels: Record<DecisionType, string> = {
   not_feasible: "Adjust the request",
 };
 export const decisionLabel = (decision: DecisionType | null) =>
-  decision ? labels[decision] : "Understanding the question";
+  decision ? labels[decision] : "Understanding the request";
 
 /** Presentation only. All fit scores, checks and decisions come from pipeline events. */
 export function Workbench({ stages, catalog, decision, children }: Props) {
@@ -72,7 +72,7 @@ export function Workbench({ stages, catalog, decision, children }: Props) {
         {
           title: "Usage",
           requested: "Used by people today",
-          available: `${(selected.views_90d ?? 0).toLocaleString("en-US")} views in 90 days · ${selected.platform ?? ""} · ${(selected.lifecycle ?? "").replace("_", " ")}`,
+          available: `${(selected.views_90d ?? 0).toLocaleString("en-US")} views in Aug–Oct 2026 · ${selected.platform ?? ""} · ${(selected.lifecycle ?? "").replace("_", " ")}`,
           missing: "Low usage or marked for retirement",
           aligned: (selected.views_90d ?? 0) >= 150 && selected.lifecycle !== "candidate_retire",
         },
@@ -115,7 +115,7 @@ export function Workbench({ stages, catalog, decision, children }: Props) {
                 </small>
                 <span className="asset-note">
                   {c.asset_id === recommended?.asset_id
-                    ? "Recommended by the decision engine"
+                    ? "Closest comparison candidate"
                     : c.gates_failed.length
                       ? "Governance review required"
                       : "Select to inspect fit"}
@@ -131,7 +131,7 @@ export function Workbench({ stages, catalog, decision, children }: Props) {
               <p>
                 {stages.discovery?.status === "done"
                   ? "No existing analysis matched this request. The decision will explain the next step."
-                  : "Your existing work comes first. Clarify the question to find relevant analyses."}
+                  : "Your existing work comes first. Clarify the request to find relevant analyses."}
               </p>
             </div>
           )}
@@ -156,7 +156,7 @@ export function Workbench({ stages, catalog, decision, children }: Props) {
               Your request, aligned with <strong>{selected.name}</strong>.
             </p>
             <div className="alignment-grid">
-              <span className="alignment-label">Your question</span>
+              <span className="alignment-label">Your request</span>
               {dimensions.map((d) => (
                 <div className="alignment-cell requested" key={d.title}>
                   <span>{d.title}</span>
@@ -209,15 +209,15 @@ export function Workbench({ stages, catalog, decision, children }: Props) {
         ) : (
           <div className="investigation-intro">
             <span className="folio">
-              QUESTION → EXISTING WORK → EVIDENCE → DECISION
+              REQUEST → EXISTING WORK → EVIDENCE → PLAN
             </span>
             <h3>
-              Start with the decision.
+              Start with the request.
               <br />
               Build on what exists.
             </h3>
             <p>
-              The investigation keeps your question, catalog matches and
+              The investigation keeps your requirements, catalog matches and
               supporting evidence together.
             </p>
           </div>

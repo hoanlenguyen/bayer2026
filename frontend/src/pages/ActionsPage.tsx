@@ -1,3 +1,4 @@
+import { OwnerSelect } from "../components/OwnerSelect";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import type { Action, ActionKind, ActionStatus, ActionSummary } from "../api/types";
@@ -32,7 +33,7 @@ function openEntity(id: string) {
 
 /** Edit panel for one action: owner, due date, status moves with required notes, verification, history. */
 function ActionDetail({ action, onSaved, onClose }: { action: Action; onSaved: (a: Action) => void; onClose: () => void }) {
-  const [owner, setOwner] = useState(action.owner);
+  const [owner, setOwner] = useState(action.owner_id ?? "");
   const [due, setDue] = useState(action.due_date ?? "");
   const [blocker, setBlocker] = useState(action.blocker);
   const [outcome, setOutcome] = useState(action.outcome);
@@ -43,14 +44,14 @@ function ActionDetail({ action, onSaved, onClose }: { action: Action; onSaved: (
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setOwner(action.owner); setDue(action.due_date ?? ""); setBlocker(action.blocker); setOutcome(action.outcome);
+    setOwner(action.owner_id ?? ""); setDue(action.due_date ?? ""); setBlocker(action.blocker); setOutcome(action.outcome);
     setPending(null); setError(null); setNote("");
   }, [action]);
 
   const save = async (body: Record<string, unknown>) => {
     setBusy(true); setError(null);
     try {
-      onSaved(await api.updateAction(action._id, { ...body, by: owner || "You" }));
+      onSaved(await api.updateAction(action._id, { ...body, version: action.version ?? 1 }));
       setPending(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -64,7 +65,7 @@ function ActionDetail({ action, onSaved, onClose }: { action: Action; onSaved: (
     else void save({ status: to });
   };
 
-  const fieldsChanged = owner !== action.owner || due !== (action.due_date ?? "");
+  const fieldsChanged = owner !== (action.owner_id ?? "") || due !== (action.due_date ?? "");
   const metric = action.verify?.metric_name;
   const better = action.verify?.direction === "decrease" ? "go down" : "go up";
   const went = action.verify?.direction === "decrease" ? "went down" : "went up";
@@ -85,10 +86,10 @@ function ActionDetail({ action, onSaved, onClose }: { action: Action; onSaved: (
       )}
 
       <div className="ad-fields">
-        <label htmlFor="ad-owner">Owner<input id="ad-owner" value={owner} onChange={(e) => setOwner(e.target.value)} /></label>
+        <label htmlFor="ad-owner">Owner<OwnerSelect id="ad-owner" value={owner} onChange={setOwner} /></label>
         <label htmlFor="ad-due">Due date<input id="ad-due" type="date" value={due} onChange={(e) => setDue(e.target.value)} /></label>
         {fieldsChanged && (
-          <button type="button" className="btn" disabled={busy} onClick={() => save({ owner, due_date: due || undefined })}>Save changes</button>
+          <button type="button" className="btn" disabled={busy} onClick={() => save({ owner_id: owner || undefined, due_date: due || undefined })}>Save changes</button>
         )}
       </div>
 

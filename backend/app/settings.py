@@ -19,6 +19,8 @@ class Settings:
     model_fast: str = field(default_factory=lambda: os.getenv("MODEL_FAST", "gpt-6-luna"))
     llm_provider_raw: str = field(default_factory=lambda: os.getenv("LLM_PROVIDER", "auto").lower())
     mongodb_uri: str | None = field(default_factory=lambda: os.getenv("MONGODB_URI") or None)
+    store_mode: str = field(default_factory=lambda: os.getenv("STORE_MODE", "sqlite"))
+    sqlite_path: Path = field(default_factory=lambda: BACKEND_DIR / os.getenv("SQLITE_PATH", "data/workbench.sqlite"))
     mongodb_db: str = field(default_factory=lambda: os.getenv("MONGODB_DB", "analytics_manager"))
     output_dir: Path = field(default_factory=lambda: BACKEND_DIR / os.getenv("OUTPUT_DIR", "output"))
     cors_origins: list[str] = field(

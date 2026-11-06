@@ -12,7 +12,8 @@ def _catalog():
 
 
 @pytest.mark.parametrize("preset_id, expected, asset", [
-    ("scn_reuse_eylea_jp", "reuse", "AST-0079"),
+    ("scn_reuse_eylea_jp", "repair", "AST-0079"),
+    ("demo_reuse_brazil", "reuse", "AST-0019"),
     ("scn_repair_xarelto_mx", "repair", "AST-0217"),
     ("scn_repair_canada_budget", "repair", "AST-0016"),
     ("req_migrate_xarelto", "migrate", "AST-0220"),

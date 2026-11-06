@@ -485,3 +485,47 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .preview th { font-weight: 600; color: var(--muted); background: var(--surface-2); }
 .preview td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .preview tr:last-child td { border-bottom: 0; }
+
+/* Workbook relationships and evidence. */
+.node.t-model .dot { fill:#286d76 } .node.t-workspace .dot { fill:#7b6f96 }
+.node.t-product .dot { fill:#a27541 } .node.t-market .dot { fill:#727e4f } .node.t-request .dot { fill:#a05f6a }
+.link.basis-join { stroke-dasharray:3 3 } .link.basis-candidate { stroke-dasharray:8 5 }
+.graph-inspector { max-height:780px; overflow-y:auto }
+.graph-filters select { width:100%; padding:8px; background:var(--bg); color:var(--fg); border:1px solid var(--line) }
+.candidate-toggle { display:flex; gap:8px; align-items:center; margin:12px 0 20px; font-size:12px }
+.source-evidence { border-top:1px solid var(--line); padding:16px 0; font-size:12px }
+.source-links { display:flex; flex-wrap:wrap; gap:5px }
+.source-links button { text-align:left; padding:5px 7px; background:transparent; border:1px solid var(--line); border-radius:3px; font:11px monospace; color:var(--fg) }
+.source-links button[aria-pressed=true] { background:#e5eee9; border-color:#467b69 }
+.source-values { margin:14px 0; max-height:330px; overflow:auto }
+.source-values div { padding:6px 0; border-bottom:1px solid var(--line) }
+.source-values dt { color:var(--muted); font:11px monospace } .source-values dd { margin:3px 0; overflow-wrap:anywhere }
+.relationship-proof { padding:14px 0; border-top:2px solid #286d76 }
+.relationship-list { margin:14px 0; font-size:12px }
+.relationship-list button { display:block; text-align:left; width:100%; padding:10px 0; background:none; border:0; border-bottom:1px solid var(--line); color:var(--fg) }
+.relationship-list small { display:block; color:var(--muted); margin-top:4px }
+.workbook-page h1 { font-family:Georgia,serif; font-size:44px; font-weight:400; margin:18px 0 }
+.workbook-page select { padding:10px; margin:12px; max-width:80vw }
+.workbook-table { overflow:auto; max-height:65vh; border:1px solid var(--line); margin:20px 0 }
+.workbook-table table { border-collapse:collapse; font-size:12px; text-align:left; width:100% }
+.workbook-table th,.workbook-table td { padding:10px 14px; border:1px solid var(--line); min-width:100px; max-width:400px; overflow-wrap:anywhere }
+.workbook-table thead { position:sticky; top:0; background:#e6e8df }
+.workbook-paging { display:flex; align-items:center; gap:20px } .workbook-paging button { padding:8px 16px }
+
+.workbook-page { padding: 28px; }
+
+/* Dashboard request lifecycle within the existing workbench. */
+.demo-identity { margin-left:auto; display:grid; gap:3px; max-width:290px; font-size:10px; letter-spacing:.08em; }
+.demo-identity select { max-width:100%; padding:7px; background:transparent; color:inherit; border:1px solid #d5d2c9; border-radius:3px; font-size:11px; }
+.request-history { display:flex; align-items:center; gap:12px; padding:12px 0; font-size:12px; color:#666; }
+.request-history select { min-width:0; max-width:650px; padding:8px; background:transparent; border:1px solid #d5d2c9; }
+.request-brief { margin:16px 0; padding:20px; border:1px solid #d5d2c9; background:#faf9f4; }
+.request-brief h2 { font-size:17px; margin:6px 0 14px; }
+.request-brief p { font-size:12px; line-height:1.6; margin:6px 0; }
+.request-brief textarea { display:block; width:100%; min-height:90px; padding:12px; margin:12px 0; font:inherit; border:1px solid #d5d2c9; background:white; }
+.request-brief details { margin-top:12px; font-size:13px; }
+.processing-strip { display:flex; flex-wrap:wrap; gap:8px; margin:18px 0; font-size:11px; }
+.processing-strip span { padding:8px 10px; border:1px solid #d5d2c9; }
+.processing-strip .process-running { border-color:#4d7369; color:#31564c; }
+.pr-form select,.ad-fields select { padding:8px; max-width:230px; font:inherit; }
+@media(max-width:900px) { .topbar-inner { flex-wrap:wrap; } .demo-identity { max-width:260px; } .request-history { flex-direction:column; align-items:stretch; } }

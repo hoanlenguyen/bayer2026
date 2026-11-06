@@ -27,3 +27,9 @@ def sse(resp):
 
 def stage(evs, name):
     return next((e for e in evs if e["type"] == "stage" and e["stage"] == name and e["status"] in ("done", "waiting")), None)
+
+
+def login(client, actor="OWN-008"):
+    result = client.post("/api/session", json={"actor_id": actor})
+    assert result.status_code == 200
+    client.headers["Authorization"] = "Bearer " + result.json()["token"]

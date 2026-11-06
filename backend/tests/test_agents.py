@@ -43,7 +43,18 @@ async def test_intent_rules_asks_when_scope_missing():
     assert run.output["status"] == "ask" and set(run.output["intent"]["measures"]) >= {"net_sales", "gross_to_net_rate"}
 
 
-async def test_intent_llm_drops_unknown_ids():
+@pytest.mark.parametrize("message,blocked", [
+    ("May I build monthly net sales for all markets for the commercial review?", False),
+    ("Build net sales for May 2026 for all markets for the commercial review", True),
+])
+async def test_intent_distinguishes_polite_request_from_may_period(message, blocked):
+    run = await IntentAgent(offline()).run({"transcript": [{"role": "user", "content": message}],
+        "intent": {"measures": []}, "asked": 0, "preset": None})
+    terms = run.output["intent"].get("unmatched_terms", [])
+    assert any("Unsupported period" in term for term in terms) == blocked
+
+
+async def test_intent_llm_preserves_unknown_requirements():
     llm, client = online([{"json": {"status": "clear", "question": None, "suggestions": [], "intent": {
         "decision": "Review", "measures": ["net_sales", "made_up_kpi"], "dimensions": ["market"],
         "filters": {"product": ["Nubeqa", "Aspirinex"], "market": ["DE", "XX"]}}}}])
@@ -52,6 +63,7 @@ async def test_intent_llm_drops_unknown_ids():
     i = run.output["intent"]
     assert run.mode == "llm" and i["measures"] == ["net_sales"]
     assert i["filters"] == {"product": ["Nubeqa"], "market": ["DE"]}
+    assert set(i["unmatched_terms"]) >= {"made_up_kpi", "product: Aspirinex", "market: XX"}
     assert client.requests[0]["response_format"] == {"type": "json_object"}
 
 
@@ -102,7 +114,8 @@ async def test_spec_rules_thin_report_is_valid():
 
 async def test_spec_repair_has_no_pages():
     spec = (await SpecAgent(offline()).run(await _ctx("scn_repair_xarelto_mx"))).output
-    assert spec["pages"] == [] and spec["base_asset_id"] == "AST-0217" and spec["validation"]["passed"]
+    assert spec["pages"] == [] and spec["base_asset_id"] == "AST-0217" and not spec["validation"]["passed"]
+    assert spec["owner_id"] is None
 
 
 async def test_spec_llm_revises_after_validation_errors():

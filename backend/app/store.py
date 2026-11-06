@@ -1,4 +1,4 @@
-"""Persistence: MongoDB when MONGODB_URI is set, otherwise in memory.
+"""Persistence: MongoDB when configured, otherwise durable single-worker SQLite.
 
 Collections
   conversations        chat messages, current intent, runs with every streamed event
@@ -10,19 +10,22 @@ Collections
   catalog_<key>        the analytics catalog built from the Bayer data pack: measures, dimensions,
                        models, assets, owners, workspaces, products, markets, lineage, rules
   datapack_<sheet>     every table sheet of the workbook, row for row (raw, for querying)
-  presets              the 10 Bayer business requests plus estate scenarios
+  presets              Bayer business requests plus labelled team demo scenarios
 """
 from __future__ import annotations
 
 import copy
 import logging
+import json
+import sqlite3
+from pathlib import Path
 from typing import Any
 
 from .settings import settings
 
 log = logging.getLogger(__name__)
 
-ARTIFACTS = ("intents", "evidence", "specs", "agent_runs", "actions")
+ARTIFACTS = ("intents", "evidence", "specs", "agent_runs", "actions", "audit", "outputs", "submissions")
 CATALOG_MAPS = ("measures", "dimensions", "models", "owners", "workspaces", "products", "markets")
 CATALOG_LISTS = ("assets", "lineage", "rules")
 
@@ -50,9 +53,13 @@ class MemoryStore:
 
     # pipeline artifacts
     async def save_artifact(self, kind: str, doc: dict[str, Any]) -> None:
+        if kind == "audit" and doc["_id"] in self.artifacts[kind]:
+            raise ValueError("Audit events are immutable")
         self.artifacts[kind][doc["_id"]] = copy.deepcopy(doc)
 
     async def update_artifact(self, kind: str, doc_id: str, fields: dict[str, Any]) -> None:
+        if kind == "audit":
+            raise ValueError("Audit events are immutable")
         if doc_id in self.artifacts[kind]:
             self.artifacts[kind][doc_id].update(copy.deepcopy(fields))
 
@@ -134,9 +141,14 @@ class MongoStore:
 
     # pipeline artifacts
     async def save_artifact(self, kind: str, doc: dict[str, Any]) -> None:
+        if kind == "audit":
+            await self.db[kind].insert_one(doc)
+            return
         await self.db[kind].replace_one({"_id": doc["_id"]}, doc, upsert=True)
 
     async def update_artifact(self, kind: str, doc_id: str, fields: dict[str, Any]) -> None:
+        if kind == "audit":
+            raise ValueError("Audit events are immutable")
         await self.db[kind].update_one({"_id": doc_id}, {"$set": fields})
 
     async def get_artifact(self, kind: str, doc_id: str) -> dict[str, Any] | None:
@@ -212,7 +224,54 @@ class MongoStore:
         await self.db["catalog_models"].update_one({"_id": model_id}, {"$set": fields})
 
 
-Store = MemoryStore | MongoStore
+class SQLiteStore(MemoryStore):
+    """Durable single-worker demo store. One atomic JSON snapshot per write."""
+    name = "sqlite"
+
+    def __init__(self, path: Path) -> None:
+        super().__init__()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.connection = sqlite3.connect(path, check_same_thread=False)
+        self.connection.execute("CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY, body TEXT NOT NULL)")
+        row = self.connection.execute("SELECT body FROM state WHERE id=1").fetchone()
+        if row:
+            data = json.loads(row[0])
+            self.conversations = data["conversations"]
+            self.artifacts.update(data["artifacts"])
+            self.catalog, self.presets = data["catalog"], data["presets"]
+
+    def flush(self):
+        data = {"conversations": self.conversations, "artifacts": self.artifacts,
+                "catalog": self.catalog, "presets": self.presets}
+        with self.connection:
+            self.connection.execute("INSERT OR REPLACE INTO state VALUES (1, ?)", (json.dumps(data),))
+
+    async def save(self, conv):
+        await super().save(conv)
+        self.flush()
+
+    async def save_artifact(self, kind, doc):
+        await super().save_artifact(kind, doc)
+        self.flush()
+
+    async def update_artifact(self, kind, doc_id, fields):
+        await super().update_artifact(kind, doc_id, fields)
+        self.flush()
+
+    async def seed_datapack(self, sheets, catalog, presets, reset=False):
+        await super().seed_datapack(sheets, catalog, presets, reset)
+        self.flush()
+
+    async def upsert_asset(self, asset):
+        await super().upsert_asset(asset)
+        self.flush()
+
+    async def update_model(self, model_id, fields):
+        await super().update_model(model_id, fields)
+        self.flush()
+
+
+Store = MemoryStore | MongoStore | SQLiteStore
 
 
 async def create_store() -> Store:
@@ -224,5 +283,7 @@ async def create_store() -> Store:
             log.info("Using MongoDB database '%s'", settings.mongodb_db)
             return store
         except Exception as exc:
-            log.warning("MongoDB unavailable (%s). Falling back to in-memory storage.", exc)
-    return MemoryStore()
+            raise RuntimeError("Configured MongoDB is unavailable; refusing silent data loss") from exc
+    if settings.store_mode == "memory":
+        return MemoryStore()
+    return SQLiteStore(settings.sqlite_path)

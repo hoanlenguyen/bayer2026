@@ -53,8 +53,8 @@ def test_graph():
     g = build_graph()
     ids = {e["id"]: e for e in g["entities"]}
     rels = {(e["s"], e["rel"], e["t"]) for e in g["edges"]}
-    assert ids["KPI-002"]["status"] == "conflict" and ("KPI-002", "conflicts_with", "KPI-001") in rels
-    assert ("KPI-003", "duplicate_of", "KPI-001") in rels
+    assert ids["KPI-002"]["status"] == "conflict" and ("KPI-002", "variant_of", "family:Net Sales") in rels
+    assert ("KPI-003", "variant_of", "family:Net Sales") in rels
     assert ids["AST-0001"]["status"] == "conflict" and ("AST-0001", "uses", "KPI-009") in rels
     assert ids[g["focus"]]["status"] == "certified"
     assert all(e["s"] in ids and e["t"] in ids for e in g["edges"])

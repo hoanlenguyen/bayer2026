@@ -13,7 +13,7 @@ def decision_text(p: dict[str, Any]) -> str:
     n_flags = len(d.get("flags") or [])
     tail = f" I also flagged {n_flags} overlapping report{'s' if n_flags != 1 else ''} to consolidate or retire." if n_flags else ""
     if dec == "reuse":
-        return f"Good news: **{cand.get('name')}** ({cand.get('asset_id')}) already answers this with approved KPIs, so nothing new needs to be built.{tail}"
+        return f"**{cand.get('name')}** ({cand.get('asset_id')}) matches these requirements in the imported metadata, so nothing new needs to be built.{tail}"
     if dec == "repair":
         return f"**{cand.get('name')}** ({cand.get('asset_id')}) covers your request and is well used, but it needs repair first. {d.get('reason', '')}{tail}"
     if dec == "consolidate":
@@ -24,9 +24,9 @@ def decision_text(p: dict[str, Any]) -> str:
         return f"Migration plan: {d.get('reason', '')}"
     if dec == "new_build":
         model = cat.model_by_id(d.get("target_model_id")) or {}
-        return (f"No existing report is both close enough and well governed. I drafted one thin report on the shared model "
-                f"**{model.get('name', d.get('target_model_id'))}** using approved KPIs only.{tail}")
+        return (f"No existing report is both close enough and well governed. I prepared a proposal using the catalogued KPIs and suggested model "
+                f"**{model.get('name', d.get('target_model_id'))}**. Generation depends on a separate executable binding contract.{tail}")
     terms = ", ".join((d.get("availability") or {}).get("missing_terms") or [])
-    return ("This can't be answered from the governed estate"
+    return ("This dashboard request cannot be fulfilled as specified"
             + (f": it needs {terms}" if terms else "") +
             ". The data pack holds aggregated commercial and operational data only, with no patient or prescriber-level data.")

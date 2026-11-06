@@ -119,8 +119,8 @@ class LLM:
         raise RuntimeError(f"agent did not finish within {max_turns} turns")
 
 
-EXPLAIN_SYSTEM = """You explain an analytics decision to a non-technical plant employee in 2-3 short sentences.
-Name the report in **bold**. Say what will happen next. Plain language, no jargon, no dashes as punctuation."""
+EXPLAIN_SYSTEM = """You explain an analytics decision to a non-technical employee requesting a dashboard in 2-3 short sentences.
+Distinguish proposed catalog models from executable demo bindings. Never claim generated, validated, repaired or published without evidence. Name the report in **bold**. Say what will happen next. Plain language, no jargon, no dashes as punctuation."""
 
 
 async def explain(llm: LLM, payload: dict[str, Any]) -> str:

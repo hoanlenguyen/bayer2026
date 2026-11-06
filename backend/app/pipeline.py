@@ -24,7 +24,10 @@ from .agents.intent import sanitize_intent
 from .decision import THRESHOLDS, Decision, data_availability, decide, rank_candidates
 from .facts import preview as facts_preview
 from .llm import LLM, explain
-from .pbip import render_pbip, slug
+from .pbip import render_pbip
+from .governance import actor_for, audit, check_request_access, digest, require_review, source_digest, spec_digest
+from .agents.spec import validate
+from .bindings import contract
 from .settings import settings
 from .store import Store
 
@@ -34,7 +37,7 @@ STAGES = {
     "governance": "Check governance",
     "decision": "Decide the lifecycle action",
     "actions": "Propose follow-up actions",
-    "deliver": "Open the existing report",
+    "deliver": "Inspect the existing report",
     "evidence": "Gather evidence",
     "spec": "Write the specification",
     "approval": "Human approval",
@@ -60,6 +63,7 @@ def label_list(ids: list[str], kind: str) -> str:
 
 class Pipeline:
     def __init__(self, store: Store, llm: LLM) -> None:
+        self.mutation_lock = asyncio.Lock()
         self.store = store
         self.llm = llm
         self.intent_agent = IntentAgent(llm)
@@ -108,16 +112,25 @@ class Pipeline:
         await self.store.save(conv)
 
     # ------------------------------------------------------------ chat turn
-    async def chat(self, conv_id: str | None, message: str, preset_id: str | None) -> AsyncIterator[Event]:
+    async def chat(self, conv_id: str | None, message: str, preset_id: str | None, actor: dict | None = None) -> AsyncIterator[Event]:
+        actor = actor or actor_for("OWN-008")
         conv = await self._load(conv_id)
+        if conv.get("requester_id"):
+            check_request_access(conv, actor)
+        else:
+            conv["requester_id"] = actor["id"]
         try:
             preset = cat.preset_by_id(preset_id)
             text = message.strip() or (preset["prompt"] if preset else "")
             conv["title"] = conv["title"] or text[:70]
-            yield {"type": "conversation", "id": conv["_id"], "provider": self.llm.name, "store": self.store.name}
+            yield {"type": "conversation", "id": conv["_id"], "provider": self.llm.name, "store": self.store.name,
+                   "revision": conv.get("revision", 0) + int(conv["state"] != "clarifying")}
 
             new_run = conv["state"] != "clarifying"
             if new_run:
+                conv["revision"] = conv.get("revision", 0) + 1
+                await audit(self.store, actor["id"], conv["_id"], "request_submitted", revision=conv["revision"],
+                            previous_state=conv.get("request_state", conv["state"]), text=text)
                 if conv["state"] == "awaiting_approval" and conv.get("plan", {}).get("spec_id"):
                     await self.store.update_artifact("specs", conv["plan"]["spec_id"], {"status": "superseded"})
                 conv["plan"] = None
@@ -156,7 +169,8 @@ class Pipeline:
             if result["status"] == "ask" and result.get("question"):
                 conv["asked"] += 1
                 conv["state"] = "clarifying"
-                yield self._stage(conv, "intent", "waiting", f"Question {conv['asked']} of up to 2",
+                conv["request_state"] = "clarifying"
+                yield self._stage(conv, "intent", "waiting", f"Clarification {conv['asked']}",
                                   {**public(intent), "agent": agent_run.trace()})
                 yield self._say(conv, result["question"], kind="question", suggestions=result.get("suggestions", []))
                 yield self._event(conv, "done", state=conv["state"])
@@ -164,6 +178,8 @@ class Pipeline:
 
             intent.pop("_pending", None)
             intent["grain"] = "month"
+            intent["requester_id"] = conv["requester_id"]
+            intent["request_revision"] = conv.get("revision", 1)
             intent["decision"] = intent.get("decision") or f"Monitor {label_list(intent['measures'], 'm') or 'the requested numbers'}"
             intent["department"] = intent.get("department") or cat.department_for(intent["measures"])
             conv["intent"] = intent
@@ -235,11 +251,12 @@ class Pipeline:
 
         if result.decision == Decision.REUSE:
             c = result.candidate
-            yield self._stage(conv, "deliver", "done", f"Opened '{c.name}'",
+            yield self._stage(conv, "deliver", "done", f"Existing match: '{c.name}'",
                               {"asset": cat.asset_by_id(c.asset_id), "filters": intent.get("filters", {}),
                                "preview": decision.get("preview")})
-            yield self._say(conv, explanation, kind="result", decision="reuse", asset_id=c.asset_id)
+            yield self._say(conv, explanation + " Inspect the source evidence before opening it in your organisation. The demo grants synthetic metadata access only; live report access has not been verified.", kind="result", decision="reuse", asset_id=c.asset_id)
             conv["state"] = "idle"
+            conv["request_state"] = "existing_asset_identified" if result.decision == Decision.REUSE else "unsupported"
             yield self._event(conv, "done", state="idle")
             return
 
@@ -249,6 +266,7 @@ class Pipeline:
                             suggestions=["Show Xarelto on-time-in-full and market access coverage for Mexico.",
                                          "How are Eylea net sales and digital engagement developing in Japan?"])
             conv["state"] = "idle"
+            conv["request_state"] = "existing_asset_identified" if result.decision == Decision.REUSE else "unsupported"
             yield self._event(conv, "done", state="idle")
             return
 
@@ -269,11 +287,12 @@ class Pipeline:
         # ---- 6. Spec agent (/to-spec)
         yield self._stage(conv, "spec", "running", "Spec agent is drafting the DashboardSpec")
         sp_run = await self.spec_agent.run({"intent": intent, "decision": decision, "evidence": evidence,
-                                            "preset": cat.preset_by_id(conv.get("preset_id"))})
+                                            "preset": cat.preset_by_id(conv.get("preset_id")), "requester_id": conv["requester_id"]})
         await self._audit(conv, "spec", sp_run)
         spec = sp_run.output
-        spec_id = await self._artifact(conv, "specs", spec, status="draft", evidence_id=evidence_id, version=1)
-        conv["plan"].update(spec=spec, spec_id=spec_id)
+        spec_id = await self._artifact(conv, "specs", spec, status="draft", evidence_id=evidence_id, version=conv.get("revision", 1))
+        conv["plan"].update(spec=spec, spec_id=spec_id, spec_hash=spec_digest(spec), source_hash=source_digest())
+        conv["request_state"] = "awaiting_review"
         n_vis = sum(len(p["visuals"]) for p in spec["pages"])
         valid = spec["validation"]["passed"]
         yield self._stage(conv, "spec", "done",
@@ -285,106 +304,119 @@ class Pipeline:
 
         # ---- 7. Human approval
         conv["state"] = "awaiting_approval"
-        approver = spec.get("approver", "Report owner")
-        yield self._stage(conv, "approval", "waiting", f"Waiting for {approver}", {"approver": approver, "spec_id": spec_id})
+        approver = "Configured demo reviewer"
+        yield self._stage(conv, "approval", "waiting", f"Waiting for {approver}", {"approver": approver, "spec_id": spec_id, "spec_hash": conv["plan"]["spec_hash"],
+                           "source_hash": conv["plan"]["source_hash"], "can_generate": valid and spec["execution_contract"]["supported"],
+                           "note": "Approval records a plan. Generation, runtime acceptance and publication are separate."})
         note = "" if valid else " The spec did not pass every check, so review the failed checks before approving."
-        yield self._say(conv, explanation + " Review the evidence and specification, then approve to generate the PBIP files." + note,
+        yield self._say(conv, explanation + " Review the plan and its prerequisites. Approval records the plan; only complete executable bindings allow generation." + note,
                         kind="approval", decision=result.decision.value)
         yield self._event(conv, "done", state=conv["state"])
 
-    # ------------------------------------------------------------ approval → render → register
-    async def approve(self, conv_id: str, approved: bool, approver: str) -> AsyncIterator[Event]:
+    # ------------------------------------------------------------ review → gated generation
+    async def approve(self, conv_id: str, approved: bool, actor: dict, expected_hash: str) -> AsyncIterator[Event]:
+        from fastapi import HTTPException
         conv = await self._load(conv_id)
+        check_request_access(conv, actor)
+        require_review(actor, conv.get("requester_id"))
+        plan = conv.get("plan") or {}
+        if not plan.get("spec"):
+            raise HTTPException(409, "There is no specification to review.")
+        if expected_hash != plan.get("spec_hash") or spec_digest(plan["spec"]) != expected_hash:
+            raise HTTPException(409, "The specification changed. Reload and review it again.")
+        if plan.get("approval"):
+            if plan["approval"]["approved"] != approved:
+                raise HTTPException(409, "This version already has a different review decision.")
+            for event in plan.get("approval_events", []):
+                yield event
+            return
+        if conv["state"] != "awaiting_approval" or source_digest() != plan.get("source_hash"):
+            raise HTTPException(409, "The request or source changed. Reassess it before approval.")
+        spec, spec_id = plan["spec"], plan["spec_id"]
+        start = len(conv["runs"][-1]["events"])
+        yield {"type": "conversation", "id": conv["_id"], "provider": self.llm.name, "store": self.store.name}
         try:
-            yield {"type": "conversation", "id": conv["_id"], "provider": self.llm.name, "store": self.store.name}
-            plan = conv.get("plan") or {}
-            if conv["state"] != "awaiting_approval" or not plan.get("spec"):
-                yield {"type": "error", "message": "There is nothing waiting for approval in this conversation."}
-                return
-            spec, spec_id = plan["spec"], plan.get("spec_id")
+            decision = {"approved": approved, "actor_id": actor["id"], "at": now(),
+                        "spec_hash": expected_hash, "source_hash": plan["source_hash"]}
+            plan["approval"] = decision
+            await audit(self.store, actor["id"], spec_id, "plan_approved" if approved else "plan_rejected", review=decision)
+            await self.store.update_artifact("specs", spec_id, {"status": "approved" if approved else "rejected", "approval": decision})
             if not approved:
-                await self.store.update_artifact("specs", spec_id, {"status": "rejected", "decided_by": approver, "decided_at": now()})
-                yield self._stage(conv, "approval", "rejected", f"Rejected by {approver}", {"approver": approver})
-                yield self._say(conv, "Understood. Nothing was built. Tell me what to change, or ask a new question.", kind="result")
-                conv["state"] = "idle"
-                yield self._event(conv, "done", state="idle")
-                return
-
-            spec.update(approved_by=approver, approved_at=now())
-            await self.store.update_artifact("specs", spec_id, {"status": "approved", "decided_by": approver,
-                                                                "decided_at": spec["approved_at"]})
-            yield self._stage(conv, "approval", "done", f"Approved by {approver}", {"approver": approver, "approved_at": spec["approved_at"]})
-            await self._pause()
-
-            if spec["decision_type"] == "repair":
-                yield self._stage(conv, "render", "done", "No report files: this is a maintenance change to an existing report",
-                                  {"files": [], "preview": {"model": ""}, "validated_in_power_bi": True, "maintenance": True})
+                conv["request_state"] = "rejected"
+                yield self._stage(conv, "approval", "rejected", "Plan rejected", {"approver": actor["name"]})
+                yield self._say(conv, "Plan rejected. Edit the request to prepare a new version.", kind="result")
             else:
-                yield self._stage(conv, "render", "running", "Writing PBIP files (plain Python, no AI)")
-                await self._pause()
-                output = render_pbip(spec, settings.output_dir, conv["_id"])
-                await self.store.update_artifact("specs", spec_id, {"pbip": {"folder": output["folder"], "files": output["files"]}})
-                yield self._stage(conv, "render", "done", f"Thin report on {output['thin_report_on']}: {len(output['files'])} files", output)
-            await self._pause()
-
-            entry = await self._register(spec)
-            yield self._stage(conv, "register", "done", f"'{entry['name']}' is now in the catalog with owner and review date", entry)
-            yield self._say(conv, f"Done. **{entry['name']}** is generated as a PBIP project and registered with owner "
-                                  f"{entry['owner']} and a review date of {entry['next_review']}. Ask the same question again and I will reuse it.",
-                            kind="result", decision=spec["decision_type"], asset_id=entry["id"])
+                spec.update(approved_by=actor["id"], approved_at=decision["at"])
+                yield self._stage(conv, "approval", "done", "Plan approved", {"approver": actor["name"], "approved_at": decision["at"], "spec_hash": expected_hash})
+                checks = validate(spec)
+                execution = contract(spec)
+                blockers = [c["text"] for c in checks if not c["ok"]]
+                if not execution["supported"]:
+                    blockers.append("Executable demo bindings unavailable for this change" + (": " + ", ".join(execution["missing"]) if execution["missing"] else "; external execution required"))
+                if execution != spec.get("execution_contract"):
+                    blockers.append("Execution contract changed since review")
+                if blockers:
+                    conv["request_state"] = "execution_blocked"
+                    action = act.create({"title": "Resolve prerequisites: " + spec["name"], "kind": "maintenance",
+                        "key": "execute:" + spec_id, "owner": spec["owner"], "reason": "; ".join(blockers),
+                        "asset_id": spec.get("base_asset_id")}, actor["id"], conv_id, conv["runs"][-1]["id"])
+                    action.update(owner_id=spec.get("owner_id"), spec_id=spec_id, status="blocked", blocker="; ".join(blockers))
+                    await self.store.save_artifact("actions", action)
+                    await audit(self.store, actor["id"], spec_id, "execution_blocked", blockers=blockers, action_id=action["_id"])
+                    yield self._stage(conv, "render", "done", "Approved plan; execution blocked", {"files": [], "preview": {"model": ""},
+                        "maintenance": True, "validated_in_power_bi": False, "artifact_state": "execution_blocked", "blockers": blockers,
+                        "action_id": action["_id"]})
+                    yield self._say(conv, "The plan is recorded. Prerequisites are tracked in Actions; no source health or trusted catalogue status was changed.", kind="result")
+                else:
+                    fingerprint = digest({k: conv["intent"].get(k) for k in ("measures", "dimensions", "filters", "grain", "scope_global")})
+                    previous = next((o for o in await self.store.list_artifacts("outputs", limit=10000)
+                        if o.get("fingerprint") == fingerprint and o.get("source_hash") == plan["source_hash"] and o.get("requester_id") == conv["requester_id"]), None)
+                    if previous:
+                        output, entry = previous["output"], previous["asset"]
+                        yield self._stage(conv, "render", "done", "Existing generated package; validation still pending", output)
+                    else:
+                        yield self._stage(conv, "render", "running", "Generating schema-checked demo PBIR with explicit bindings")
+                        output = render_pbip(spec, settings.output_dir, spec_id)
+                        output["download_url"] = "/api/outputs/" + spec_id + "/download"
+                        entry = await self._register_pending(spec, spec_id)
+                        await self.store.save_artifact("outputs", {"_id": spec_id, "conversation_id": conv_id, "created_at": now(),
+                            "requester_id": conv["requester_id"], "fingerprint": fingerprint, "source_hash": plan["source_hash"],
+                            "output": output, "asset": entry})
+                        await audit(self.store, actor["id"], spec_id, "artifact_generated", state="validation_pending", spec_hash=expected_hash,
+                                    hashes=output["validation"]["artifact_hashes"])
+                        yield self._stage(conv, "render", "done", "Generated; Power BI runtime validation pending", output)
+                    plan["output_asset_id"] = entry["id"]
+                    plan["output"] = output
+                    conv["request_state"] = "validation_pending"
+                    yield self._stage(conv, "register", "done", "Draft registered; excluded from trusted reuse", entry)
+                    yield self._say(conv, "Download the validation package. Automated schema and binding checks passed. Power BI rendering, numerical reconciliation and publication remain pending.", kind="result")
             conv["state"] = "idle"
             yield self._event(conv, "done", state="idle")
+            plan["approval_events"] = conv["runs"][-1]["events"][start:]
+        except Exception as exc:
+            conv["request_state"] = "generation_failed"
+            conv["state"] = "idle"
+            await audit(self.store, actor["id"], spec_id, "generation_failed", reason=str(exc), spec_hash=expected_hash)
+            yield self._event(conv, "error", message="Generation failed; the review is retained. Reassess after resolving: " + str(exc))
+            yield self._event(conv, "done", state="idle")
+            plan["approval_events"] = conv["runs"][-1]["events"][start:]
         finally:
             await self._save(conv)
 
-    async def _register(self, spec: dict[str, Any]) -> dict[str, Any]:
-        """Apply the approved change to the catalog so the next identical request is answered by reuse."""
-        today = date.today().isoformat()
-        dec = spec["decision_type"]
-        base = cat.asset_by_id(spec.get("base_asset_id"))
-        if base and dec == "repair":
-            reason = spec["change"].get("repairs", "")
-            if base["owner_status"] != "active":
-                base.update(owner="Data steward (interim)", owner_status="active")
-            model = cat.model_by_id(base.get("model_id"))
-            if model and base.get("refresh_status") != "healthy":
-                model["refresh_status"] = "healthy"
-                await self.store.update_model(model["id"], {"refresh_status": "healthy"})
-            base["refresh_status"] = "healthy"
-            for m in [m["id"] for m in spec["measures"]]:
-                base["variants"].pop(m, None)
-            base.update(endorsement="promoted", certified=True, lifecycle="active", last_modified=today,
-                        model_ai_readiness="good" if "AI-ready" in reason else base.get("model_ai_readiness"))
-            for s_ in base["signals"]:
-                if s_["status"] == "open" and s_["code"] in ("MISSING_OWNER", "HIGH_REACH_UNENDORSED", "SELF_SERVICE_HIGH_REACH"):
-                    s_["status"] = "resolved"
-            await self.store.upsert_asset(base)
-            return {**base, "next_review": spec["review_date"], "change": spec["change"]}
-        if base and dec == "consolidate":
-            base["measures"] = list(dict.fromkeys(base["measures"] + spec["change"].get("add_measures", [])))
-            base["last_modified"] = today
-            await self.store.upsert_asset(base)
-            return {**base, "next_review": spec["review_date"], "change": spec["change"]}
-
-        # New build or migration: a new thin Power BI report on the shared model, promoted on approval.
-        model = spec.get("semantic_model") or {}
-        model_full = cat.model_by_id(model.get("id")) or {}
-        asset = {
-            "id": "NEW-" + slug(spec["name"]).upper()[:40], "name": spec["name"], "asset_type": "Report", "platform": "Power BI",
-            "workspace_id": model_full.get("workspace_id"), "workspace": model.get("workspace"), "model_id": model.get("id"),
+    async def _register_pending(self, spec: dict, spec_id: str) -> dict:
+        model = cat.model_by_id((spec.get("semantic_model") or {}).get("id")) or {}
+        entry = {"id": "GEN-" + spec_id, "name": spec["name"], "asset_type": "Report", "platform": "Power BI",
+            "workspace_id": model.get("workspace_id"), "workspace": "Local synthetic validation package",
+            "model_id": None, "execution_model": "BayerDemo", "proposed_source_model_id": model.get("id"),
             "product_scope": spec["product_scope"], "market_scope": spec["market_scope"],
-            "owner_id": None, "owner": spec["owner"], "owner_status": "active", "created": today, "last_modified": today,
-            "lifecycle": "active", "endorsement": "promoted", "certified": True, "audience": 0,
-            "classification": "internal", "delivery_model": "central_BI", "grain": "month",
-            "kpis": [m["kpi_id"] for m in spec["measures"]], "measures": [m["id"] for m in spec["measures"]],
-            "conflicts": {}, "variants": {}, "views_90d": 0, "users_90d": 0, "errors_90d": 0, "avg_load_ms": None,
-            "signals": [], "dq_issues": [], "migration": None, "refresh_status": model.get("refresh_status"),
-            "model_ai_readiness": model.get("ai_readiness"), "created_from_spec": True, "replaces": spec.get("replaces", []),
-        }
-        existing = cat.asset_by_id(asset["id"])
-        if existing:
-            existing.update(asset)
-        else:
-            cat.CATALOG["assets"].append(asset)
-        await self.store.upsert_asset(asset)
-        return {**asset, "next_review": spec["review_date"]}
+            "owner_id": spec["owner_id"], "owner": spec["owner"], "business_owner_id": spec.get("business_owner_id"),
+            "owner_status": "active", "created": date.today().isoformat(), "last_modified": date.today().isoformat(),
+            "artifact_state": "validation_pending", "validated_in_power_bi": False, "lifecycle": "draft",
+            "endorsement": "none", "certified": False, "classification": "synthetic_demo", "delivery_model": "demo",
+            "grain": "month", "kpis": [m["kpi_id"] for m in spec["measures"]], "measures": [m["id"] for m in spec["measures"]],
+            "conflicts": {}, "variants": {}, "views_90d": 0, "users_90d": 0, "signals": [], "dq_issues": [],
+            "refresh_status": None, "model_ai_readiness": "unknown", "created_from_spec": True,
+            "next_review": spec["review_date"], "replaces": [], "spec_id": spec_id}
+        cat.CATALOG["assets"].append(entry)
+        await self.store.upsert_asset(entry)
+        return entry

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { OwnerSelect } from "../OwnerSelect";
 import { api } from "../../api/client";
 import type { ActionProposal } from "../../api/types";
 
@@ -10,7 +11,7 @@ export function ProposedActions({ proposals, conversationId, onAdded }: {
 }) {
   const [rows, setRows] = useState<Record<string, RowState>>(() =>
     Object.fromEntries(proposals.map((p) => [p.key, {
-      owner: p.owner, due: p.due_date,
+      owner: "", due: p.due_date,
       status: p.existing_action_id ? "added" : "idle",
       message: p.existing_action_id ? "Already tracked" : undefined,
     }])));
@@ -21,7 +22,7 @@ export function ProposedActions({ proposals, conversationId, onAdded }: {
     const row = rows[p.key];
     update(p.key, { status: "saving", message: undefined });
     try {
-      await api.createAction({ ...p, owner: row.owner, due_date: row.due, conversation_id: conversationId, by: "You" });
+      await api.createAction({ ...p, owner_id: row.owner, due_date: row.due, conversation_id: conversationId });
       update(p.key, { status: "added", message: `Assigned to ${row.owner}` });
       onAdded();
     } catch (e) {
@@ -53,7 +54,7 @@ export function ProposedActions({ proposals, conversationId, onAdded }: {
               ) : (
                 <div className="pr-form">
                   <label htmlFor={`own-${p.key}`} className="sr-only">Owner</label>
-                  <input id={`own-${p.key}`} value={row.owner} onChange={(e) => update(p.key, { owner: e.target.value })} />
+                  <OwnerSelect id={`own-${p.key}`} value={row.owner} onChange={(owner) => update(p.key, { owner })} />
                   <label htmlFor={`due-${p.key}`} className="sr-only">Due date</label>
                   <input id={`due-${p.key}`} type="date" value={row.due} onChange={(e) => update(p.key, { due: e.target.value })} />
                   <button type="button" className="btn" disabled={row.status === "saving" || !row.owner.trim()} onClick={() => accept(p)}>

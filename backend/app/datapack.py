@@ -314,7 +314,9 @@ def build_catalog(sheets: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
             "audience": a["estimated_audience"], "classification": a["classification"], "delivery_model": a["delivery_model"],
             "grain": "month", "kpis": [k for k, _ in used], "measures": list(dict.fromkeys(a_measures)),
             "conflicts": conflicts, "variants": variants,
-            "views_90d": u["views"], "users_90d": u["users"], "errors_90d": u["errors"],
+            # Legacy field retained for scoring compatibility; this covers the workbook's final three calendar months.
+            "views_90d": u["views"], "users_90d": None, "monthly_user_sum": u["users"], "errors_90d": u["errors"],
+            "usage_period": "August–October 2026", "unique_users_period": None,
             "avg_load_ms": round(u["load_ms"] / u["months"]) if u["months"] else None,
             "signals": signals.get(a["asset_id"], []), "dq_issues": dq.get(a["asset_id"], []),
             "migration": {k: mig[k] for k in ("recommended_path_candidate", "candidate_target_model_id", "complexity",

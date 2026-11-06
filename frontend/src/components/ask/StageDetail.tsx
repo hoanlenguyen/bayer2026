@@ -1,4 +1,11 @@
 import { DECISION_LABEL, type Candidate, type CatalogMeta, type DecisionType, type Preview, type StageId } from "../../api/types";
+import { useState } from "react";
+import { downloadArtifact } from "../../api/client";
+
+function Download({ url }: { url: string }) {
+  const [error, setError] = useState("");
+  return <div><button type="button" className="btn" onClick={() => downloadArtifact(url).catch(e => setError(e.message))}>Download Power BI validation package</button>{error && <p role="alert">{error}</p>}</div>;
+}
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const tone = (v: number, good = 0.9, ok = 0.6) => (v >= good ? "ok" : v >= ok ? "warn" : "bad");
@@ -143,7 +150,7 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
           {cands.map((c) => (
             <div key={c.asset_id} className="cand">
               <div className="cand-head"><strong>{c.name}</strong><span className="muted small">{c.asset_id} · {c.platform}</span></div>
-              <p className="muted small">{c.scope_note} · {c.views_90d?.toLocaleString("en-US")} views in 90 days · {c.lifecycle?.replace("_", " ")}</p>
+              <p className="muted small">{c.scope_note} · {c.views_90d?.toLocaleString("en-US")} views in Aug–Oct 2026 · {c.lifecycle?.replace("_", " ")}</p>
               <div className="scores">
                 <Score label="Coverage" value={c.coverage} />
                 <Score label="Freshness" value={c.freshness} />
@@ -239,7 +246,7 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
           ["Workspace", a.workspace],
           ["Scope", `${a.product_scope} / ${a.market_scope}`],
           ["Owner", `${a.owner} (${a.owner_status})`],
-          ["Views (90 days)", a.views_90d?.toLocaleString("en-US") ?? "0"],
+          ["Views (Aug–Oct 2026)", a.views_90d?.toLocaleString("en-US") ?? "0"],
           ["Semantic model", a.model_id],
         ]} />
         <PreviewTable preview={data.preview} />
@@ -280,7 +287,9 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
             ["Scope", `${data.product_scope} / ${data.market_scope}`],
             ...(data.replaces?.length ? [["Replaces", data.replaces.join(", ")] as [string, string]] : []),
             ...(data.change?.repairs ? [["Repairs", data.change.repairs] as [string, string]] : []),
-            ["Owner", data.owner],
+            ["Report owner", `${data.owner} · ${data.owner_id ?? "unassigned"}`],
+            ["Business owner", data.business_owner_id ?? "Unassigned"],
+            ["Execution", data.execution_contract?.supported ? "Bound synthetic demo model · BayerDemo" : "Blocked: external execution or missing bindings"],
             ["Review date", data.review_date],
             ...(data.pages.length ? [["Pages", data.pages.map((p: { name: string; visuals: unknown[] }) => `${p.name} (${p.visuals.length} visuals)`).join(", ")] as [string, string]] : []),
           ]} />
@@ -311,16 +320,24 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
     case "render":
       return (
         <div className="detail-stack">
+          <p><strong>{(data.artifact_state ?? "validation_pending").replaceAll("_", " ")}</strong> · Plan approval does not certify or publish this dashboard.</p>
+          {data.blockers?.map((b: string) => <p className="bad-text" key={b}>{b}</p>)}
+          {data.action_id && <a href="#actions">Resolve the linked prerequisite action ↗</a>}
+          {data.download_url && <Download url={data.download_url} />}
+          {data.validation && <p>Automated specification, file structure, data bindings and layout checks passed. A reviewer must still open the report in Power BI and reconcile the numbers.</p>}
+          <details><summary>Validation evidence and generated files</summary>
+          {data.validation && <KV rows={Object.entries(data.validation.layers).map(([k, v]) => [k.replaceAll("_", " "), String(v).replaceAll("_", " ")])} />}
           <ul className="files">
             {data.files.map((f: { path: string; bytes: number }) => (
               <li key={f.path}><code>{f.path}</code><span className="muted">{f.bytes.toLocaleString("en-US")} B</span></li>
             ))}
           </ul>
+          </details>
           <details>
             <summary>{data.maintenance ? "Maintenance change" : "Connection to the shared model (definition.pbir)"}</summary>
             <pre className="code">{data.preview.model}</pre>
           </details>
-          {!data.validated_in_power_bi && <p className="muted small">Skeleton output: not yet opened in Power BI Desktop.</p>}
+          {!data.validated_in_power_bi && <p className="muted small">Power BI rendering and numerical acceptance have not been run. The package contains source mappings, expected totals and artifact hashes for that review.</p>}
         </div>
       );
 
@@ -333,6 +350,8 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
           ["Workspace", data.workspace],
           ["Owner", data.owner],
           ["Next review", data.next_review],
+          ["Artifact state", data.artifact_state ?? "Unknown"],
+          ["Endorsement", data.endorsement ?? "None"],
         ]} />
         </div>
       );
