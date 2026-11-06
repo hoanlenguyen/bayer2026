@@ -1,112 +1,107 @@
-"""Evidence agent (/explore): proves the request can be built from catalog sources.
+"""Evidence agent (/explore): proves what the recommendation rests on.
 
-The agent chooses source tables and columns using read-only catalog tools.
-Python then verifies the proposal: unknown tables and columns are removed,
-required tables are added, and every proof line is generated from catalog
-facts, so the numbers shown to the user never come from the model.
+The agent picks the shared semantic model and inspects KPIs, reports, usage and
+lineage with read-only catalog tools. Python then verifies the proposal (the
+model exists and serves the requested KPIs) and writes every proof line from
+catalog facts, so numbers shown to the user never come from the model
+(RULE-004 lineage, RULE-008 explain every lifecycle action).
 """
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 from .. import catalog as cat
 from .base import Agent, Step
-from .tools import CATALOG_TOOLS, get_dataset, get_measure, get_relationships, get_report
+from .tools import CATALOG_TOOLS, get_kpi, get_lineage, get_model, get_report
 
-GRAIN_ADJ = {"hour": "hourly", "day": "daily", "week": "weekly", "month": "monthly"}
-DIM_COLUMN_HINTS = {
-    "customer": "customer_id", "carrier": "carrier_id", "line": "line_id", "product": "product_id",
-    "batch": "batch_id", "material": "material_id", "supplier": "supplier_id", "priority": "priority",
-    "deviation_category": "category", "shift": "shift", "department": "department", "cost_center": "cost_center",
-    "destination_country": "destination_country",
-}
-
-SYSTEM = """You are the evidence agent for a governed analytics platform at a pharma plant.
-Given the user's intent and the decision (extend an existing report or create a new one), use the tools to find
-which source tables and columns deliver every requested measure and breakdown. Check row counts, freshness and
-quality tests. For an extend decision, inspect the base report first.
-Use only tables and columns returned by the tools. When finished, reply with JSON only:
-{"datasets": [dataset_id], "columns": {dataset_id: [column]}, "notes": [short finding], "summary": "two plain sentences for a plant manager"}"""
+SYSTEM = """You are the evidence agent for governed analytics at Bayer Pharmaceuticals.
+Given the intent and the lifecycle decision, use the tools to confirm: the approved KPI definitions (and which variants
+must not be used), the shared semantic model to build on, the existing report involved (usage, owner, signals,
+migration backlog) and the downstream impact from lineage. Use only ids returned by the tools.
+When finished, reply with JSON only:
+{"semantic_model": model_id, "notes": [short finding], "summary": "two plain sentences for a business user"}"""
 
 
-def required_columns(intent: dict[str, Any], dataset_id: str) -> list[str]:
-    """Columns needed for the intent's measures and breakdowns in one dataset."""
-    C = cat.CATALOG
-    cols = C["datasets"][dataset_id]["columns"]
-    used: list[str] = []
-    for m in intent["measures"]:
-        used += re.findall(rf"{dataset_id}\[(\w+)\]", C["measures"][m]["expression"])
-    for d in intent["dimensions"] + ["date"]:
-        if d == "date":
-            used += [c for c in cols if c.endswith("_date") or c.endswith("_ts") or c == "date"][:1]
-        elif DIM_COLUMN_HINTS.get(d) in cols:
-            used.append(DIM_COLUMN_HINTS[d])
-    return [c for c in dict.fromkeys(used) if c in cols]
+def _pick_model(decision: dict[str, Any], availability: dict[str, Any], base: dict[str, Any] | None) -> str | None:
+    if decision.get("target_model_id"):
+        return decision["target_model_id"]
+    if base and base.get("model_id") and decision["decision"] in ("repair", "consolidate", "reuse"):
+        return base["model_id"]
+    return (availability.get("best_model") or {}).get("id")
 
 
 def finalize(intent: dict[str, Any], decision: dict[str, Any], availability: dict[str, Any],
              proposal: dict[str, Any], steps: list[Step]) -> dict[str, Any]:
-    """Verify the agent's proposal against the catalog and build the evidence record."""
     C = cat.CATALOG
-    cand = decision.get("candidate")
-    base = cat.asset_by_id(cand["asset_id"]) if cand and decision["decision"] == "extend" else None
+    cand = decision.get("candidate") or {}
+    base = cat.asset_by_id(cand.get("asset_id")) if decision["decision"] in ("repair", "consolidate", "migrate") else None
     verification: list[dict[str, Any]] = []
+    req = intent.get("measures", [])
 
-    proposed = [d for d in proposal.get("datasets", []) if isinstance(d, str)]
-    unknown = [d for d in proposed if d not in C["datasets"]]
-    for d in unknown:
-        verification.append({"ok": False, "text": f"Removed '{d}': not a catalog dataset."})
-    required = availability["datasets"] or (base["datasets"] if base else [])
-    datasets = [d for d in dict.fromkeys([*proposed, *required]) if d in C["datasets"]]
-    for d in required:
-        if d in C["datasets"] and d not in proposed:
-            verification.append({"ok": False, "text": f"Added '{d}': it holds a requested measure but was not selected."})
-
-    columns: dict[str, list[str]] = {}
-    for ds in datasets:
-        valid = C["datasets"][ds]["columns"]
-        chosen = [c for c in (proposal.get("columns") or {}).get(ds, []) if isinstance(c, str)]
-        for c in chosen:
-            if c not in valid:
-                verification.append({"ok": False, "text": f"Removed column '{c}': it does not exist in {ds}."})
-        need = required_columns(intent, ds)
-        missing = [c for c in need if c not in chosen]
-        if chosen and missing:
-            verification.append({"ok": False, "text": f"Added required columns to {ds}: {', '.join(missing)}."})
-        columns[ds] = [c for c in dict.fromkeys([*chosen, *need]) if c in valid]
-    if not any(not v["ok"] for v in verification):
-        verification.append({"ok": True, "text": "All tables and columns the agent selected exist in the catalog."})
-    steps.append(Step("check", "Verify agent proposal against the catalog",
-                      f"{sum(1 for v in verification if not v['ok'])} correction(s)", ok=True))
-
-    proofs = []
-    for ds in datasets:
-        d = C["datasets"][ds]
-        proofs.append({"ok": d["tests_passed"] == d["tests_total"],
-                       "text": f"{d['table']}: {d['rows']:,} rows, refreshed {d['refresh_age_hours']} h ago, "
-                               f"{d['tests_passed']}/{d['tests_total']} quality tests pass. Owner: {d['owner']}."})
-    for m in intent["measures"]:
-        md = C["measures"][m]
-        proofs.append({"ok": md["certified"], "text": f"{md['name']} uses the certified definition: {md['definition']}"})
-    if base:
-        if decision.get("change_type") == "maintenance":
-            proofs.append({"ok": False, "text": f"'{base['name']}' was refreshed {base['refresh_age_hours']} h ago; "
-                                                f"a {GRAIN_ADJ[intent['grain']]} decision needs fresher data."})
+    expected = _pick_model(decision, availability, base)
+    proposed = proposal.get("semantic_model")
+    model_id = expected
+    if proposed and proposed != expected:
+        pm = cat.model_by_id(proposed)
+        if not pm:
+            verification.append({"ok": False, "text": f"Ignored model '{proposed}': not in the catalog."})
+        elif not set(req) & set(pm["measures"]):
+            verification.append({"ok": False, "text": f"Ignored model {proposed}: it serves none of the requested KPIs."})
+        elif decision["decision"] in ("repair", "consolidate"):
+            verification.append({"ok": False, "text": f"Kept {expected}: a {decision['decision']} stays on the report's own model."})
         else:
-            gaps = cand["measures_missing"] + cand["dimensions_missing"]
-            if gaps:
-                proofs.append({"ok": True, "text": f"Missing in '{base['name']}': {', '.join(gaps)}. All are available in the source tables above."})
-            if not cand["grain_supported"]:
-                proofs.append({"ok": True, "text": f"'{base['name']}' is {GRAIN_ADJ[base['grain']]}; the request needs "
-                                                   f"{GRAIN_ADJ[intent['grain']]}. Source data supports it."})
+            model_id = proposed
+            verification.append({"ok": True, "text": f"Agent chose {proposed} instead of {expected}; it serves requested KPIs."})
+    if not any(not v["ok"] for v in verification):
+        verification.append({"ok": True, "text": "The agent's model choice and ids match the catalog."})
+    steps.append(Step("check", "Verify agent proposal against the catalog",
+                      f"{sum(1 for v in verification if not v['ok'])} correction(s)"))
 
-    rels = [r for r in C["relationships"] if r["from"].split(".")[0] in datasets]
-    return {"datasets": datasets, "columns": columns, "relationships": rels, "proofs": proofs,
-            "verification": verification, "notes": [str(n) for n in proposal.get("notes", [])][:6],
-            "summary": str(proposal.get("summary") or ""), "base_asset": base,
-            "measures": intent["measures"], "dimensions": intent["dimensions"]}
+    model = cat.model_by_id(model_id)
+    proofs: list[dict[str, Any]] = []
+    if model:
+        served = [m for m in req if m in model["measures"]]
+        proofs.append({"ok": model["refresh_status"] == "healthy" and model["endorsement"] != "none",
+                       "text": f"Shared model {model['id']} '{model['name']}' ({model['platform']}, {model['endorsement']}): "
+                               f"refresh {model['refresh_status']} ({model['refresh_frequency']}), AI readiness {model['ai_readiness']}, "
+                               f"serves {len(served)} of {len(req)} requested KPIs. Owner: {model['owner']}."})
+        gaps = [C["measures"][m]["name"] for m in req if m not in model["measures"]]
+        if gaps:
+            proofs.append({"ok": False, "text": f"Model does not yet serve: {', '.join(gaps)}. Add the approved measures to it."})
+        for issue in model["dq_issues"]:
+            proofs.append({"ok": False, "text": f"Data quality {issue['id']} ({issue['severity']}): {issue['field']} = {issue['value']}. {issue['impact']}"})
+    for m in req:
+        md = C["measures"][m]
+        avoid = ", ".join(f"{v['name']} ({v['status'].replace('_', ' ')})" for v in md["variants"]) or "none"
+        proofs.append({"ok": md["certified"], "text": f"{md['name']}: use approved {md['kpi_id']}. Variants not to use: {avoid}."})
+    if base:
+        open_sig = [s for s in base["signals"] if s["status"] == "open"]
+        proofs.append({"ok": base["owner_status"] == "active",
+                       "text": f"{base['id']} '{base['name']}' ({base['platform']} {base['asset_type']}, {base['product_scope']} / {base['market_scope']}): "
+                               f"{base['views_90d']:,} views and {base['users_90d']:,} users in 90 days; lifecycle {base['lifecycle']}; "
+                               f"owner {base['owner']} ({base['owner_status']}); {len(open_sig)} open signal(s)"
+                               + (f": {', '.join(s['code'] for s in open_sig)}" if open_sig else "") + "."})
+        if base.get("migration"):
+            mg = base["migration"]
+            proofs.append({"ok": True, "text": f"Migration backlog: path {mg['recommended_path_candidate']}, target {mg['candidate_target_model_id']}, "
+                                               f"complexity {mg['complexity']}, status {mg['status']} ({mg['synthetic_reason']})."})
+    impact_node = (base or {}).get("id") or model_id
+    lineage = get_lineage(impact_node) if impact_node else {"downstream_count": 0, "upstream": []}
+    if impact_node:
+        proofs.append({"ok": True, "text": f"Lineage: {len(lineage['upstream'])} upstream and {lineage['downstream_count']} downstream "
+                                           f"dependencies for {impact_node} (RULE-004)."})
+
+    return {
+        "semantic_model": {k: model[k] for k in ("id", "name", "workspace", "platform", "endorsement", "refresh_status",
+                                                 "ai_readiness", "owner", "measures")} if model else None,
+        "datasets": [model_id] if model_id else [],
+        "columns": {}, "relationships": [],
+        "base_asset": base, "measures": req, "dimensions": intent.get("dimensions", []),
+        "proofs": proofs, "verification": verification, "lineage": lineage,
+        "replaces": decision.get("replaces", []), "rules_applied": decision.get("rules_applied", []),
+        "notes": [str(n) for n in proposal.get("notes", [])][:6], "summary": str(proposal.get("summary") or ""),
+    }
 
 
 class EvidenceAgent(Agent):
@@ -115,33 +110,33 @@ class EvidenceAgent(Agent):
     role = "reasoning"
 
     async def run_llm(self, ctx: dict[str, Any], steps: list[Step]) -> dict[str, Any]:
-        intent, decision = ctx["intent"], ctx["decision"]
+        intent, decision, availability = ctx["intent"], ctx["decision"], ctx["availability"]
         cand = decision.get("candidate") or {}
-        user = json.dumps({"intent": {k: v for k, v in intent.items() if not k.startswith("_")},
-                           "decision": decision["decision"], "change_type": decision.get("change_type"),
-                           "base_report_id": cand.get("asset_id") if decision["decision"] == "extend" else None},
-                          ensure_ascii=False)
+        user = json.dumps({
+            "intent": {k: v for k, v in intent.items() if not k.startswith("_")},
+            "decision": decision["decision"], "reason": decision["reason"], "report_id": cand.get("asset_id"),
+            "suggested_model": decision.get("target_model_id") or (availability.get("best_model") or {}).get("id"),
+        }, ensure_ascii=False)
         proposal = await self.llm.tool_loop(self.role, SYSTEM, user, CATALOG_TOOLS, self.tool_recorder(steps))
-        steps.append(Step("model", "Proposed sources", f"{len(proposal.get('datasets', []))} table(s)"))
-        return finalize(intent, decision, ctx["availability"], proposal, steps)
+        steps.append(Step("model", "Proposed model and findings", str(proposal.get("semantic_model"))))
+        return finalize(intent, decision, availability, proposal, steps)
 
     async def run_rules(self, ctx: dict[str, Any], steps: list[Step]) -> dict[str, Any]:
         intent, decision, availability = ctx["intent"], ctx["decision"], ctx["availability"]
         record = self.tool_recorder(steps)
         cand = decision.get("candidate") or {}
-        if decision["decision"] == "extend" and cand:
-            record("get_report", {"report_id": cand["asset_id"]}, get_report(cand["asset_id"]))
-        for m in intent["measures"]:
-            record("get_measure", {"measure_id": m}, get_measure(m))
-        datasets = availability["datasets"] or (cat.asset_by_id(cand["asset_id"])["datasets"] if cand else [])
-        for ds in datasets:
-            record("get_dataset", {"dataset_id": ds}, get_dataset(ds))
-        record("get_relationships", {"dataset_ids": datasets}, get_relationships(datasets))
-        n = len(intent["measures"])
-        proposal = {
-            "datasets": datasets,
-            "columns": {ds: required_columns(intent, ds) for ds in datasets if ds in cat.CATALOG["datasets"]},
-            "summary": f"The {n} requested measure{'s' if n != 1 else ''} come from {len(datasets)} certified source table"
-                       f"{'s' if len(datasets) != 1 else ''} with passing quality checks. The breakdowns you asked for are available there.",
-        }
-        return finalize(intent, decision, availability, proposal, steps)
+        base = cat.asset_by_id(cand.get("asset_id")) if decision["decision"] in ("repair", "consolidate", "migrate") else None
+        if base:
+            record("get_report", {"report_id": base["id"]}, get_report(base["id"]))
+        for m in intent.get("measures", []):
+            record("get_kpi", {"measure_id": m}, get_kpi(m))
+        model_id = _pick_model(decision, availability, base)
+        if model_id:
+            record("get_model", {"model_id": model_id}, get_model(model_id))
+        node = (base or {}).get("id") or model_id
+        if node:
+            record("get_lineage", {"node_id": node}, get_lineage(node))
+        model = cat.model_by_id(model_id)
+        summary = (f"The request can be served from the shared model '{model['name']}' using approved KPIs only. "
+                   f"Local and conflicting variants are excluded." if model else "No shared model serves this request yet.")
+        return finalize(intent, decision, availability, {"semantic_model": model_id, "summary": summary}, steps)

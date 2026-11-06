@@ -1,70 +1,60 @@
-from datetime import date
-
 import pytest
 
-from app.catalog import CATALOG, preset_by_id
-from app.decision import (Decision, coverage, data_availability, decide, freshness, governance,
-                          rank_candidates)
+from app import catalog as cat
+from app.decision import freshness, governance, scope_match
 
-TODAY = date(2026, 11, 6)
-
-
-def intent_for(preset_id: str) -> dict:
-    p = preset_by_id(preset_id)
-    return {"measures": p["measures"], "dimensions": p["dimensions"], "grain": p["grain"],
-            "unmatched_terms": p.get("requested_terms", [])}
+from .helpers import plan, preset_intent
 
 
-def run(preset_id: str):
-    intent = intent_for(preset_id)
-    cands = rank_candidates(intent, CATALOG["assets"], TODAY)
-    return decide(cands, data_availability(intent, CATALOG)["available"])
+@pytest.fixture(autouse=True)
+def _catalog():
+    cat.reset_catalog()
 
 
 @pytest.mark.parametrize("preset_id, expected, asset", [
-    ("prod_shift_start", Decision.REUSE, "rpt_daily_production"),
-    ("fin_month_end", Decision.REUSE, "rpt_plant_cost"),
-    ("sc_late_deliveries", Decision.EXTEND, "rpt_delivery_perf"),
-    ("qa_release_blockers", Decision.EXTEND, "rpt_batch_release"),
-    ("hr_weekly_staffing", Decision.EXTEND, "rpt_hr_monthly"),
-    ("sc_stockout_risk", Decision.CREATE, None),
-    ("it_system_health", Decision.NOT_FEASIBLE, None),
+    ("scn_reuse_eylea_jp", "reuse", "AST-0079"),
+    ("scn_repair_xarelto_mx", "repair", "AST-0217"),
+    ("scn_repair_canada_budget", "repair", "AST-0016"),
+    ("req_migrate_xarelto", "migrate", "AST-0220"),
+    ("req_finance_gtn", "new_build", None),
+    ("req_supply_risk", "new_build", None),
+    ("scn_out_of_scope", "not_feasible", None),
 ])
-def test_preset_decisions(preset_id, expected, asset):
-    result = run(preset_id)
-    assert result.decision == expected
+def test_decisions(preset_id, expected, asset):
+    _, d = plan(preset_id)
+    assert d["decision"] == expected
     if asset:
-        assert result.candidate.asset_id == asset
+        assert d["candidate"]["asset_id"] == asset
+    assert d["rules_applied"]
 
 
-def test_stale_but_complete_asset_is_maintenance_extend():
-    result = run("qa_release_blockers")
-    assert result.change_type == "maintenance"
+def test_new_build_targets_a_shared_model_and_flags_sprawl():
+    _, d = plan("req_finance_gtn")
+    assert d["target_model_id"] in cat.CATALOG["models"]
+    assert d["flags"] and all("retir" in f["message"] or "consolidat" in f["message"] for f in d["flags"])
 
 
-def test_conflicting_copy_is_flagged_not_reused():
-    result = run("sc_late_deliveries")
-    flagged = {f["asset_id"] for f in result.flags}
-    assert "rpt_logistics_weekly" in flagged
+def test_migration_does_not_migrate_waste():
+    _, d = plan("req_migrate_xarelto")
+    tableau = [a["id"] for a in cat.CATALOG["assets"] if a["platform"] == "Tableau" and a["product_scope"] == "Xarelto"]
+    assert set(d["replaces"]) == set(tableau)
+    assert any("retire, do not migrate" in f["message"] for f in d["flags"])
 
 
-def test_freshness_curve():
-    assert freshness(10, "day") == 1.0
-    assert freshness(48, "day") == 0.5
-    assert freshness(72, "day") == 0.0
+def test_repair_lists_fixes():
+    _, d = plan("scn_repair_xarelto_mx")
+    assert d["change_type"] == "maintenance" and "owner" in d["reason"]
 
 
-def test_coverage_weights():
-    asset = {"measures": ["a"], "dimensions": ["x"], "grain": "day"}
-    value, det = coverage({"measures": ["a", "b"], "dimensions": ["x"], "grain": "day"}, asset)
-    assert value == pytest.approx(0.5 * 0.5 + 0.3 + 0.2)
-    assert det["measures_missing"] == ["b"]
+def test_scope_match():
+    asset = {"product_scope": "Eylea", "market_scope": "JP"}
+    assert scope_match(preset_intent("scn_reuse_eylea_jp"), asset, cat.CATALOG)[0] == 1.0
+    assert scope_match(preset_intent("req_finance_gtn"), asset, cat.CATALOG)[0] == 0.0
 
 
-def test_governance_score_full_and_empty():
-    full = {"conflicts": {}, "certified": True, "owner_status": "active", "tests_passing": True,
-            "last_review": "2026-10-01", "documented": True}
-    assert governance(full, TODAY)[0] == pytest.approx(1.0)
-    empty = {"conflicts": {"m": "x"}, "certified": False, "owner_status": "left", "tests_passing": False,
-             "last_review": "2020-01-01", "documented": False}
-    assert governance(empty, TODAY)[0] == 0.0
+def test_governance_is_relative_to_requested_kpis():
+    a = cat.asset_by_id("AST-0001")
+    with_conflict, _ = governance(a, {"measures": ["demand_forecast_accuracy"]})
+    without, _ = governance(a, {"measures": ["net_sales_growth"]})
+    assert without > with_conflict
+    assert freshness({"refresh_status": "failed"}) < freshness({"refresh_status": "healthy"})

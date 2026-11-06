@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from . import actions as act
 from . import catalog as cat
 from .graph import build_graph
 from .llm import get_llm
@@ -25,6 +26,30 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = None
     message: str = ""
     preset_id: str | None = None
+
+
+class ActionCreate(BaseModel):
+    title: str = Field(min_length=3, max_length=200)
+    kind: str = "business"
+    owner: str = Field(min_length=1, max_length=80)
+    due_date: str | None = None
+    reason: str = ""
+    asset_id: str | None = None
+    asset_name: str | None = None
+    key: str | None = None
+    verify: dict[str, Any] | None = None
+    conversation_id: str | None = None
+    by: str = "You"
+
+
+class ActionUpdate(BaseModel):
+    status: str | None = None
+    owner: str | None = None
+    due_date: str | None = None
+    blocker: str | None = None
+    outcome: str | None = None
+    verification: dict[str, Any] | None = None
+    by: str = "You"
 
 
 class ApprovalRequest(BaseModel):
@@ -85,6 +110,21 @@ async def catalog() -> dict[str, Any]:
     return cat.CATALOG
 
 
+@app.get("/api/requests")
+async def business_requests() -> list[dict[str, Any]]:
+    """The 150 synthetic business requests from the data pack."""
+    return cat.SHEETS.get("business_requests", [])
+
+
+@app.get("/api/datapack")
+async def datapack_summary() -> dict[str, Any]:
+    """What was loaded from the Bayer data pack."""
+    C = cat.CATALOG
+    return {"source": C.get("source"), "sheets": {k: len(v) for k, v in cat.SHEETS.items()},
+            "assets": len(C["assets"]), "models": len(C["models"]), "measures": len(C["measures"]),
+            "usage_window": C.get("usage_window"), "rules": C.get("rules")}
+
+
 @app.get("/api/graph")
 async def graph() -> dict[str, Any]:
     """Entities and relationships for the Estate Explorer, built from the live catalog."""
@@ -94,6 +134,62 @@ async def graph() -> dict[str, Any]:
 @app.get("/api/specs")
 async def specs(conversation_id: str | None = None) -> list[dict[str, Any]]:
     return await pipeline().store.list_artifacts("specs", conversation_id)
+
+
+@app.get("/api/actions")
+async def list_actions(status: str | None = None, kind: str | None = None, owner: str | None = None,
+                       conversation_id: str | None = None) -> dict[str, Any]:
+    items = await pipeline().store.list_artifacts("actions", conversation_id, limit=500)
+    summary = act.summary(items)
+    if status:
+        items = [a for a in items if a["status"] in status.split(",")]
+    if kind:
+        items = [a for a in items if a["kind"] == kind]
+    if owner:
+        items = [a for a in items if a["owner"] == owner]
+    return {"items": [act.view(a) for a in items], "summary": summary}
+
+
+@app.post("/api/actions", status_code=201)
+async def create_action(req: ActionCreate) -> dict[str, Any]:
+    store = pipeline().store
+    if req.key:
+        existing = await store.list_artifacts("actions", limit=500)
+        dup = next((a for a in existing if a.get("key") == req.key and a["status"] not in act.CLOSED), None)
+        if dup:
+            raise HTTPException(409, f"An open action already covers this: '{dup['title']}' ({dup['_id']}).")
+    run_id = None
+    if req.conversation_id:
+        conv = await store.get(req.conversation_id)
+        run_id = conv["runs"][-1]["id"] if conv and conv.get("runs") else None
+    try:
+        action = act.create(req.model_dump(exclude={"by", "conversation_id"}), req.by, req.conversation_id, run_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    await store.save_artifact("actions", action)
+    return act.view(action)
+
+
+@app.get("/api/actions/{action_id}")
+async def get_action(action_id: str) -> dict[str, Any]:
+    action = await pipeline().store.get_artifact("actions", action_id)
+    if not action:
+        raise HTTPException(404, "Action not found")
+    return act.view(action)
+
+
+@app.patch("/api/actions/{action_id}")
+async def update_action(action_id: str, req: ActionUpdate) -> dict[str, Any]:
+    store = pipeline().store
+    action = await store.get_artifact("actions", action_id)
+    if not action:
+        raise HTTPException(404, "Action not found")
+    try:
+        updated = act.apply_update(action, req.model_dump(exclude={"by"}, exclude_none=True), req.by)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    await store.save_artifact("actions", updated)
+    return act.view(updated)
 
 
 @app.get("/api/agent-runs")

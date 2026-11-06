@@ -1,157 +1,160 @@
 """Builds the Estate Explorer graph ("molecular view") from the live catalog.
 
-Entities: reports, measures, datasets, owners (people and data teams) and
-departments. Edges: usage, lineage, ownership, metric conflicts and overlaps
-between reports. Status, trust and flags reuse the governance scoring in
-decision.py, so the graph and the decision always agree.
+Entities: reports (assets), semantic models, KPIs (approved ones and their
+local, duplicate or conflicting variants), owners and workspaces.
+Edges: model supplies report, report uses KPI, variant duplicates or conflicts
+with the approved KPI, owner owns, lineage (derived from), model in workspace.
+Status, trust and flags reuse the governance scoring in decision.py, so the
+graph and the decisions always agree.
 """
 from __future__ import annotations
 
 import re
-from datetime import date
-from itertools import combinations
 from typing import Any
 
 from . import catalog as cat
-from .decision import THRESHOLDS, freshness, governance
+from .decision import FRESHNESS_BY_REFRESH, THRESHOLDS, governance
 
-DEPT_ID = lambda name: "dom_" + re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")  # noqa: E731
-PERSON_ID = lambda name: "p_" + re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")  # noqa: E731
+
+def _pid(name: str) -> str:
+    return "p_" + re.sub(r"[^a-z0-9]+", "_", (name or "unknown").lower()).strip("_")
 
 
 def _initials(name: str) -> str:
-    parts = [p for p in re.split(r"[\s.]+", name) if p and p[0].isalpha()]
+    parts = [p for p in re.split(r"[\s.()]+", name or "") if p and p[0].isalpha()]
     return "".join(p[0] for p in parts[:2]).upper() or "?"
 
 
-def _asset_status(a: dict[str, Any], gov: float, today: date) -> str:
+def _asset_status(a: dict[str, Any]) -> str:
     if a.get("conflicts"):
         return "conflict"
     if a.get("owner_status") != "active":
         return "orphaned"
-    reviewed = a.get("last_review")
-    if a.get("refresh_age_hours", 0) > 7 * 24 or (reviewed and (today - date.fromisoformat(reviewed)).days > THRESHOLDS["review_max_days"]):
+    if a.get("lifecycle") in ("candidate_retire", "legacy"):
         return "stale"
-    return "certified" if a.get("certified") else "uncertified"
+    return "certified" if a.get("endorsement") in ("certified", "promoted") else "uncertified"
 
 
-def build_graph(today: date | None = None) -> dict[str, Any]:
-    today = today or date.today()
+def build_graph() -> dict[str, Any]:
     C = cat.CATALOG
     entities: dict[str, dict[str, Any]] = {}
     edges: list[dict[str, str]] = []
+    kpi_index: dict[str, tuple[str, dict[str, Any] | None]] = {}  # kpi_id -> (measure_id, variant or None)
 
-    def edge(s: str, rel: str, t: str) -> None:
-        if s in entities and t in entities:
+    def edge(s: str | None, rel: str, t: str | None) -> None:
+        if s and t and s in entities and t in entities:
             edges.append({"s": s, "rel": rel, "t": t})
 
-    # Departments
-    for dept in sorted(set(cat.DATASET_DEPARTMENT.values())):
-        did = DEPT_ID(dept)
-        entities[did] = {"id": did, "uid": did, "type": "domain", "name": dept, "status": "active", "trust": 1.0,
-                         "updated": today.isoformat(), "summary": f"{dept} department at the plant.",
-                         "props": {"Datasets": str(sum(1 for d in cat.DATASET_DEPARTMENT.values() if d == dept))}, "flags": []}
+    # Workspaces
+    for wid, w in C["workspaces"].items():
+        entities[wid] = {"id": wid, "uid": wid, "type": "domain", "name": w["workspace_name"], "status": "active", "trust": 1.0,
+                         "updated": "", "summary": f"{w['platform']} workspace, {w['environment']}, {w['governance_mode'].replace('_', ' ')}.",
+                         "props": {"Scope": w["scope"], "Environment": w["environment"], "Governance": w["governance_mode"].replace("_", " "),
+                                   "Classification": w["classification"]}, "flags": []}
 
-    # Measures
+    # Owners
+    for oid, o in C["owners"].items():
+        entities[oid] = {"id": oid, "uid": oid, "type": "person", "name": o["owner_name"], "initials": _initials(o["owner_name"]),
+                         "status": "active" if o["status"] == "active" else "left", "trust": 1.0 if o["status"] == "active" else 0.0,
+                         "updated": "", "summary": f"{o['role']}, {o['scope']}.", "props": {"Role": o["role"], "Scope": o["scope"], "Status": o["status"]},
+                         "flags": [] if o["status"] == "active" else [{"sev": "warn", "title": "Inactive owner",
+                                                                       "text": "Reports still list this person as owner (RULE-003)."}]}
+
+    # KPIs: approved ones and their variants
     for mid, m in C["measures"].items():
-        entities[mid] = {
-            "id": mid, "uid": f"msr_{mid}", "type": "metric", "name": m["name"],
-            "status": "certified" if m["certified"] else "draft", "trust": 0.95 if m["certified"] else 0.5,
-            "updated": today.isoformat(), "summary": m["definition"],
-            "props": {"Measure ID": mid, "Formula": m["expression"], "Unit": m["unit"], "Default grain": m["default_grain"],
-                      "Source dataset": m["dataset"]},
-            "flags": [] if m["certified"] else [{"sev": "warn", "title": "Not certified", "text": "This measure has no approved definition."}],
-        }
+        if m["kpi_id"]:
+            kpi_index[m["kpi_id"]] = (mid, None)
+            entities[m["kpi_id"]] = {
+                "id": m["kpi_id"], "uid": m["kpi_id"], "type": "metric", "name": m["name"], "status": "certified", "trust": 1.0,
+                "updated": "", "summary": m["definition"],
+                "props": {"KPI": m["kpi_id"], "Domain": m["domain"], "Unit": m["unit"], "Frequency": "monthly",
+                          "Variants in use": str(len(m["variants"])), "Owner": m.get("owner") or "-"},
+                "flags": [{"sev": "warn", "title": f"{len(m['variants'])} unapproved variants",
+                           "text": ", ".join(v["name"] for v in m["variants"])}] if m["variants"] else [],
+            }
+        for v in m["variants"]:
+            kpi_index[v["kpi_id"]] = (mid, v)
+            conflict = v["status"] == "definition_conflict"
+            entities[v["kpi_id"]] = {
+                "id": v["kpi_id"], "uid": v["kpi_id"], "type": "metric", "name": v["name"],
+                "status": "conflict" if conflict else "draft", "trust": 0.2 if conflict else 0.5, "updated": "",
+                "summary": f"{v['status'].replace('_', ' ').capitalize()} of {m['name']} ({v['approval']}). Use {m['kpi_id']} instead.",
+                "props": {"KPI": v["kpi_id"], "Variant of": m["name"], "Definition status": v["status"].replace("_", " "),
+                          "Approval": v["approval"]},
+                "flags": [{"sev": "bad" if conflict else "warn",
+                           "title": "Conflicting definition" if conflict else "Unapproved variant",
+                           "text": f"Reports using it may show different numbers than {m['kpi_id']} (RULE-002)."}],
+            }
 
-    # Datasets and their owning teams
-    for dsid, d in C["datasets"].items():
-        tests_ok = d["tests_passed"] == d["tests_total"]
-        fresh = freshness(d["refresh_age_hours"], "day")
-        flags = []
-        if not tests_ok:
-            flags.append({"sev": "warn", "title": "Quality test failing",
-                          "text": f"{d['tests_total'] - d['tests_passed']} of {d['tests_total']} tests fail."})
-        if fresh < 1:
-            flags.append({"sev": "warn", "title": "Older than a day", "text": f"Last refreshed {d['refresh_age_hours']} h ago."})
-        entities[dsid] = {
-            "id": dsid, "uid": f"tbl_{dsid}", "type": "dataset", "name": dsid,
-            "status": "certified" if tests_ok else "uncertified",
-            "trust": round(0.6 * (d["tests_passed"] / max(d["tests_total"], 1)) + 0.4 * fresh, 2),
-            "updated": today.isoformat(), "summary": f"Source table {d['table']} with {d['rows']:,} rows.",
-            "props": {"Table": d["table"], "Rows": f"{d['rows']:,}", "Refreshed": f"{d['refresh_age_hours']} h ago",
-                      "Quality tests": f"{d['tests_passed']} / {d['tests_total']} passing", "Owner": d["owner"],
-                      "Columns": ", ".join(d["columns"])},
+    # Semantic models
+    for sid, s in C["models"].items():
+        flags = [{"sev": "bad" if i["severity"] == "high" else "warn", "title": f"{i['field'].replace('_', ' ')}: {i['value']}",
+                  "text": i["impact"]} for i in s["dq_issues"]]
+        entities[sid] = {
+            "id": sid, "uid": sid, "type": "dataset", "name": s["name"],
+            "status": "stale" if s["refresh_status"] == "failed" else ("certified" if s["endorsement"] != "none" else "uncertified"),
+            "trust": round(0.5 * FRESHNESS_BY_REFRESH.get(s["refresh_status"], 0.5)
+                           + 0.3 * {"good": 1, "partial": 0.5}.get(s["ai_readiness"], 0)
+                           + 0.2 * (s["endorsement"] != "none"), 2),
+            "updated": "", "summary": f"{s['model_type']} in {s['workspace']}. {len(s['assets'])} reports depend on it.",
+            "props": {"Model": sid, "Type": s["model_type"], "Workspace": s["workspace"], "Product scope": s["product_scope"],
+                      "Region scope": s["region_scope"], "Endorsement": s["endorsement"],
+                      "Refresh": f"{s['refresh_frequency']}, {s['refresh_status']}", "AI readiness": f"{s['ai_readiness']} ({s['ai_issue_pattern'].replace('_', ' ')})",
+                      "Tables / measures": f"{s['table_count']} / {s['measure_count']}", "Owner": s.get("owner") or "-"},
             "flags": flags,
         }
-
-    owners: dict[str, dict[str, Any]] = {}
-    for d in C["datasets"].values():
-        owners.setdefault(d["owner"], {"status": "active", "role": "Data team"})
-    for a in C["assets"]:
-        owners[a["owner"]] = {"status": "left" if a.get("owner_status") == "left" else "active", "role": "Report owner"}
-    for name, info in owners.items():
-        pid = PERSON_ID(name)
-        entities[pid] = {"id": pid, "uid": pid, "type": "person", "name": name, "initials": _initials(name),
-                         "status": info["status"], "trust": 1.0 if info["status"] == "active" else 0.0,
-                         "updated": today.isoformat(), "summary": f"{info['role']}.", "props": {"Role": info["role"]},
-                         "flags": [] if info["status"] == "active" else
-                         [{"sev": "warn", "title": "Left the company", "text": "Assets still list this person as owner."}]}
 
     # Reports
     for a in C["assets"]:
-        gov, checks = governance(a, today)
-        flags = [{"sev": "bad", "title": f"Conflicting definition: {C['measures'].get(m, {}).get('name', m)}", "text": why}
-                 for m, why in (a.get("conflicts") or {}).items()]
-        flags += [{"sev": "warn", "title": f"Governance check failed: {c.label}", "text": f"Weight {c.weight:.2f} of the governance score."}
-                  for c in checks if not c.passed and c.id != "definitions_match"]
-        entities[a["id"]] = {
-            "id": a["id"], "uid": a["id"], "type": "dashboard", "name": a["name"], "status": _asset_status(a, gov, today),
-            "trust": gov, "updated": a.get("last_review") or today.isoformat(), "views": a.get("views_90d", 0),
-            "summary": f"{a['workspace']}. {len(a['measures'])} measures, {a['grain']}ly grain." if a["grain"] != "day"
-                       else f"{a['workspace']}. {len(a['measures'])} measures, daily grain.",
-            "props": {"Workspace": a["workspace"], "Grain": a["grain"], "Views (90 days)": f"{a.get('views_90d', 0):,}",
-                      "Refreshed": f"{a.get('refresh_age_hours')} h ago", "Last review": a.get("last_review") or "Never",
-                      "Governance score": f"{gov:.2f}", "Owner": a["owner"],
-                      "Backup owner": a.get("backup_owner") or "None"},
+        gov, checks = governance(a)
+        flags = [{"sev": "bad", "title": "Conflicting KPI definition", "text": why} for why in a["conflicts"].values()]
+        flags += [{"sev": "warn", "title": "Unapproved KPI variant", "text": why} for why in a["variants"].values()]
+        flags += [{"sev": "bad" if s_["severity"] == "high" else "warn", "title": s_["code"].replace("_", " ").capitalize(),
+                   "text": f"{s_['status']}, detected by {s_['detected_by'].replace('_', ' ')}."}
+                  for s_ in a["signals"] if s_["status"] != "resolved"]
+        mig = a.get("migration") or {}
+        low_use = a["views_90d"] < THRESHOLDS["low_usage_views_90d"]
+        entity = {
+            "id": a["id"], "uid": a["id"], "type": "dashboard", "name": a["name"], "status": _asset_status(a), "trust": gov,
+            "updated": a.get("last_modified") or "", "views": a["views_90d"],
+            "summary": f"{a['platform']} {a['asset_type'].lower()} in {a.get('workspace')}, scope {a['product_scope']} / {a['market_scope']}.",
+            "props": {"Asset": a["id"], "Type": f"{a['platform']} {a['asset_type']}", "Product scope": a["product_scope"],
+                      "Market scope": a["market_scope"], "Views (90 days)": f"{a['views_90d']:,}", "Users (90 days)": f"{a['users_90d']:,}",
+                      "Lifecycle": a["lifecycle"].replace("_", " "), "Endorsement": a["endorsement"], "Delivery": (a.get("delivery_model") or "").replace("_", " "),
+                      "Semantic model": a.get("model_id") or "-", "Owner": f"{a['owner']} ({a['owner_status']})",
+                      "Governance score": f"{gov:.2f}", **({"Migration path": f"{mig['recommended_path_candidate']} → {mig['candidate_target_model_id']}"} if mig else {})},
             "flags": flags,
         }
+        if a["lifecycle"] == "candidate_retire" or (low_use and a["lifecycle"] != "active") or mig.get("recommended_path_candidate") == "RETIRE":
+            entity["action"] = f"Retire {a['name']}"
+        entities[a["id"]] = entity
+
+    # People that exist only as names (new reports created in this session)
+    for a in C["assets"]:
+        if not a.get("owner_id") and a.get("owner"):
+            pid = _pid(a["owner"])
+            entities.setdefault(pid, {"id": pid, "uid": pid, "type": "person", "name": a["owner"], "initials": _initials(a["owner"]),
+                                      "status": "active", "trust": 1.0, "updated": "", "summary": "Owner of reports created here.",
+                                      "props": {"Role": "Report owner"}, "flags": []})
 
     # Edges
     for mid, m in C["measures"].items():
-        edge(m["dataset"], "feeds", mid)
-        dept = cat.DATASET_DEPARTMENT.get(m["dataset"])
-        if dept:
-            edge(mid, "belongs_to", DEPT_ID(dept))
-    for dsid, d in C["datasets"].items():
-        edge(PERSON_ID(d["owner"]), "owns", dsid)
-    for r in C["relationships"]:
-        s, t = r["from"].split(".")[0], r["to"].split(".")[0]
-        if s != t:
-            edge(s, "joins", t)
+        for v in m["variants"]:
+            edge(v["kpi_id"], "conflicts_with" if v["status"] == "definition_conflict" else "duplicate_of", m["kpi_id"])
+        edge(m.get("owner_id"), "owns", m["kpi_id"])
+    for sid, s in C["models"].items():
+        edge(s["owner_id"], "owns", sid)
+        edge(sid, "belongs_to", s["workspace_id"])
     for a in C["assets"]:
-        for m in a["measures"]:
-            edge(a["id"], "uses", m)
-        for ds in a.get("datasets", []):
-            edge(ds, "sources", a["id"])
-        edge(PERSON_ID(a["owner"]), "owns", a["id"])
-        for m in (a.get("conflicts") or {}):
-            edge(a["id"], "conflicts_with", m)
+        edge(a.get("model_id"), "sources", a["id"])
+        edge(a.get("owner_id") or _pid(a.get("owner", "")), "owns", a["id"])
+        for k in a.get("kpis", []):
+            edge(a["id"], "uses", k)
+    for e in C["lineage"]:
+        if e["type"] in ("ASSET_TO_ASSET", "MODEL_TO_MODEL"):
+            edge(e["target"], "derived_from", e["source"])
 
-    # Overlapping reports: shared measures relative to the smaller report.
-    for a, b in combinations(C["assets"], 2):
-        shared = set(a["measures"]) & set(b["measures"])
-        if not shared or len(shared) / min(len(a["measures"]), len(b["measures"])) < 0.5:
-            continue
-        ga, gb = entities[a["id"]]["trust"], entities[b["id"]]["trust"]
-        weak, strong = (a, b) if ga < gb else (b, a)
-        if min(ga, gb) < THRESHOLDS["ungoverned_governance"] or entities[weak["id"]]["status"] in ("conflict", "orphaned"):
-            edge(weak["id"], "duplicate_of", strong["id"])
-            entities[weak["id"]]["flags"].append({"sev": "warn", "title": f"Overlaps {strong['name']}",
-                                                  "text": "Poorly governed overlap. Candidate for merge or retirement."})
-            entities[weak["id"]]["action"] = f"Merge into {strong['name']} or retire"
-        else:
-            edge(a["id"], "overlaps", b["id"])
-
-    focus = next((a["id"] for a in C["assets"] if a.get("certified")), next(iter(entities)))
+    # Land on the approved Net Sales KPI: its variants and the reports using them show the sprawl at a glance.
+    focus = C["measures"].get("net_sales", {}).get("kpi_id") or C["assets"][0]["id"]
     return {"entities": list(entities.values()), "edges": edges, "focus": focus,
-            "counts": {"reports": len(C["assets"]), "measures": len(C["measures"]), "datasets": len(C["datasets"])}}
+            "counts": {"reports": len(C["assets"]), "measures": len(C["measures"]), "models": len(C["models"])}}

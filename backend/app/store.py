@@ -6,9 +6,11 @@ Collections
   evidence             verified evidence records
   specs                DashboardSpec versions with status draft / approved / rejected
   agent_runs           audit log: agent, mode, model, steps, duration
-  catalog_measures, catalog_dimensions, catalog_datasets, catalog_assets, catalog_relationships
-                       the analytics catalog (seeded from app/data/catalog.json when empty)
-  presets              department presets
+  actions              follow-up actions with owner, due date, status history and verification
+  catalog_<key>        the analytics catalog built from the Bayer data pack: measures, dimensions,
+                       models, assets, owners, workspaces, products, markets, lineage, rules
+  datapack_<sheet>     every table sheet of the workbook, row for row (raw, for querying)
+  presets              the 10 Bayer business requests plus estate scenarios
 """
 from __future__ import annotations
 
@@ -20,8 +22,9 @@ from .settings import settings
 
 log = logging.getLogger(__name__)
 
-ARTIFACTS = ("intents", "evidence", "specs", "agent_runs")
-CATALOG_MAPS = ("measures", "dimensions", "datasets")
+ARTIFACTS = ("intents", "evidence", "specs", "agent_runs", "actions")
+CATALOG_MAPS = ("measures", "dimensions", "models", "owners", "workspaces", "products", "markets")
+CATALOG_LISTS = ("assets", "lineage", "rules")
 
 
 class MemoryStore:
@@ -53,6 +56,13 @@ class MemoryStore:
         if doc_id in self.artifacts[kind]:
             self.artifacts[kind][doc_id].update(copy.deepcopy(fields))
 
+    async def get_artifact(self, kind: str, doc_id: str) -> dict[str, Any] | None:
+        doc = self.artifacts[kind].get(doc_id)
+        return copy.deepcopy(doc) if doc else None
+
+    async def count_artifacts(self, kind: str) -> int:
+        return len(self.artifacts[kind])
+
     async def list_artifacts(self, kind: str, conv_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         docs = [d for d in self.artifacts[kind].values() if conv_id is None or d.get("conversation_id") == conv_id]
         return copy.deepcopy(sorted(docs, key=lambda d: d.get("created_at", ""), reverse=True)[:limit])
@@ -64,9 +74,11 @@ class MemoryStore:
     async def load_presets(self) -> list[dict[str, Any]] | None:
         return copy.deepcopy(self.presets)
 
-    async def seed_catalog(self, catalog: dict[str, Any], presets: list[dict[str, Any]], reset: bool = False) -> None:
+    async def seed_datapack(self, sheets: dict[str, list[dict[str, Any]]], catalog: dict[str, Any],
+                            presets: list[dict[str, Any]], reset: bool = False) -> None:
+        # Raw sheets stay in the workbook cache; only the catalog is kept here.
         if reset or self.catalog is None:
-            self.catalog = copy.deepcopy({k: v for k, v in catalog.items() if not k.startswith("_")})
+            self.catalog = copy.deepcopy(catalog)
             self.presets = copy.deepcopy(presets)
 
     async def upsert_asset(self, asset: dict[str, Any]) -> None:
@@ -79,9 +91,9 @@ class MemoryStore:
                 return
         assets.append(copy.deepcopy(asset))
 
-    async def update_dataset(self, dataset_id: str, fields: dict[str, Any]) -> None:
-        if self.catalog and dataset_id in self.catalog["datasets"]:
-            self.catalog["datasets"][dataset_id].update(fields)
+    async def update_model(self, model_id: str, fields: dict[str, Any]) -> None:
+        if self.catalog and model_id in self.catalog["models"]:
+            self.catalog["models"][model_id].update(fields)
 
 
 class MongoStore:
@@ -106,6 +118,8 @@ class MongoStore:
         for kind in ARTIFACTS:
             await self.db[kind].create_index([("conversation_id", 1), ("created_at", -1)])
         await self.db["specs"].create_index([("status", 1)])
+        await self.db["actions"].create_index([("status", 1), ("due_date", 1)])
+        await self.db["actions"].create_index([("owner", 1)])
 
     # conversations
     async def get(self, conv_id: str) -> dict[str, Any] | None:
@@ -125,6 +139,12 @@ class MongoStore:
     async def update_artifact(self, kind: str, doc_id: str, fields: dict[str, Any]) -> None:
         await self.db[kind].update_one({"_id": doc_id}, {"$set": fields})
 
+    async def get_artifact(self, kind: str, doc_id: str) -> dict[str, Any] | None:
+        return await self.db[kind].find_one({"_id": doc_id})
+
+    async def count_artifacts(self, kind: str) -> int:
+        return await self.db[kind].count_documents({})
+
     async def list_artifacts(self, kind: str, conv_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         query = {"conversation_id": conv_id} if conv_id else {}
         cursor = self.db[kind].find(query).sort("created_at", -1).limit(limit)
@@ -137,30 +157,49 @@ class MongoStore:
         catalog: dict[str, Any] = {}
         for key in CATALOG_MAPS:
             catalog[key] = {d.pop("_id"): d async for d in self.db[f"catalog_{key}"].find({})}
-        catalog["assets"] = [{k: v for k, v in d.items() if k not in ("_id", "order")}
-                             async for d in self.db["catalog_assets"].find({}).sort("order", 1)]
-        catalog["relationships"] = [{k: v for k, v in d.items() if k != "_id"}
-                                    async for d in self.db["catalog_relationships"].find({}).sort("_id", 1)]
+        for key in CATALOG_LISTS:
+            catalog[key] = [{k: v for k, v in d.items() if k not in ("_id", "order")}
+                            async for d in self.db[f"catalog_{key}"].find({}).sort("order", 1)]
+        meta = await self.db["catalog_meta"].find_one({"_id": "meta"}) or {}
+        catalog.update({k: v for k, v in meta.items() if k != "_id"})
         return catalog
 
     async def load_presets(self) -> list[dict[str, Any]] | None:
         docs = [d async for d in self.db["presets"].find({}).sort("order", 1)]
         return [{k: v for k, v in d.items() if k not in ("_id", "order")} for d in docs] or None
 
-    async def seed_catalog(self, catalog: dict[str, Any], presets: list[dict[str, Any]], reset: bool = False) -> None:
+    async def seed_datapack(self, sheets: dict[str, list[dict[str, Any]]], catalog: dict[str, Any],
+                            presets: list[dict[str, Any]], reset: bool = False) -> None:
+        """Write raw sheets, the derived catalog and presets. Skips if already seeded unless reset."""
         if not reset and await self.db["catalog_assets"].count_documents({}) > 0:
-            return
+            meta = await self.db["catalog_meta"].find_one({"_id": "meta"}) or {}
+            if meta.get("schema") == catalog.get("schema"):
+                return
+            # An older catalog (for example the earlier fictional plant catalog) would break the app: replace it.
+            log.warning("Catalog in MongoDB has schema %s, expected %s. Reloading it from the data pack.",
+                        meta.get("schema"), catalog.get("schema"))
+        for old in ("catalog_datasets", "catalog_relationships"):   # from the earlier plant catalog
+            await self.db[old].delete_many({})
+        for name, rows in sheets.items():
+            col = self.db[f"datapack_{name}"]
+            await col.delete_many({})
+            if rows:
+                await col.insert_many([dict(r) for r in rows])
         for key in CATALOG_MAPS:
             col = self.db[f"catalog_{key}"]
             await col.delete_many({})
-            await col.insert_many([{"_id": k, **v} for k, v in catalog[key].items()])
-        await self.db["catalog_assets"].delete_many({})
-        await self.db["catalog_assets"].insert_many([{"_id": a["id"], "order": i, **a} for i, a in enumerate(catalog["assets"])])
-        await self.db["catalog_relationships"].delete_many({})
-        await self.db["catalog_relationships"].insert_many([{"_id": i, **r} for i, r in enumerate(catalog["relationships"])])
+            if catalog[key]:
+                await col.insert_many([{"_id": k, **v} for k, v in catalog[key].items()])
+        for key in CATALOG_LISTS:
+            col = self.db[f"catalog_{key}"]
+            await col.delete_many({})
+            if catalog[key]:
+                await col.insert_many([{"_id": r.get("id", i), "order": i, **r} for i, r in enumerate(catalog[key])])
+        await self.db["catalog_meta"].replace_one(
+            {"_id": "meta"}, {"_id": "meta", **{k: v for k, v in catalog.items() if k not in CATALOG_MAPS + CATALOG_LISTS}}, upsert=True)
         await self.db["presets"].delete_many({})
         await self.db["presets"].insert_many([{"_id": p["id"], "order": i, **p} for i, p in enumerate(presets)])
-        log.info("Seeded MongoDB catalog: %d assets, %d measures", len(catalog["assets"]), len(catalog["measures"]))
+        log.info("Seeded MongoDB from the data pack: %d sheets, %d assets", len(sheets), len(catalog["assets"]))
 
     async def upsert_asset(self, asset: dict[str, Any]) -> None:
         # Keep the original position of existing reports; new ones go last.
@@ -169,8 +208,8 @@ class MongoStore:
             {"$set": {k: v for k, v in asset.items() if k != "order"}, "$setOnInsert": {"order": 10_000}},
             upsert=True)
 
-    async def update_dataset(self, dataset_id: str, fields: dict[str, Any]) -> None:
-        await self.db["catalog_datasets"].update_one({"_id": dataset_id}, {"$set": fields})
+    async def update_model(self, model_id: str, fields: dict[str, Any]) -> None:
+        await self.db["catalog_models"].update_one({"_id": model_id}, {"$set": fields})
 
 
 Store = MemoryStore | MongoStore
