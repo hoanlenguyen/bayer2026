@@ -32,7 +32,7 @@ export default function App() {
       window.removeEventListener("open-entity", onOpen);
     };
   }, []);
-
+  console.log('clg')
   return (
     <div className={`app app-${page}`}>
       <TopBar
