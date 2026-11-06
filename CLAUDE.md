@@ -96,8 +96,11 @@ Each agent has `run_llm` (OpenAI) and `run_rules` (offline). If the model fails 
 ```
 materials/                 Bayer data pack (committed)
 frontend/  React + TypeScript + Vite
-  #ask       chat, 10 Bayer requests + 4 estate scenarios, live flow panel with previews
-  #explorer  Estate Explorer: reports, models, KPIs (+variants), owners, workspaces from GET /api/graph
+  #ask       Investigations: research workbench (Divin's design). Left: existing analyses; centre: compatibility
+             view (KPIs, scope, usage) with scores; right: evidence inspector (fit, evidence, spec, decision);
+             decision dock with approve/reject; expandable processing record (flow panel). Stays mounted
+             when other pages open. Start screen: 10 Bayer requests + 4 estate scenarios.
+  #explorer  Asset index (Estate Explorer): reports, models, KPIs (+variants), owners, workspaces from GET /api/graph
   #actions   action tracker board
 backend/   Python 3.12+, FastAPI
   app/datapack.py      workbook → catalog, presets, scenarios
@@ -138,6 +141,7 @@ python -m app.load_datapack          # optional: load into MongoDB (needs MONGOD
 uvicorn app.main:app --reload --port 8000
 pytest                               # 41 tests
 cd frontend && npm install && npm run dev
+npm run test:workbench               # renders real backend SSE events through the workbench (28 tests)
 ```
 
 ## Conventions

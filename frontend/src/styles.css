@@ -473,8 +473,6 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 }
 
 /* ===================== Data pack additions ===================== */
-.preset-heading { margin: 6px 0 -4px; font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
-.preset-heading .muted { font-weight: 400; }
 .rule-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .d-repair { color: var(--warn); background: var(--warn-soft); }
 .d-consolidate { color: var(--t-dashboard); background: color-mix(in srgb, var(--t-dashboard) 14%, transparent); }

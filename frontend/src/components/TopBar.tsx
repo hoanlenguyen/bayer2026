@@ -34,8 +34,8 @@ export function TopBar({ page, onPick, activeActions }: Props) {
           Analytics Manager
         </a>
         <nav className="app-nav" aria-label="Main">
-          <a href="#ask" aria-current={page === "ask" ? "page" : undefined}>Ask</a>
-          <a href="#explorer" aria-current={page === "explorer" ? "page" : undefined}>Estate Explorer</a>
+          <a href="#ask" aria-current={page === "ask" ? "page" : undefined}>Investigations</a>
+          <a href="#explorer" aria-current={page === "explorer" ? "page" : undefined}>Asset index</a>
           <a href="#actions" aria-current={page === "actions" ? "page" : undefined}>
             Actions{activeActions ? <span className="nav-count" aria-label={`${activeActions} active`}>{activeActions}</span> : null}
           </a>
@@ -78,7 +78,7 @@ export function TopBar({ page, onPick, activeActions }: Props) {
             </ul>
           )}
         </div>}
-        <span className="sample-tag" title="All entities on this page are fictional sample data">Sample data</span>
+        <span className="sample-tag" title="Synthetic Bayer Pharmaceuticals × Since AI data pack">Synthetic data</span>
       </div>
     </header>
   );

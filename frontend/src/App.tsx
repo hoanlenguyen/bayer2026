@@ -6,7 +6,11 @@ import { AskPage } from "./pages/AskPage";
 import { ExplorerPage } from "./pages/ExplorerPage";
 
 const pageFromHash = (): Page =>
-  window.location.hash.startsWith("#explorer") ? "explorer" : window.location.hash.startsWith("#actions") ? "actions" : "ask";
+  window.location.hash.startsWith("#explorer")
+    ? "explorer"
+    : window.location.hash.startsWith("#actions")
+      ? "actions"
+      : "ask";
 
 export default function App() {
   const [page, setPage] = useState<Page>(pageFromHash);
@@ -33,14 +37,26 @@ export default function App() {
     };
   }, []);
   console.log('clg')
+
+  useEffect(() => {
+    if (page === "ask") document.title = "Investigations · Analytics Manager";
+    if (page === "actions") document.title = "Actions · Analytics Manager";
+  }, [page]);
+
   return (
     <div className={`app app-${page}`}>
       <TopBar
         page={page}
-        onPick={(id) => { setFocusRequest(id); window.location.hash = "#explorer"; }}
+        onPick={(id) => {
+          setFocusRequest(id);
+          window.location.hash = "#explorer";
+        }}
         activeActions={activeActions}
       />
-      {page === "ask" && <AskPage onActionsChanged={refreshActions} />}
+      {/* Investigations stay mounted so the active session survives a visit to the asset index. */}
+      <div hidden={page !== "ask"}>
+        <AskPage onActionsChanged={refreshActions} />
+      </div>
       {page === "explorer" && <ExplorerPage focusRequest={focusRequest} />}
       {page === "actions" && <ActionsPage onChanged={refreshActions} />}
     </div>
