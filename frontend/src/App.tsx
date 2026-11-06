@@ -1,25 +1,33 @@
 import { useEffect, useState } from "react";
 import { Sidebar, type Page } from "./components/Sidebar";
 import { AskPage } from "./pages/AskPage";
+import { CalaGraphPage } from "./pages/CalaGraphPage";
 import { ExplorerPage } from "./pages/ExplorerPage";
 
-const pageFromHash = (): Page => (window.location.hash.startsWith("#explorer") ? "explorer" : "ask");
+const pageFromLocation = (): Page => {
+  if (window.location.pathname.replace(/\/+$/, "") === "/cala-graph") return "cala-graph";
+  return window.location.hash.startsWith("#explorer") ? "explorer" : "ask";
+};
 
 export default function App() {
-  const [page, setPage] = useState<Page>(pageFromHash);
+  const [page, setPage] = useState<Page>(pageFromLocation);
   const [focusRequest, setFocusRequest] = useState<string | null>(null);
 
   useEffect(() => {
-    const onHash = () => setPage(pageFromHash());
+    const onNavigate = () => setPage(pageFromLocation());
     // Other pages can ask to open an entity: window.dispatchEvent(new CustomEvent("open-entity", { detail: id }))
     const onOpen = (e: Event) => {
       setFocusRequest((e as CustomEvent<string>).detail);
-      window.location.hash = "#explorer";
+      // Set the path too: a hash change alone would stay on /cala-graph.
+      history.pushState(null, "", "/#explorer");
+      onNavigate();
     };
-    window.addEventListener("hashchange", onHash);
+    window.addEventListener("hashchange", onNavigate);
+    window.addEventListener("popstate", onNavigate);
     window.addEventListener("open-entity", onOpen);
     return () => {
-      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener("hashchange", onNavigate);
+      window.removeEventListener("popstate", onNavigate);
       window.removeEventListener("open-entity", onOpen);
     };
   }, []);
@@ -28,7 +36,9 @@ export default function App() {
     <div className={`app app-${page}`}>
       <Sidebar page={page} />
       <div className="app-main">
-        {page === "ask" ? <AskPage /> : <ExplorerPage focusRequest={focusRequest} />}
+        {page === "ask" && <AskPage />}
+        {page === "explorer" && <ExplorerPage focusRequest={focusRequest} />}
+        {page === "cala-graph" && <CalaGraphPage />}
       </div>
     </div>
   );

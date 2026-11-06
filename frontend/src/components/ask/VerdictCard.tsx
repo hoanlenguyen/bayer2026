@@ -14,6 +14,10 @@ const VERDICTS = {
   extend: { tag: "Extend", title: "Extend an existing report", tone: "accent" },
   maintenance: { tag: "Extend", title: "Fix the refresh schedule, no new report", tone: "accent" },
   create: { tag: "Create", title: "Build a new report", tone: "accent" },
+  repair: { tag: "Repair", title: "Repair the existing report, no new report", tone: "accent" },
+  consolidate: { tag: "Consolidate", title: "Merge the overlapping reports into one", tone: "accent" },
+  migrate: { tag: "Migrate", title: "Rebuild this report in Power BI", tone: "accent" },
+  new_build: { tag: "New build", title: "Build a new report", tone: "accent" },
   not_feasible: { tag: "Not feasible", title: "This can't be answered with today's data", tone: "bad" },
 } as const;
 
@@ -48,8 +52,12 @@ export function VerdictCard({ stages, catalog, busy, onApprove }: Props) {
   if (!stage || stage.status !== "done") return null;
 
   const d = stage.data;
-  const v = d.change_type === "maintenance" ? VERDICTS.maintenance : VERDICTS[d.decision as keyof typeof VERDICTS];
+  const v = d.decision === "extend" && d.change_type === "maintenance"
+    ? VERDICTS.maintenance
+    : VERDICTS[d.decision as keyof typeof VERDICTS] ?? { tag: String(d.decision), title: stage.summary, tone: "accent" as const };
   const c: Candidate | null = d.candidate ?? null;
+  // On a new build the candidate is only the closest old report, not the report being built.
+  const building = d.decision === "new_build" || d.decision === "create";
   const t = d.thresholds ?? {};
 
   const asset = stages.deliver?.data?.asset;
@@ -59,14 +67,14 @@ export function VerdictCard({ stages, catalog, busy, onApprove }: Props) {
   const registered = stages.register?.status === "done" ? stages.register.data : null;
   const files: number | null = stages.render?.status === "done" ? stages.render.data.files.length : null;
 
-  const reportName: string | null = asset?.name ?? c?.name ?? spec?.name ?? null;
+  const reportName: string | null = asset?.name ?? (building ? spec?.name : c?.name ?? spec?.name) ?? null;
   const owner: string | null = asset?.owner ?? spec?.owner ?? null;
 
-  const missing = c
+  const missing = c && !building
     ? [
         ...c.measures_missing.map((m) => catalog?.measures[m]?.name ?? m),
-        ...c.dimensions_missing.map((x) => catalog?.dimensions[x]?.name ?? x),
-        ...(c.grain_supported ? [] : ["Finer time grain"]),
+        ...(c.dimensions_missing ?? []).map((x) => catalog?.dimensions[x]?.name ?? x),
+        ...(c.grain_supported === false ? ["Finer time grain"] : []),
       ]
     : [];
   const unavailable: string[] = d.decision === "not_feasible"
@@ -94,13 +102,17 @@ export function VerdictCard({ stages, catalog, busy, onApprove }: Props) {
         )}
       </header>
 
+      {building && c && (
+        <p className="muted verdict-note">Closest existing report, which can't be reused: <strong>{c.name}</strong></p>
+      )}
+
       {c ? (
         <div className="vscores">
-          <ScoreMeter label="Coverage" hint="Has the numbers you asked for" value={c.coverage} target={t.reuse_coverage ?? 0.9} floor={t.extend_min_coverage ?? 0.6} />
+          <ScoreMeter label="Coverage" hint="Has the numbers you asked for" value={c.coverage} target={t.reuse_coverage ?? 0.9} floor={t.consolidate_min_coverage ?? t.extend_min_coverage ?? 0.6} />
           <ScoreMeter label="Freshness" hint="Data is recent enough" value={c.freshness} target={t.reuse_freshness ?? 0.9} floor={0.6} />
-          <ScoreMeter label="Governance" hint="Certified, owned and reviewed" value={c.governance} target={t.min_governance ?? 0.8} floor={t.ungoverned_governance ?? 0.6} />
+          <ScoreMeter label="Governance" hint="Certified, owned and reviewed" value={c.governance} target={t.reuse_governance ?? t.min_governance ?? 0.8} floor={t.consolidate_governance ?? t.ungoverned_governance ?? 0.6} />
         </div>
-      ) : d.decision === "create" && (
+      ) : building && (
         <p className="muted verdict-note">No existing report has these numbers, so reuse is not possible.</p>
       )}
 

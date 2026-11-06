@@ -1,8 +1,8 @@
-/* Face: Clean (white sidebar, grey content, flat cards), keeping the project's teal accent and IBM Plex. Decisions are in DESIGN.md. */
+/* Face: Clean (white sidebar, #f7f7f7 content, flat cards), with #232f3f as the main colour and IBM Plex. Decisions are in DESIGN.md. */
 :root {
-  --bg: #f3f6f6; --surface: #ffffff; --surface-2: #edf2f2; --line: #dfe6e6; --line-strong: #aebcbd;
-  --item-hover: #f3f6f6; --selected: #e6eded; --button-hover: #f0f4f4;
-  --fg: #14202a; --muted: #54666f; --accent: #0b7566; --accent-hover: #095f53; --accent-fg: #ffffff; --accent-soft: #d8eeea;
+  --bg: #f7f7f7; --surface: #ffffff; --surface-2: #eeeff1; --line: #e2e4e7; --line-strong: #b3b8bf;
+  --item-hover: #f3f4f5; --selected: #e9ebee; --button-hover: #f1f2f4;
+  --fg: #232f3f; --muted: #5a6573; --accent: #232f3f; --accent-hover: #18212d; --accent-fg: #ffffff; --accent-soft: #e4e7eb;
   --ok: #1a7a3c; --ok-soft: #e0f2e6; --warn: #985600; --warn-soft: #fbeed6; --bad: #b42318; --bad-soft: #fbe4e1;
   --t-metric: #6a4cc0; --t-dashboard: #2360b2; --t-dataset: #0b7566; --t-source: #7a6950;
   --t-person: #bf5419; --t-glossary: #ad336b; --t-domain: #5b781b; --on-node: #ffffff;
@@ -13,9 +13,9 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0e1417; --surface: #141c20; --surface-2: #1a2429; --line: #283439; --line-strong: #4a5a61;
-    --item-hover: #1a2429; --selected: #24313a; --button-hover: #1f2b31;
-    --fg: #e3eaec; --muted: #94a5ac; --accent: #43c2a9; --accent-hover: #5ad2ba; --accent-fg: #062520; --accent-soft: #15362f;
+    --bg: #151c26; --surface: #1b2430; --surface-2: #232f3f; --line: #2f3c4e; --line-strong: #4d5c70;
+    --item-hover: #232f3f; --selected: #2c3a4d; --button-hover: #273446;
+    --fg: #e6eaef; --muted: #9aa7b6; --accent: #aebccf; --accent-hover: #c4d0df; --accent-fg: #141b24; --accent-soft: #2a3647;
     --ok: #5ccb8a; --ok-soft: #173325; --warn: #e6a640; --warn-soft: #382a12; --bad: #f2776b; --bad-soft: #3d1c19;
     --t-metric: #a88ff2; --t-dashboard: #6fa8f2; --t-dataset: #43c2a9; --t-source: #bba98d;
     --t-person: #f29b60; --t-glossary: #ee82b3; --t-domain: #a8c65c; --on-node: #0e1417;
@@ -23,9 +23,9 @@
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0e1417; --surface: #141c20; --surface-2: #1a2429; --line: #283439; --line-strong: #4a5a61;
-  --item-hover: #1a2429; --selected: #24313a; --button-hover: #1f2b31;
-  --fg: #e3eaec; --muted: #94a5ac; --accent: #43c2a9; --accent-hover: #5ad2ba; --accent-fg: #062520; --accent-soft: #15362f;
+  --bg: #151c26; --surface: #1b2430; --surface-2: #232f3f; --line: #2f3c4e; --line-strong: #4d5c70;
+  --item-hover: #232f3f; --selected: #2c3a4d; --button-hover: #273446;
+  --fg: #e6eaef; --muted: #9aa7b6; --accent: #aebccf; --accent-hover: #c4d0df; --accent-fg: #141b24; --accent-soft: #2a3647;
   --ok: #5ccb8a; --ok-soft: #173325; --warn: #e6a640; --warn-soft: #382a12; --bad: #f2776b; --bad-soft: #3d1c19;
   --t-metric: #a88ff2; --t-dashboard: #6fa8f2; --t-dataset: #43c2a9; --t-source: #bba98d;
   --t-person: #f29b60; --t-glossary: #ee82b3; --t-domain: #a8c65c; --on-node: #0e1417;
@@ -277,6 +277,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .inline-link:hover { text-decoration: underline; }
 
 .page { max-width: 1360px; margin: 0 auto; padding: 16px var(--pad-x) 32px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.page > h1 { margin: 0; font-size: 24px; line-height: 1.25; font-weight: 600; letter-spacing: -0.015em; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
 .tabs button { border: 0; background: none; padding: 10px 12px; cursor: pointer; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
@@ -410,6 +411,20 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .fgroup h4 { margin: 0; font-size: 13px; font-weight: 600; }
 .insp-flags { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
 .insp-flags li { display: flex; gap: 8px; align-items: baseline; }
+
+/* ===================== Knowledge graph (/cala-graph) ===================== */
+.kg-page { position: relative; }
+.kg-status { margin: 0; padding: 48px 24px; text-align: center; color: var(--muted); }
+.kg { position: relative; height: 100dvh; min-height: 520px; overflow: hidden;
+  --kg-dot: #6b6360; --kg-line: rgb(107 99 96 / 0.22); --kg-line-far: rgb(107 99 96 / 0.07); --kg-dot-hover: rgb(238 90 100 / 0.6); --kg-dot-linked: rgb(240 178 62 / 0.9); --kg-tip-bg: rgb(60 56 53 / 0.88); --kg-line-hover: rgb(107 99 96 / 0.7); }
+.kg-canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.kg-card { position: absolute; right: 48px; bottom: 104px; max-width: calc(100% - 32px); padding: 8px 16px; background: var(--surface); border-radius: var(--radius); font-size: 13px; line-height: 1.25; pointer-events: none; }
+.kg-card p { margin: 0; overflow-wrap: anywhere; }
+.kg-card-title { font-weight: 600; }
+@media (max-width: 768px) {
+  .kg { height: calc(100dvh - 57px); } /* 56px bar plus its 1px border */
+  .kg-card { right: 16px; bottom: 16px; }
+}
 
 /* ===================== Narrower screens ===================== */
 @media (max-width: 1180px) {

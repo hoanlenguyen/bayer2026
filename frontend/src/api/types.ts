@@ -1,9 +1,10 @@
 export type StageId =
-  | "intent" | "discovery" | "governance" | "decision" | "deliver"
+  | "intent" | "discovery" | "governance" | "decision" | "actions" | "deliver"
   | "evidence" | "spec" | "approval" | "render" | "register";
 
 export type StageStatus = "pending" | "running" | "waiting" | "done" | "rejected";
-export type DecisionType = "reuse" | "extend" | "create" | "not_feasible";
+// extend and create come from the backend before the Bayer data pack; the rest from the data pack version.
+export type DecisionType = "reuse" | "repair" | "consolidate" | "migrate" | "new_build" | "extend" | "create" | "not_feasible";
 
 export interface Preset {
   id: string;
@@ -13,7 +14,16 @@ export interface Preset {
   decision: string;
   measures: string[];
   dimensions: string[];
-  grain: string;
+  grain?: string;
+}
+
+export interface ActionProposal {
+  key: string;
+  kind: "business" | "maintenance";
+  title: string;
+  reason: string;
+  owner: string;
+  due_date: string;
 }
 
 export interface StageEvent {
@@ -59,15 +69,17 @@ export interface CatalogMeta {
 export interface Candidate {
   asset_id: string;
   name: string;
+  platform?: string;
+  scope_note?: string;
   coverage: number;
   freshness: number;
   governance: number;
   measures_found: string[];
   measures_missing: string[];
-  dimensions_found: string[];
-  dimensions_missing: string[];
-  grain_supported: boolean;
-  gates_failed: string[];
+  dimensions_found?: string[];
+  dimensions_missing?: string[];
+  grain_supported?: boolean;
+  gates_failed?: string[];
   gates_pass: boolean;
   checks: { id: string; label: string; passed: boolean; weight: number }[];
 }

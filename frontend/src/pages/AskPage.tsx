@@ -15,8 +15,6 @@ interface ChatMessage {
 
 type ConvState = "idle" | "clarifying" | "awaiting_approval";
 
-const DEPARTMENTS = ["All", "Production", "Quality", "Supply chain", "HR", "Finance", "IT"];
-
 /** Renders **bold** segments; everything else is plain text. */
 function RichText({ text }: { text: string }) {
   const parts = text.split(/\*\*(.+?)\*\*/g);
@@ -142,6 +140,7 @@ export function AskPage() {
     setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null);
   };
 
+  const departments = useMemo(() => ["All", ...new Set(presets.map((p) => p.department))], [presets]);
   const shownPresets = useMemo(() => presets.filter((p) => dept === "All" || p.department === dept), [presets, dept]);
   const lastId = messages.length ? messages[messages.length - 1].id : -1;
   const runningStage = (Object.values(stages) as StageEvent[]).find((s) => s.status === "running")?.stage;
@@ -163,7 +162,7 @@ export function AskPage() {
           <div className="starters-head">
             <h2 id="starters-title">Common questions</h2>
             <div className="dept-filter" role="group" aria-label="Filter questions by department">
-              {DEPARTMENTS.map((d) => (
+              {departments.map((d) => (
                 <button key={d} type="button" aria-pressed={dept === d} onClick={() => setDept(d)}>{d}</button>
               ))}
             </div>

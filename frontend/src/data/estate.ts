@@ -2,13 +2,13 @@
 import type { Edge, Entity, EntityType, RelationType, Status } from "./types";
 
 export const TYPES: Record<EntityType, { label: string; plural: string; r: number; glyph: string | null }> = {
-  metric: { label: "Measure", plural: "Measures", r: 15, glyph: "M" },
-  dashboard: { label: "Report", plural: "Reports", r: 14, glyph: "R" },
-  dataset: { label: "Dataset", plural: "Datasets", r: 13, glyph: "DS" },
+  metric: { label: "KPI", plural: "KPIs", r: 14, glyph: "K" },
+  dashboard: { label: "Report", plural: "Reports", r: 13, glyph: "R" },
+  dataset: { label: "Semantic model", plural: "Semantic models", r: 15, glyph: "SM" },
   source: { label: "Source system", plural: "Source systems", r: 12, glyph: "SS" },
   person: { label: "Owner", plural: "Owners", r: 12, glyph: null },
   glossary: { label: "Glossary term", plural: "Glossary terms", r: 12, glyph: "G" },
-  domain: { label: "Department", plural: "Departments", r: 13, glyph: "DP" },
+  domain: { label: "Workspace", plural: "Workspaces", r: 13, glyph: "WS" },
 };
 
 export const STATUS: Record<Status, { label: string; tone: "ok" | "warn" | "bad" | "neutral" }> = {
@@ -44,14 +44,14 @@ export const ENTITIES: Entity[] = [];
 export const EDGES: Edge[] = [];
 
 export const PROV: Record<EntityType, (e: Entity) => [string, string, string][]> = {
-  metric: (e) => [["Semantic layer", `catalog_measures / ${e.id}`, `Loaded ${e.updated}`]],
+  metric: (e) => [["Bayer data pack", `KPI_Catalog / ${e.id}`, "Synthetic"]],
   dashboard: (e) => [
-    ["BI tenant scan", "Workspace scanner (sample catalog)", `Reviewed ${e.updated}`],
+    ["Bayer data pack", "Analytics_Assets, Asset_Usage, Governance_Signals, Migration_Backlog", `Modified ${e.updated || "–"}`],
     ["Governance score", "decision.py, same rules as the Ask flow", "Computed on load"],
   ],
-  dataset: () => [["Data catalog", "catalog_datasets: rows, refresh age, quality tests", "Computed on load"]],
+  dataset: () => [["Bayer data pack", "Semantic_Models, Data_Quality, Lineage_Edges", "Synthetic"]],
   source: () => [["Integration registry", "Connector inventory", "Computed on load"]],
-  person: () => [["Catalog owners", "Report and dataset owner fields", "Computed on load"]],
+  person: () => [["Bayer data pack", "Owners", "Synthetic"]],
   glossary: () => [["Business glossary", "Approved terms list", "Computed on load"]],
-  domain: () => [["Department map", "Dataset to department mapping", "Computed on load"]],
+  domain: () => [["Bayer data pack", "Workspaces", "Synthetic"]],
 };

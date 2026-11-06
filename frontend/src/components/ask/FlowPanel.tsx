@@ -9,6 +9,7 @@ const STAGE_KIND: Record<StageId, { label: string; cls: string }> = {
   discovery: { label: "Catalog + Python", cls: "kind-state" },
   governance: { label: "Python", cls: "kind-py" },
   decision: { label: "Python", cls: "kind-py" },
+  actions: { label: "Python", cls: "kind-py" },
   deliver: { label: "Python", cls: "kind-py" },
   evidence: { label: "Evidence agent", cls: "kind-ai" },
   spec: { label: "Spec agent", cls: "kind-ai" },
@@ -22,6 +23,7 @@ const TITLES: Record<StageId, string> = {
   discovery: "Find existing reports",
   governance: "Check they can be trusted",
   decision: "Decide what to do",
+  actions: "Suggest follow-up work",
   deliver: "Open the existing report",
   evidence: "Check the data sources",
   spec: "Design the report",
@@ -35,6 +37,7 @@ export const RUNNING_COPY: Record<StageId, string> = {
   discovery: "Looking through the catalog",
   governance: "Checking ownership and certification",
   decision: "Applying the decision rules",
+  actions: "Suggesting follow-up work",
   deliver: "Opening the report",
   evidence: "Checking the data sources",
   spec: "Designing the report",
@@ -47,10 +50,10 @@ const BASE: StageId[] = ["intent", "discovery", "governance", "decision"];
 const BUILD: StageId[] = ["evidence", "spec", "approval", "render", "register"];
 const TECH_KEY = "am.technical";
 
-function stagesFor(decision: DecisionType | null): StageId[] {
-  if (decision === "reuse") return [...BASE, "deliver"];
-  if (decision === "extend" || decision === "create") return [...BASE, ...BUILD];
-  return BASE;
+function stagesFor(decision: DecisionType | null, hasActions: boolean): StageId[] {
+  const base: StageId[] = hasActions ? [...BASE, "actions"] : BASE;
+  if (!decision || decision === "not_feasible") return base;
+  return decision === "reuse" ? [...base, "deliver"] : [...base, ...BUILD];
 }
 
 function readTechnical() {
@@ -61,6 +64,7 @@ function summaryFor(ev: StageEvent | undefined, technical: boolean): string | nu
   if (!ev) return null;
   if (technical) return ev.summary;
   if (ev.status === "running") return null;
+  if (ev.stage === "actions") return `${ev.data?.proposals?.length ?? 0} suggestions`;
   if (ev.stage === "render" && ev.data?.files) return `${ev.data.files.length} files created`;
   return ev.summary;
 }
@@ -73,7 +77,7 @@ interface Props {
 }
 
 export function FlowPanel({ stages, decision, health, catalog }: Props) {
-  const order = stagesFor(decision);
+  const order = stagesFor(decision, (stages.actions?.data?.proposals?.length ?? 0) > 0);
   const [open, setOpen] = useState<Set<StageId>>(new Set());
   const [technical, setTechnical] = useState(readTechnical);
 

@@ -1,4 +1,4 @@
-import type { Candidate, CatalogMeta, StageId } from "../../api/types";
+import type { ActionProposal, Candidate, CatalogMeta, StageId } from "../../api/types";
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const tone = (v: number, good = 0.9, ok = 0.6) => (v >= good ? "ok" : v >= ok ? "warn" : "bad");
@@ -106,11 +106,12 @@ export function StageDetail({ stage, data, catalog, technical }: Props) {
                 <Score label="Freshness" value={c.freshness} />
                 <Score label="Governance" value={c.governance} good={0.8} />
               </div>
-              {(c.measures_missing.length > 0 || c.dimensions_missing.length > 0 || !c.grain_supported) && (
+              {c.scope_note && <p className="muted small">{c.scope_note}</p>}
+              {(c.measures_missing.length > 0 || (c.dimensions_missing?.length ?? 0) > 0 || c.grain_supported === false) && (
                 <p className="muted small">
                   Missing: {[...c.measures_missing.map((m) => catalog?.measures[m]?.name ?? m),
-                    ...c.dimensions_missing.map((d) => catalog?.dimensions[d]?.name ?? d),
-                    ...(c.grain_supported ? [] : ["finer time grain"])].join(", ")}
+                    ...(c.dimensions_missing ?? []).map((d) => catalog?.dimensions[d]?.name ?? d),
+                    ...(c.grain_supported === false ? ["finer time grain"] : [])].join(", ")}
                 </p>
               )}
             </div>
@@ -138,7 +139,7 @@ export function StageDetail({ stage, data, catalog, technical }: Props) {
                   </li>
                 ))}
               </ul>
-              {c.gates_failed.map((g) => <p key={g} className="text-bad small">Blocked: {g}</p>)}
+              {(c.gates_failed ?? []).map((g) => <p key={g} className="text-bad small">Blocked: {g}</p>)}
             </div>
           ))}
         </div>
@@ -158,13 +159,26 @@ export function StageDetail({ stage, data, catalog, technical }: Props) {
         </div>
       );
 
+    case "actions":
+      return (
+        <div className="detail-stack">
+          <p className="muted">Suggestions only. Nothing is assigned, because this screen has no action tracker yet.</p>
+          {(data.proposals ?? []).map((p: ActionProposal) => (
+            <div key={p.key} className="cand">
+              <div className="cand-head"><strong>{p.title}</strong></div>
+              <p className="muted small">{p.owner} · due {p.due_date}</p>
+            </div>
+          ))}
+        </div>
+      );
+
     case "deliver": {
       const a = data.asset;
       return (
         <KV rows={[
           ["Workspace", a.workspace],
           ["Views (90 days)", a.views_90d?.toLocaleString("en-US") ?? "0"],
-          ["Last reviewed", a.last_review],
+          [a.last_review ? "Last reviewed" : "Last changed", a.last_review ?? a.last_modified ?? "Not recorded"],
         ]} />
       );
     }
