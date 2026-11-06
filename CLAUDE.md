@@ -160,4 +160,4 @@ npm run test:workbench               # renders real backend SSE events through t
 - [ ] Load into the team's MongoDB Atlas (`python -m app.load_datapack`)
 - [ ] Validate generated PBIP in Power BI Desktop
 - [ ] Previews for KPIs not in Product_Market_Monthly (e.g. reimbursement from Market_Access)
-- [ ] Build plan page (artifact) still describes the old plant scope: update
+- [x] Build plan page updated for the Bayer data pack: https://claude.ai/artifact/NWgjoee8m5ZYAYoBkDmYCC
