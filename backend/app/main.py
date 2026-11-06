@@ -110,6 +110,21 @@ async def catalog() -> dict[str, Any]:
     return cat.CATALOG
 
 
+@app.get("/api/requests")
+async def business_requests() -> list[dict[str, Any]]:
+    """The 150 synthetic business requests from the data pack."""
+    return cat.SHEETS.get("business_requests", [])
+
+
+@app.get("/api/datapack")
+async def datapack_summary() -> dict[str, Any]:
+    """What was loaded from the Bayer data pack."""
+    C = cat.CATALOG
+    return {"source": C.get("source"), "sheets": {k: len(v) for k, v in cat.SHEETS.items()},
+            "assets": len(C["assets"]), "models": len(C["models"]), "measures": len(C["measures"]),
+            "usage_window": C.get("usage_window"), "rules": C.get("rules")}
+
+
 @app.get("/api/graph")
 async def graph() -> dict[str, Any]:
     """Entities and relationships for the Estate Explorer, built from the live catalog."""

@@ -3,7 +3,11 @@ export type StageId =
   | "evidence" | "spec" | "approval" | "render" | "register";
 
 export type StageStatus = "pending" | "running" | "waiting" | "done" | "rejected";
-export type DecisionType = "reuse" | "extend" | "create" | "not_feasible";
+export type DecisionType = "reuse" | "repair" | "consolidate" | "migrate" | "new_build" | "not_feasible";
+
+export const DECISION_LABEL: Record<DecisionType, string> = {
+  reuse: "Reuse", repair: "Repair", consolidate: "Consolidate", migrate: "Migrate", new_build: "New build", not_feasible: "Not feasible",
+};
 
 export interface Preset {
   id: string;
@@ -13,7 +17,21 @@ export interface Preset {
   decision: string;
   measures: string[];
   dimensions: string[];
-  grain: string;
+  filters?: Record<string, string[]>;
+  /** How often this text appears in Bayer's Business_Requests sheet. */
+  requests?: number;
+  /** Set for estate scenarios built from real assets to show a specific outcome. */
+  scenario?: string;
+}
+
+export interface Preview {
+  month: string;
+  previous_month: string | null;
+  by: "product" | "market";
+  columns: { id: string; name: string; unit: string; lower_is_better: boolean }[];
+  rows: { label: string; values: Record<string, number>; previous: Record<string, number> }[];
+  not_previewed: string[];
+  note: string;
 }
 
 export interface StageEvent {
@@ -59,6 +77,11 @@ export interface CatalogMeta {
 export interface Candidate {
   asset_id: string;
   name: string;
+  platform: string;
+  scope_score: number;
+  scope_note: string;
+  views_90d: number;
+  lifecycle: string;
   coverage: number;
   freshness: number;
   governance: number;

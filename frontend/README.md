@@ -10,7 +10,7 @@ npm run dev        # http://localhost:5173
 npm run build      # type-check and production build into dist/
 ```
 
-Start the backend first (see `../backend/README.md`). Open `http://localhost:5173/#explorer-graph` to land on the graph.
+Start the backend first (see `../backend/README.md`). Pages: `#ask`, `#explorer` (`#explorer-graph` for the graph), `#actions`.
 
 ## Structure
 

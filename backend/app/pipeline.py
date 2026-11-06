@@ -2,7 +2,8 @@
 
 Flow: intent agent → discovery → governance → decision
         → reuse: deliver
-        → extend/create: evidence agent → spec agent → human approval → PBIP render → register
+        → repair / consolidate / migrate / new build:
+              evidence agent → spec agent → human approval → PBIP render (thin report) → register
         → not feasible: explain
 
 Agents propose; Python verifies and decides. Every stage emits ``stage`` events
@@ -20,7 +21,8 @@ from . import actions as act
 from . import catalog as cat
 from .agents import AgentRun, EvidenceAgent, IntentAgent, SpecAgent
 from .agents.intent import sanitize_intent
-from .decision import Decision, data_availability, decide, rank_candidates
+from .decision import THRESHOLDS, Decision, data_availability, decide, rank_candidates
+from .facts import preview as facts_preview
 from .llm import LLM, explain
 from .pbip import render_pbip, slug
 from .settings import settings
@@ -30,7 +32,7 @@ STAGES = {
     "intent": "Understand the request",
     "discovery": "Find existing analytics",
     "governance": "Check governance",
-    "decision": "Decide: reuse, extend or create",
+    "decision": "Decide the lifecycle action",
     "actions": "Propose follow-up actions",
     "deliver": "Open the existing report",
     "evidence": "Gather evidence",
@@ -127,7 +129,9 @@ class Pipeline:
                                   "unmatched_terms": [], "decision": None}
                 if preset:
                     conv["intent"].update(measures=list(preset["measures"]), dimensions=list(preset["dimensions"]),
-                                          grain=preset["grain"], decision=preset["decision"],
+                                          grain="month", decision=preset["decision"],
+                                          filters={k: list(v) for k, v in (preset.get("filters") or {}).items()},
+                                          scope_global=bool(preset.get("scope_global")), migration=preset.get("migration"),
                                           unmatched_terms=list(preset.get("requested_terms", [])),
                                           department=preset["department"])
             run = conv["runs"][-1]
@@ -159,15 +163,15 @@ class Pipeline:
                 return
 
             intent.pop("_pending", None)
-            if not intent.get("grain"):
-                first = intent["measures"][0] if intent["measures"] else None
-                intent["grain"] = cat.measure(first)["default_grain"] if first else "day"
+            intent["grain"] = "month"
             intent["decision"] = intent.get("decision") or f"Monitor {label_list(intent['measures'], 'm') or 'the requested numbers'}"
             intent["department"] = intent.get("department") or cat.department_for(intent["measures"])
             conv["intent"] = intent
             await self._artifact(conv, "intents", public(intent), preset_id=conv["preset_id"])
-            summary = (f"{label_list(intent['measures'], 'm') or 'No catalog measures'}"
-                       f"{' by ' + label_list(intent['dimensions'], 'd') if intent['dimensions'] else ''}, per {intent['grain']}")
+            scope = ", ".join(v for vals in (intent.get("filters") or {}).values() for v in vals) or ("global" if intent.get("scope_global") else "")
+            summary = (f"{label_list(intent['measures'], 'm') or 'No governed KPIs'}"
+                       f"{' by ' + label_list(intent['dimensions'], 'd') if intent['dimensions'] else ''}"
+                       f"{' · ' + scope if scope else ''}{' · Tableau migration' if intent.get('migration') else ''}")
             yield self._stage(conv, "intent", "done", summary, {**public(intent), "agent": agent_run.trace()})
             await self._pause()
 
@@ -183,31 +187,36 @@ class Pipeline:
         # ---- 2. Discovery (catalog search + scoring)
         yield self._stage(conv, "discovery", "running", "Searching the catalog")
         await self._pause()
-        candidates = rank_candidates(intent, cat.CATALOG["assets"])
+        candidates = rank_candidates(intent, cat.CATALOG)
         availability = data_availability(intent, cat.CATALOG)
+        shown = candidates[: THRESHOLDS["max_candidates_shown"]]
+        in_scope = sum(1 for c in candidates if c.scope_score >= THRESHOLDS["min_scope"])
         yield self._stage(conv, "discovery", "done",
-                          f"{len(candidates)} related report{'s' if len(candidates) != 1 else ''} found in {len(cat.CATALOG['assets'])} catalog assets",
-                          {"candidates": [c.to_dict() for c in candidates], "availability": availability,
-                           "searched": len(cat.CATALOG["assets"])})
+                          f"{len(candidates)} of {len(cat.CATALOG['assets'])} reports use a requested KPI; {in_scope} fit the product and market scope",
+                          {"candidates": [c.to_dict() for c in shown], "total_candidates": len(candidates), "in_scope": in_scope,
+                           "availability": availability, "searched": len(cat.CATALOG["assets"])})
         await self._pause()
 
         # ---- 3. Governance check
         yield self._stage(conv, "governance", "running", "Scoring each candidate")
         await self._pause()
-        passing = sum(1 for c in candidates if c.gates_pass and c.governance >= 0.8)
-        yield self._stage(conv, "governance", "done", f"{passing} of {len(candidates)} candidates are well governed",
+        passing = sum(1 for c in candidates if c.gates_pass and c.governance >= THRESHOLDS["reuse_governance"])
+        yield self._stage(conv, "governance", "done", f"{passing} of {len(candidates)} candidates pass every governance check",
                           {"candidates": [{"asset_id": c.asset_id, "name": c.name, "governance": c.governance,
                                            "checks": [vars(k) for k in c.checks], "gates_failed": c.gates_failed}
-                                          for c in candidates]})
+                                          for c in shown]})
         await self._pause()
 
         # ---- 4. Decision (deterministic)
-        result = decide(candidates, availability["available"])
+        result = decide(candidates, availability, intent, cat.CATALOG)
         decision = result.to_dict()
-        missing = availability["missing_terms"] + [cat.CATALOG["dimensions"][d]["name"] for d in availability["missing_dimensions"]]
+        missing = availability["missing_terms"]
         decision["availability"] = availability
+        if result.decision != Decision.NOT_FEASIBLE:
+            decision["preview"] = facts_preview(intent)
         conv["plan"] = {"decision": decision}
-        label = {"reuse": "Reuse", "extend": "Extend", "create": "Create", "not_feasible": "Not feasible"}[result.decision.value]
+        label = {"reuse": "Reuse", "repair": "Repair", "consolidate": "Consolidate", "migrate": "Migrate",
+                 "new_build": "New build", "not_feasible": "Not feasible"}[result.decision.value]
         if result.change_type:
             label += f" ({result.change_type})"
         yield self._stage(conv, "decision", "done", label, decision)
@@ -227,16 +236,18 @@ class Pipeline:
         if result.decision == Decision.REUSE:
             c = result.candidate
             yield self._stage(conv, "deliver", "done", f"Opened '{c.name}'",
-                              {"asset": cat.asset_by_id(c.asset_id), "filters": intent.get("filters", {})})
+                              {"asset": cat.asset_by_id(c.asset_id), "filters": intent.get("filters", {}),
+                               "preview": decision.get("preview")})
             yield self._say(conv, explanation, kind="result", decision="reuse", asset_id=c.asset_id)
             conv["state"] = "idle"
             yield self._event(conv, "done", state="idle")
             return
 
         if result.decision == Decision.NOT_FEASIBLE:
-            yield self._say(conv, explanation + " You can rephrase the request, or ask the data team to add a source.",
+            yield self._say(conv, explanation + " You can rephrase the request using the governed KPIs.",
                             kind="result", decision="not_feasible",
-                            suggestions=["Which deliveries need action today?", "What needs attention on my lines this shift?"])
+                            suggestions=["Show Xarelto on-time-in-full and market access coverage for Mexico.",
+                                         "How are Eylea net sales and digital engagement developing in Japan?"])
             conv["state"] = "idle"
             yield self._event(conv, "done", state="idle")
             return
@@ -266,8 +277,9 @@ class Pipeline:
         n_vis = sum(len(p["visuals"]) for p in spec["pages"])
         valid = spec["validation"]["passed"]
         yield self._stage(conv, "spec", "done",
-                          f"{len(spec['measures'])} certified measures, {n_vis} visuals, "
-                          + ("all checks pass" if valid else "validation failed"),
+                          (f"Repair plan for {spec['name']}" if spec["decision_type"] == "repair" else
+                           f"{len(spec['measures'])} approved KPIs, {n_vis} visuals on {spec['semantic_model']['id'] if spec.get('semantic_model') else 'no model'}")
+                          + (", all checks pass" if valid else ", some checks need review"),
                           {**spec, "agent": sp_run.trace()})
         await self._pause()
 
@@ -304,11 +316,15 @@ class Pipeline:
             yield self._stage(conv, "approval", "done", f"Approved by {approver}", {"approver": approver, "approved_at": spec["approved_at"]})
             await self._pause()
 
-            yield self._stage(conv, "render", "running", "Writing PBIP files (plain Python, no AI)")
-            await self._pause()
-            output = render_pbip(spec, settings.output_dir, conv["_id"])
-            await self.store.update_artifact("specs", spec_id, {"pbip": {"folder": output["folder"], "files": output["files"]}})
-            yield self._stage(conv, "render", "done", f"{len(output['files'])} files in {output['folder']}", output)
+            if spec["decision_type"] == "repair":
+                yield self._stage(conv, "render", "done", "No report files: this is a maintenance change to an existing report",
+                                  {"files": [], "preview": {"model": ""}, "validated_in_power_bi": True, "maintenance": True})
+            else:
+                yield self._stage(conv, "render", "running", "Writing PBIP files (plain Python, no AI)")
+                await self._pause()
+                output = render_pbip(spec, settings.output_dir, conv["_id"])
+                await self.store.update_artifact("specs", spec_id, {"pbip": {"folder": output["folder"], "files": output["files"]}})
+                yield self._stage(conv, "render", "done", f"Thin report on {output['thin_report_on']}: {len(output['files'])} files", output)
             await self._pause()
 
             entry = await self._register(spec)
@@ -322,30 +338,48 @@ class Pipeline:
             await self._save(conv)
 
     async def _register(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Apply the approved change to the catalog so the next identical request is answered by reuse."""
         today = date.today().isoformat()
-        base = cat.asset_by_id(spec["base_asset_id"]) if spec.get("base_asset_id") else None
-        if base:
-            if spec["change_type"] == "maintenance":
-                base["refresh_age_hours"] = 1
-                for ds in base["datasets"]:
-                    if ds in cat.CATALOG["datasets"]:
-                        cat.CATALOG["datasets"][ds]["refresh_age_hours"] = 1
-                        await self.store.update_dataset(ds, {"refresh_age_hours": 1})
-            else:
-                base["measures"] = list(dict.fromkeys(base["measures"] + spec["change"].get("add_measures", [])))
-                base["dimensions"] = list(dict.fromkeys(base["dimensions"] + spec["change"].get("add_dimensions", [])))
-                base["grain"] = spec["change"].get("grain", base["grain"])
-            base["last_review"] = today
+        dec = spec["decision_type"]
+        base = cat.asset_by_id(spec.get("base_asset_id"))
+        if base and dec == "repair":
+            reason = spec["change"].get("repairs", "")
+            if base["owner_status"] != "active":
+                base.update(owner="Data steward (interim)", owner_status="active")
+            model = cat.model_by_id(base.get("model_id"))
+            if model and base.get("refresh_status") != "healthy":
+                model["refresh_status"] = "healthy"
+                await self.store.update_model(model["id"], {"refresh_status": "healthy"})
+            base["refresh_status"] = "healthy"
+            for m in [m["id"] for m in spec["measures"]]:
+                base["variants"].pop(m, None)
+            base.update(endorsement="promoted", certified=True, lifecycle="active", last_modified=today,
+                        model_ai_readiness="good" if "AI-ready" in reason else base.get("model_ai_readiness"))
+            for s_ in base["signals"]:
+                if s_["status"] == "open" and s_["code"] in ("MISSING_OWNER", "HIGH_REACH_UNENDORSED", "SELF_SERVICE_HIGH_REACH"):
+                    s_["status"] = "resolved"
+            await self.store.upsert_asset(base)
+            return {**base, "next_review": spec["review_date"], "change": spec["change"]}
+        if base and dec == "consolidate":
+            base["measures"] = list(dict.fromkeys(base["measures"] + spec["change"].get("add_measures", [])))
+            base["last_modified"] = today
             await self.store.upsert_asset(base)
             return {**base, "next_review": spec["review_date"], "change": spec["change"]}
 
+        # New build or migration: a new thin Power BI report on the shared model, promoted on approval.
+        model = spec.get("semantic_model") or {}
+        model_full = cat.model_by_id(model.get("id")) or {}
         asset = {
-            "id": "rpt_" + slug(spec["name"]).lower(), "name": spec["name"], "workspace": "Generated · Pending certification",
-            "grain": next(iter(spec["grain"].values()), "day"), "measures": [m["id"] for m in spec["measures"]],
-            "dimensions": list(dict.fromkeys(spec["dimensions"] + ["date"])), "datasets": spec["entities"],
-            "certified": False, "owner": spec["owner"], "owner_status": "active", "backup_owner": "Data steward",
-            "refresh_age_hours": 1, "last_review": today, "documented": True, "tests_passing": True,
-            "conflicts": {}, "restricted": False, "views_90d": 0, "created_from_spec": True,
+            "id": "NEW-" + slug(spec["name"]).upper()[:40], "name": spec["name"], "asset_type": "Report", "platform": "Power BI",
+            "workspace_id": model_full.get("workspace_id"), "workspace": model.get("workspace"), "model_id": model.get("id"),
+            "product_scope": spec["product_scope"], "market_scope": spec["market_scope"],
+            "owner_id": None, "owner": spec["owner"], "owner_status": "active", "created": today, "last_modified": today,
+            "lifecycle": "active", "endorsement": "promoted", "certified": True, "audience": 0,
+            "classification": "internal", "delivery_model": "central_BI", "grain": "month",
+            "kpis": [m["kpi_id"] for m in spec["measures"]], "measures": [m["id"] for m in spec["measures"]],
+            "conflicts": {}, "variants": {}, "views_90d": 0, "users_90d": 0, "errors_90d": 0, "avg_load_ms": None,
+            "signals": [], "dq_issues": [], "migration": None, "refresh_status": model.get("refresh_status"),
+            "model_ai_readiness": model.get("ai_readiness"), "created_from_spec": True, "replaces": spec.get("replaces", []),
         }
         existing = cat.asset_by_id(asset["id"])
         if existing:

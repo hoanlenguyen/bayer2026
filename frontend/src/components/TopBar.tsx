@@ -45,7 +45,7 @@ export function TopBar({ page, onPick, activeActions }: Props) {
           <input
             id="search"
             type="search"
-            placeholder="Search reports, measures, datasets, owners"
+            placeholder="Search reports, KPIs, models, owners (e.g. AST-0217, Nubeqa)"
             autoComplete="off"
             aria-controls="search-results"
             aria-expanded={open && !!q}

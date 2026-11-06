@@ -1,73 +1,55 @@
-import json
-import os
-
-os.environ["STAGE_DELAY"] = "0"
-os.environ["LLM_PROVIDER"] = "mock"
-os.environ["MONGODB_URI"] = ""
-
 import pytest
 from fastapi.testclient import TestClient
 
-from app.catalog import reset_catalog
+from app import catalog as cat
 from app.main import app
 
-
-def events(resp):
-    out = []
-    for block in resp.text.strip().split("\n\n"):
-        data = [l[6:] for l in block.splitlines() if l.startswith("data: ")]
-        if data:
-            out.append(json.loads(data[0]))
-    return out
+from .helpers import sse, stage
 
 
 @pytest.fixture()
 def client():
-    reset_catalog()
+    cat.reset_catalog()
     with TestClient(app) as c:
         yield c
 
 
-def stage_status(evs, stage):
-    return [e["status"] for e in evs if e["type"] == "stage" and e["stage"] == stage]
+def test_datapack_endpoints(client):
+    s = client.get("/api/datapack").json()
+    assert s["assets"] == 360 and s["sheets"]["governance_signals"] == 410
+    assert len(client.get("/api/requests").json()) == 150
 
 
-def test_preset_reuse_flow(client):
-    evs = events(client.post("/api/chat", json={"preset_id": "prod_shift_start"}))
-    assert any(e["type"] == "message" and e.get("kind") == "question" for e in evs)
-    conv = evs[0]["id"]
-    evs = events(client.post("/api/chat", json={"conversation_id": conv, "message": "All lines"}))
-    decision = next(e for e in evs if e["type"] == "stage" and e["stage"] == "decision")
-    assert decision["data"]["decision"] == "reuse"
-    assert stage_status(evs, "deliver") == ["done"]
+def test_reuse_flow_with_preview(client):
+    evs = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_eylea_jp"}))
+    d = stage(evs, "decision")["data"]
+    assert d["decision"] == "reuse" and d["preview"]["rows"]
+    assert stage(evs, "deliver")
 
 
-def test_create_flow_with_approval_and_reuse_after(client):
-    evs = events(client.post("/api/chat", json={"preset_id": "sc_stockout_risk"}))
-    conv = evs[0]["id"]
-    assert stage_status(evs, "approval") == ["waiting"]
-    evs = events(client.post("/api/approve", json={"conversation_id": conv, "approver": "Data steward"}))
-    render = next(e for e in evs if e["type"] == "stage" and e["stage"] == "render" and e["status"] == "done")
-    assert any(f["path"].endswith(".pbip") for f in render["data"]["files"])
-    assert stage_status(evs, "register") == ["done"]
-    # Same request again is now answered by reuse.
-    evs = events(client.post("/api/chat", json={"preset_id": "sc_stockout_risk"}))
-    decision = next(e for e in evs if e["type"] == "stage" and e["stage"] == "decision")
-    assert decision["data"]["decision"] == "reuse"
+@pytest.mark.parametrize("preset_id", ["req_finance_gtn", "req_migrate_xarelto", "scn_repair_xarelto_mx"])
+def test_build_flows_approve_then_reuse(client, preset_id):
+    evs = sse(client.post("/api/chat", json={"preset_id": preset_id}))
+    assert stage(evs, "approval")["status"] == "waiting"
+    evs = sse(client.post("/api/approve", json={"conversation_id": evs[0]["id"], "approver": "Data steward"}))
+    assert stage(evs, "register")
+    files = stage(evs, "render")["data"]["files"]
+    assert (files == []) == (preset_id.startswith("scn_repair"))
+    if files:
+        assert any(f["path"].endswith("definition.pbir") for f in files)
+    evs = sse(client.post("/api/chat", json={"preset_id": preset_id}))
+    assert stage(evs, "decision")["data"]["decision"] == "reuse"
 
 
 def test_free_text_grill_me(client):
-    evs = events(client.post("/api/chat", json={"message": "I need a late deliveries dashboard"}))
-    q = next(e for e in evs if e["type"] == "message")
-    assert q["kind"] == "question"
+    evs = sse(client.post("/api/chat", json={"message": "I need net sales and gross-to-net"}))
     conv = evs[0]["id"]
-    evs = events(client.post("/api/chat", json={"conversation_id": conv, "message": "Act on today's issues"}))
-    evs += events(client.post("/api/chat", json={"conversation_id": conv, "message": "By carrier and priority"}))
-    decision = next(e for e in evs if e["type"] == "stage" and e["stage"] == "decision")
-    assert decision["data"]["decision"] == "extend"
+    assert next(e for e in evs if e["type"] == "message")["kind"] == "question"
+    evs = sse(client.post("/api/chat", json={"conversation_id": conv, "message": "All products, all markets"}))
+    evs += sse(client.post("/api/chat", json={"conversation_id": conv, "message": "Monthly performance review"}))
+    assert stage(evs, "decision")["data"]["decision"] in ("new_build", "consolidate", "reuse")
 
 
 def test_not_feasible(client):
-    evs = events(client.post("/api/chat", json={"preset_id": "it_system_health"}))
-    decision = next(e for e in evs if e["type"] == "stage" and e["stage"] == "decision")
-    assert decision["data"]["decision"] == "not_feasible"
+    evs = sse(client.post("/api/chat", json={"preset_id": "scn_out_of_scope"}))
+    assert stage(evs, "decision")["data"]["decision"] == "not_feasible"

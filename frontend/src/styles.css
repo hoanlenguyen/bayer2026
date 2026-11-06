@@ -471,3 +471,19 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
   .board { grid-template-columns: minmax(0, 1fr); overflow-x: visible; }
   .ad-fields { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ===================== Data pack additions ===================== */
+.preset-heading { margin: 6px 0 -4px; font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+.preset-heading .muted { font-weight: 400; }
+.rule-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.d-repair { color: var(--warn); background: var(--warn-soft); }
+.d-consolidate { color: var(--t-dashboard); background: color-mix(in srgb, var(--t-dashboard) 14%, transparent); }
+.d-migrate { color: var(--t-source); background: color-mix(in srgb, var(--t-source) 16%, transparent); }
+.d-new_build { color: var(--t-metric); background: color-mix(in srgb, var(--t-metric) 14%, transparent); }
+.preview { display: grid; gap: 6px; }
+.preview-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+.preview table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.preview th, .preview td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.preview th { font-weight: 600; color: var(--muted); background: var(--surface-2); }
+.preview td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.preview tr:last-child td { border-bottom: 0; }

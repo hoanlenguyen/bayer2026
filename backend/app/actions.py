@@ -25,10 +25,6 @@ TRANSITIONS: dict[str, set[str]] = {
     "verified": set(),
     "dismissed": {"open"},
 }
-# For these measures a lower value is better; for all others higher is better.
-LOWER_IS_BETTER = {"late_shipments", "days_late", "downtime_hours", "open_deviations", "release_lead_time",
-                   "absenteeism", "budget_variance", "cost_per_unit"}
-DUE_DAYS = {"hour": 1, "day": 1, "week": 7, "month": 30}
 
 
 def now() -> str:
@@ -37,7 +33,7 @@ def now() -> str:
 
 def verify_target(measure_id: str) -> dict[str, Any]:
     m = cat.CATALOG["measures"].get(measure_id, {})
-    lower = measure_id in LOWER_IS_BETTER
+    lower = bool(m.get("lower_is_better"))
     return {"metric_id": measure_id, "metric_name": m.get("name", measure_id),
             "direction": "decrease" if lower else "increase", "result": None, "note": "", "checked_at": None, "checked_by": None}
 
@@ -60,46 +56,47 @@ def propose(intent: dict[str, Any], decision: dict[str, Any], existing: list[dic
                     "asset_name": (cat.asset_by_id(asset_id) or {}).get("name") if asset_id else None,
                     "verify": verify, "existing_action_id": open_match["_id"] if open_match else None})
 
+    def steward(asset: dict[str, Any] | None) -> str:
+        return asset["owner"] if asset and asset.get("owner_status") == "active" else "Data steward"
+
     # Business: act on the decision the request supports, then check the number moved.
     if dec != "not_feasible" and intent.get("measures"):
-        m0 = intent["measures"][0]
+        m0 = next((m for m in intent["measures"] if C["measures"].get(m, {}).get("fact_column")), intent["measures"][0])
         target = verify_target(m0)
         add(f"biz:{intent.get('preset_id') or '-'}:{intent['decision']}", "business", intent["decision"].rstrip(". "),
             f"From your request. Afterwards, {target['metric_name']} should {'go down' if target['direction'] == 'decrease' else 'go up'}.",
-            "You (requester)", DUE_DAYS.get(intent.get("grain") or "day", 1),
-            cand.get("asset_id") if dec == "reuse" else None, target)
+            "You (requester)", 30, cand.get("asset_id") if dec == "reuse" else None, target)
 
-    # Maintenance: refresh schedule for a complete but stale report.
-    if dec == "extend" and decision.get("change_type") == "maintenance" and cand:
-        a = cat.asset_by_id(cand["asset_id"]) or {}
-        add(f"maint:refresh:{cand['asset_id']}", "maintenance", f"Fix the refresh schedule of {cand['name']}",
-            f"Data is {a.get('refresh_age_hours')} h old; this decision needs data under 24 h.", a.get("owner", "Data steward"), 3,
-            cand["asset_id"], {"metric_id": None, "metric_name": "Freshness", "direction": "increase", "result": None,
-                               "note": "", "checked_at": None, "checked_by": None})
-
-    # Maintenance: poorly governed overlaps flagged by the decision.
+    # Maintenance: overlapping, legacy or poorly governed reports flagged by the decision.
     for f in decision.get("flags", []):
-        a = cat.asset_by_id(f["asset_id"]) or {}
-        if a.get("owner_status") != "active" and not a.get("backup_owner"):
+        a = cat.asset_by_id(f["asset_id"])
+        if a and a.get("owner_status") != "active":
             add(f"maint:owner:{f['asset_id']}", "maintenance", f"Assign a new owner for {f['name']}",
-                f"{a.get('owner')} has left and no backup owner is set.", "Data steward", 5, f["asset_id"])
-        target = cand.get("name") if cand and cand.get("asset_id") != f["asset_id"] else None
-        add(f"maint:retire:{f['asset_id']}", "maintenance",
-            f"Merge {f['name']} into {target} or retire it" if target else f"Review or retire {f['name']}",
-            f["message"], a.get("owner") if a.get("owner_status") == "active" else "Data steward", 14, f["asset_id"])
+                f"{a.get('owner')} is {a.get('owner_status')} (RULE-003).", "Data steward", 7, f["asset_id"])
+        verb = "Retire" if "retire" in f["message"].lower() and "fold" not in f["message"].lower() else "Consolidate or retire"
+        add(f"maint:retire:{f['asset_id']}", "maintenance", f"{verb} {f['name']}", f["message"], steward(a), 21, f["asset_id"])
 
-    # Maintenance: failing quality tests in the source tables this request depends on.
-    for ds in decision.get("availability", {}).get("datasets", []):
-        d = C["datasets"].get(ds, {})
-        if d and d["tests_passed"] < d["tests_total"]:
-            add(f"maint:tests:{ds}", "maintenance", f"Fix failing quality tests in {d['table']}",
-                f"{d['tests_total'] - d['tests_passed']} of {d['tests_total']} tests fail.", d["owner"], 7)
+    # Maintenance: data-quality issues on the model the decision builds on.
+    model = cat.model_by_id(decision.get("target_model_id") or (cat.asset_by_id(cand.get("asset_id")) or {}).get("model_id"))
+    if model and dec in ("new_build", "migrate", "consolidate"):
+        for issue in model["dq_issues"]:
+            if issue["severity"] in ("high", "medium"):
+                add(f"maint:dq:{issue['id']}", "maintenance", f"Fix {issue['field'].replace('_', ' ')} on {model['name']} ({model['id']})",
+                    f"{issue['value']}: {issue['impact']}", model.get("owner") or "Data steward", 14)
 
-    # Maintenance: the data does not exist yet.
+    # Maintenance: a governed KPI the shared model does not serve yet.
+    gaps = (decision.get("availability") or {}).get("model_gaps") or []
+    if dec == "new_build" and gaps and model:
+        add(f"maint:modelgap:{model['id']}:{'|'.join(gaps)}", "maintenance",
+            f"Add {', '.join(C['measures'][g]['name'] for g in gaps)} to {model['name']}",
+            "The new report needs approved measures the shared model does not serve yet (RULE-001, RULE-002).",
+            model.get("owner") or "Data steward", 14)
+
     if dec == "not_feasible":
-        terms = decision.get("availability", {}).get("missing_terms") or intent.get("unmatched_terms") or ["the requested data"]
-        add(f"maint:source:{'|'.join(terms)}", "maintenance", f"Add a data source for: {', '.join(terms)}",
-            "Requested but not in the catalog.", "Data platform team", 30)
+        terms = (decision.get("availability") or {}).get("missing_terms") or intent.get("unmatched_terms") or []
+        if not any("patient" in t or "prescriber" in t for t in terms):
+            add(f"maint:source:{'|'.join(terms)}", "maintenance", f"Assess a governed source for: {', '.join(terms)}",
+                "Requested but not in the catalog.", "Data platform team", 30)
     return out
 
 
@@ -196,39 +193,43 @@ def summary(actions: list[dict[str, Any]]) -> dict[str, int]:
 
 
 # ---------------------------------------------------------------- sample actions
-SAMPLES = [
-    {"kind": "maintenance", "title": "Assign a new owner for Logistics Weekly KPI (copy)", "owner": "Data steward",
-     "reason": "J. Kovac has left and no backup owner is set.", "asset_id": "rpt_logistics_weekly", "due": 2, "status": "open",
-     "key": "maint:owner:rpt_logistics_weekly"},
-    {"kind": "business", "title": "Investigate three late shipments to Nordic distributors", "owner": "M. Laine",
-     "reason": "Late shipments rose this week on two carriers.", "asset_id": "rpt_delivery_perf", "due": 1, "status": "in_progress",
-     "verify": "late_shipments"},
-    {"kind": "maintenance", "title": "Fix failing quality test in mfg.line_events_fact", "owner": "Manufacturing IT",
-     "reason": "1 of 18 tests fails.", "asset_id": None, "due": -2, "status": "blocked", "key": "maint:tests:line_events_fact",
-     "blocker": "Waiting for the line sensor vendor to fix timestamps."},
-    {"kind": "business", "title": "Close the two oldest open deviations blocking batch release", "owner": "H. Lehto",
-     "reason": "Batches waited 6 days for QA release.", "asset_id": "rpt_batch_release", "due": -1, "status": "done",
-     "outcome": "Both deviations closed after root-cause review.", "verify": "release_lead_time"},
-]
-
-
 def sample_actions() -> list[dict[str, Any]]:
+    """Example actions drawn from real signals in the data pack, so the tracker opens in a realistic state."""
+    C = cat.CATALOG
+    assets = sorted(C["assets"], key=lambda a: -a["views_90d"])
+    no_owner = next(a for a in assets if a["owner_status"] != "active")
+    failed = next(m for m in C["models"].values() if m["refresh_status"] == "failed" and m["assets"])
+    legacy = next(a for a in assets if a["platform"] == "Tableau" and (a.get("migration") or {}).get("recommended_path_candidate") == "RETIRE")
+    samples = [
+        {"kind": "maintenance", "title": f"Assign a new owner for {no_owner['name']}", "owner": "Data steward",
+         "reason": f"{no_owner['owner']} is {no_owner['owner_status']}; {no_owner['views_90d']:,} views in 90 days (RULE-003).",
+         "asset_id": no_owner["id"], "due": 3, "status": "open", "key": f"maint:owner:{no_owner['id']}"},
+        {"kind": "business", "title": "Review Nubeqa forecast variance in Germany with the country team", "owner": "Commercial Analytics Lead",
+         "reason": "Forecast variance moved from -8.4% to +11.8% between September and October (synthetic).",
+         "asset_id": None, "due": 5, "status": "in_progress", "verify": "forecast_variance"},
+        {"kind": "maintenance", "title": f"Fix failing refresh of {failed['name']} ({failed['id']})", "owner": failed.get("owner") or "Data steward",
+         "reason": f"Refresh failed; {len(failed['assets'])} reports depend on this model (RULE-004).", "asset_id": None, "due": -2,
+         "status": "blocked", "blocker": "Waiting for the source system team to restore the gateway credentials.",
+         "key": f"maint:refresh:{failed['id']}"},
+        {"kind": "maintenance", "title": f"Retire {legacy['name']}", "owner": "BI Platform Owner",
+         "reason": f"Tableau, backlog path RETIRE, {legacy['views_90d']:,} views in 90 days (RULE-006).", "asset_id": legacy["id"],
+         "due": -1, "status": "done", "outcome": "Users redirected to the governed Power BI report; workbook archived.",
+         "key": f"maint:retire:{legacy['id']}"},
+    ]
     out = []
-    for s in SAMPLES:
+    for s in samples:
         a = create({"kind": s["kind"], "title": s["title"], "owner": s["owner"], "reason": s["reason"],
                     "asset_id": s["asset_id"], "asset_name": (cat.asset_by_id(s["asset_id"]) or {}).get("name") if s["asset_id"] else None,
                     "due_date": (date.today() + timedelta(days=s["due"])).isoformat(),
                     "verify": verify_target(s["verify"]) if s.get("verify") else None,
                     # Same keys as live proposals, so a proposal for the same finding links to the sample action.
-                    "key": s.get("key", f"sample:{s['title']}")},
-                   by="Sample data", sample=True)
-        if s["status"] != "open":
-            if s["status"] == "blocked":
-                a = apply_update(a, {"blocker": s["blocker"], "status": "blocked"}, s["owner"])
-            elif s["status"] == "done":
-                a = apply_update(a, {"status": "in_progress"}, s["owner"])
-                a = apply_update(a, {"outcome": s["outcome"], "status": "done"}, s["owner"])
-            else:
-                a = apply_update(a, {"status": s["status"]}, s["owner"])
+                    "key": s.get("key", f"sample:{s['title']}")}, by="Sample data", sample=True)
+        if s["status"] == "blocked":
+            a = apply_update(a, {"blocker": s["blocker"], "status": "blocked"}, s["owner"])
+        elif s["status"] == "done":
+            a = apply_update(a, {"status": "in_progress"}, s["owner"])
+            a = apply_update(a, {"outcome": s["outcome"], "status": "done"}, s["owner"])
+        elif s["status"] != "open":
+            a = apply_update(a, {"status": s["status"]}, s["owner"])
         out.append(a)
     return out

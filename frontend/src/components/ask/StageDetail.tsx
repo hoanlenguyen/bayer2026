@@ -1,4 +1,4 @@
-import type { Candidate, CatalogMeta, StageId } from "../../api/types";
+import { DECISION_LABEL, type Candidate, type CatalogMeta, type DecisionType, type Preview, type StageId } from "../../api/types";
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const tone = (v: number, good = 0.9, ok = 0.6) => (v >= good ? "ok" : v >= ok ? "warn" : "bad");
@@ -72,6 +72,47 @@ function OpenInExplorer({ id }: { id: string }) {
   );
 }
 
+/** Synthetic business numbers for the request, computed in Python from the data pack. */
+function PreviewTable({ preview }: { preview: Preview | null | undefined }) {
+  if (!preview || !preview.rows.length) return null;
+  const fmt = (v: number | undefined, unit: string) =>
+    v === undefined ? "–" : unit === "M EUR" ? `€${v.toLocaleString("en-US", { maximumFractionDigits: 1 })}M`
+      : unit === "units" ? v.toLocaleString("en-US") : `${v.toLocaleString("en-US", { maximumFractionDigits: 1 })}${unit === "%" ? "%" : " " + unit}`;
+  return (
+    <div className="preview">
+      <strong className="small">Preview · {new Date(preview.month).toLocaleDateString("en-GB", { month: "long", year: "numeric" })} by {preview.by}</strong>
+      <div className="preview-scroll">
+        <table>
+          <thead><tr><th>{preview.by === "product" ? "Product" : "Market"}</th>{preview.columns.map((c) => <th key={c.id}>{c.name}</th>)}</tr></thead>
+          <tbody>
+            {preview.rows.map((r) => (
+              <tr key={r.label}>
+                <td>{r.label}</td>
+                {preview.columns.map((c) => {
+                  const v = r.values[c.id], p = r.previous[c.id];
+                  const delta = v !== undefined && p !== undefined ? v - p : null;
+                  const good = delta === null ? null : c.lower_is_better ? delta < 0 : delta > 0;
+                  return (
+                    <td key={c.id} className="num">
+                      {fmt(v, c.unit)}
+                      {delta !== null && Math.abs(delta) > 0.05 && <span className={good ? "ok-text" : "bad-text"}> {delta > 0 ? "▲" : "▼"}</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted small">{preview.note}{preview.not_previewed.length ? ` No preview data for: ${preview.not_previewed.join(", ")}.` : ""}</p>
+    </div>
+  );
+}
+
+function filterText(filters: Record<string, string[]> | undefined): string {
+  return Object.entries(filters ?? {}).map(([k, v]) => `${k.replace("_", " ")}: ${(v ?? []).join(", ")}`).join(" · ");
+}
+
 export function StageDetail({ stage, data, catalog }: { stage: StageId; data: any; catalog: CatalogMeta | null }) {
   switch (stage) {
     case "intent":
@@ -82,11 +123,9 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
           ["Decision", data.decision ?? "Not yet known"],
           ["Numbers", names(data.measures, "m", catalog)],
           ["Broken down by", names(data.dimensions, "d", catalog)],
-          ["Time grain", data.grain ?? "Not yet known"],
-          ...(Object.keys(data.filters ?? {}).length
-            ? [["Filters", Object.entries(data.filters).map(([k, v]) => `${k} = ${v}`).join(", ")] as [string, string]]
-            : []),
-          ...(data.department ? [["Department", data.department] as [string, string]] : []),
+          ["Scope", (filterText(data.filters) || "No filter") + (data.scope_global ? " · global" : "")],
+          ...(data.migration ? [["Migration", `Replace a ${data.migration.from} workbook`] as [string, string]] : []),
+          ...(data.department ? [["Domain", data.department] as [string, string]] : []),
           ...(data.unmatched_terms?.length ? [["Not in catalog", data.unmatched_terms.join(", ")] as [string, string]] : []),
         ]} />
         </div>
@@ -96,28 +135,28 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
       const cands: Candidate[] = data.candidates ?? [];
       return (
         <div className="detail-stack">
-          <p className="muted">Searched {data.searched} catalog assets. Scores compare each report with your request.</p>
+          <p className="muted">
+            {data.total_candidates ?? cands.length} of {data.searched} reports use a requested KPI; {data.in_scope ?? "–"} fit the product and market scope.
+            Showing the closest {cands.length}.
+          </p>
           {cands.length === 0 && <p className="muted">No existing report uses these numbers.</p>}
           {cands.map((c) => (
             <div key={c.asset_id} className="cand">
-              <div className="cand-head"><strong>{c.name}</strong></div>
+              <div className="cand-head"><strong>{c.name}</strong><span className="muted small">{c.asset_id} · {c.platform}</span></div>
+              <p className="muted small">{c.scope_note} · {c.views_90d?.toLocaleString("en-US")} views in 90 days · {c.lifecycle?.replace("_", " ")}</p>
               <div className="scores">
                 <Score label="Coverage" value={c.coverage} />
                 <Score label="Freshness" value={c.freshness} />
                 <Score label="Governance" value={c.governance} good={0.8} />
               </div>
-              {(c.measures_missing.length > 0 || c.dimensions_missing.length > 0 || !c.grain_supported) && (
-                <p className="muted small">
-                  Missing: {[...c.measures_missing.map((m) => catalog?.measures[m]?.name ?? m),
-                    ...c.dimensions_missing.map((d) => catalog?.dimensions[d]?.name ?? d),
-                    ...(c.grain_supported ? [] : ["finer time grain"])].join(", ")}
-                </p>
+              {c.measures_missing.length > 0 && (
+                <p className="muted small">Missing KPIs: {c.measures_missing.map((m) => catalog?.measures[m]?.name ?? m).join(", ")}</p>
               )}
             </div>
           ))}
           {!data.availability?.available && (
             <p className="warn-text small">
-              Data not available: {[...(data.availability?.missing_terms ?? []), ...(data.availability?.missing_dimensions ?? [])].join(", ") || "no catalog measures matched"}
+              Not available: {[...(data.availability?.missing_terms ?? [])].join(", ") || "no governed KPI matched"}
             </p>
           )}
         </div>
@@ -148,11 +187,13 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
       return (
         <div className="detail-stack">
           <div className={`decision-badge d-${data.decision}`}>
-            {({ reuse: "Reuse", extend: "Extend", create: "Create", not_feasible: "Not feasible" } as Record<string, string>)[data.decision]}
-            {data.change_type && <span> · {data.change_type}</span>}
+            {DECISION_LABEL[data.decision as DecisionType]}
           </div>
           <p>{data.reason}</p>
           <p className="rule"><span className="muted">Rule applied: </span>{data.rule}</p>
+          {data.rules_applied?.length > 0 && (
+            <div className="rule-chips">{data.rules_applied.map((r: string) => <span key={r} className="badge">{r}</span>)}</div>
+          )}
           {c && (
             <div className="scores">
               <Score label="Coverage" value={c.coverage} />
@@ -160,9 +201,10 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
               <Score label="Governance" value={c.governance} good={0.8} />
             </div>
           )}
+          <PreviewTable preview={data.preview} />
           {data.flags?.length > 0 && (
             <div className="flags-box">
-              <strong className="small">Also flagged</strong>
+              <strong className="small">Also flagged ({data.flags.length})</strong>
               {data.flags.map((f: { asset_id: string; name: string; message: string }) => (
                 <p key={f.asset_id} className="small"><strong>{f.name}</strong>: {f.message}</p>
               ))}
@@ -193,11 +235,14 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
         <OpenInExplorer id={a.id} />
         <KV rows={[
           ["Report", <strong key="n">{a.name}</strong>],
+          ["Asset", `${a.id} · ${a.platform} ${a.asset_type}`],
           ["Workspace", a.workspace],
-          ["Owner", a.owner],
+          ["Scope", `${a.product_scope} / ${a.market_scope}`],
+          ["Owner", `${a.owner} (${a.owner_status})`],
           ["Views (90 days)", a.views_90d?.toLocaleString("en-US") ?? "0"],
-          ["Last reviewed", a.last_review],
+          ["Semantic model", a.model_id],
         ]} />
+        <PreviewTable preview={data.preview} />
         </div>
       );
     }
@@ -229,10 +274,15 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
           {data.agent && <AgentTrace trace={data.agent} />}
           <KV rows={[
             ["Name", <strong key="n">{data.name}</strong>],
-            ["Type", `${data.decision_type}${data.change_type ? ` (${data.change_type})` : ""}`],
+            ["Type", DECISION_LABEL[data.decision_type as DecisionType] ?? data.decision_type],
+            ...(data.semantic_model ? [["Shared model", `${data.semantic_model.id} · ${data.semantic_model.name} (${data.semantic_model.endorsement})`] as [string, string]] : []),
+            ["KPIs", data.measures.map((m: { name: string; kpi_id: string }) => `${m.name} (${m.kpi_id})`).join(", ")],
+            ["Scope", `${data.product_scope} / ${data.market_scope}`],
+            ...(data.replaces?.length ? [["Replaces", data.replaces.join(", ")] as [string, string]] : []),
+            ...(data.change?.repairs ? [["Repairs", data.change.repairs] as [string, string]] : []),
             ["Owner", data.owner],
             ["Review date", data.review_date],
-            ["Pages", data.pages.map((p: { name: string; visuals: unknown[] }) => `${p.name} (${p.visuals.length} visuals)`).join(", ")],
+            ...(data.pages.length ? [["Pages", data.pages.map((p: { name: string; visuals: unknown[] }) => `${p.name} (${p.visuals.length} visuals)`).join(", ")] as [string, string]] : []),
           ]} />
           {data.rationale && <p className="muted">{data.rationale}</p>}
           {data.validation && (
@@ -267,7 +317,7 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
             ))}
           </ul>
           <details>
-            <summary>Table definition (TMDL preview)</summary>
+            <summary>{data.maintenance ? "Maintenance change" : "Connection to the shared model (definition.pbir)"}</summary>
             <pre className="code">{data.preview.model}</pre>
           </details>
           {!data.validated_in_power_bi && <p className="muted small">Skeleton output: not yet opened in Power BI Desktop.</p>}

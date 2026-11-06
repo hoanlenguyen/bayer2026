@@ -2,13 +2,13 @@
 
 Bayer Hackathon 2026 entry for "Build Less, Build Better: AI for Governed Analytics".
 
-An AI workspace for a pharma manufacturing plant. Before anything is built it checks what already exists, decides with a transparent formula whether to reuse, extend or create, and only then generates version-controlled Power BI (PBIP) files, with a human approval step.
+An AI workspace for Bayer Pharmaceuticals' analytics estate. A business user asks for a report or a number; the system finds what already exists across 360 Power BI and Tableau assets, checks KPI definitions, usage, ownership, lineage and governance, and recommends with evidence whether to **reuse, repair, consolidate, migrate or build**. New reports are thin Power BI (PBIP) reports on shared semantic models, generated only after a person approves. Follow-up work goes into an action tracker.
 
-- `CLAUDE.md`: scope, architecture, decision formula and conventions (source of truth)
-- `backend/`: FastAPI pipeline, decision rules, PBIP generator. See `backend/README.md`
-- `frontend/`: React app with the Ask page (chat + live processing flow) and the Estate Explorer. See `frontend/README.md`
-- `docs/PROPOSAL.md`: earlier concept write-up
-- Build plan (published page): https://claude.ai/artifact/NWgjoee8m5ZYAYoBkDmYCC
+- `CLAUDE.md`: scope, data mapping, decision rules, architecture (source of truth)
+- `materials/`: Bayer Pharmaceuticals × Since AI 2026 Builder Data Pack (synthetic)
+- `backend/`: FastAPI pipeline, agents, decision rules, PBIP generator. See `backend/README.md`
+- `frontend/`: React app: Ask, Estate Explorer, Actions. See `frontend/README.md`
+- `docs/PROPOSAL.md`: early concept write-up (partly outdated)
 
 ## Quick start
 
@@ -20,3 +20,5 @@ uvicorn app.main:app --reload --port 8000
 ```bash
 cd frontend && npm install && npm run dev    # http://localhost:5173
 ```
+
+All data is synthetic. No patient or HCP data is used.

@@ -114,7 +114,7 @@ export function GraphTab(p: Props) {
           <div className="fgroup">
             <h3>Flags</h3>
             <ul className="insp-flags">
-              {e.flags.map((f) => <li key={f.title}><SeverityPill sev={f.sev} />{f.title}</li>)}
+              {e.flags.map((f, i) => <li key={`${i}-${f.title}`}><SeverityPill sev={f.sev} />{f.title}</li>)}
             </ul>
           </div>
         )}

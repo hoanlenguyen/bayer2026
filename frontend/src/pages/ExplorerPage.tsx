@@ -45,7 +45,7 @@ function ExplorerView({ initialFocus, home, focusRequest }: { initialFocus: stri
   const [focus, setFocusId] = useState(initialFocus);
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTabState] = useState<Tab>(tabFromHash);
-  const [depth, setDepth] = useState(2);
+  const [depth, setDepth] = useState(1); // the estate is large: start with direct neighbours
   const [hidden, setHidden] = useState<Set<EntityType>>(() => new Set());
   const [sent, setSent] = useState<Set<string>>(() => new Set());
 

@@ -14,7 +14,6 @@ interface ChatMessage {
 
 type ConvState = "idle" | "clarifying" | "awaiting_approval";
 
-const DEPARTMENTS = ["All", "Production", "Quality", "Supply chain", "HR", "Finance", "IT"];
 
 function greeting(d = new Date()) {
   const h = d.getHours();
@@ -148,7 +147,10 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
     setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null); setProposals(null);
   };
 
+  const departments = useMemo(() => ["All", ...Array.from(new Set(presets.map((p) => p.department)))], [presets]);
   const shownPresets = useMemo(() => presets.filter((p) => dept === "All" || p.department === dept), [presets, dept]);
+  const requestPresets = shownPresets.filter((p) => !p.scenario);
+  const scenarioPresets = shownPresets.filter((p) => p.scenario);
   const lastId = messages.length ? messages[messages.length - 1].id : -1;
 
   const offlineBanner = offline && (
@@ -165,22 +167,33 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
           <h1>{greeting()}.</h1>
           <p>What do you need to decide today?</p>
         </div>
-        <Composer onSend={(t) => send(t)} disabled={busy} autoFocus placeholder="Describe the decision or the numbers you need, in your own words" />
+        <Composer onSend={(t) => send(t)} disabled={busy} autoFocus placeholder="Ask for a report or a number, for example: Nubeqa net sales and market access by country" />
         <div className="dept-filter" role="group" aria-label="Filter suggestions by department">
-          {DEPARTMENTS.map((d) => (
+          {departments.map((d) => (
             <button key={d} type="button" aria-pressed={dept === d} onClick={() => setDept(d)}>{d}</button>
           ))}
         </div>
+        {requestPresets.length > 0 && <h2 className="preset-heading">Business requests from Bayer's data pack</h2>}
         <div className="preset-grid">
-          {shownPresets.map((p) => (
+          {requestPresets.map((p) => (
             <button key={p.id} type="button" className="preset" onClick={() => send(p.prompt, p.id)} disabled={busy}>
-              <span className="preset-dept">{p.department}</span>
+              <span className="preset-dept">{p.department}{p.requests ? ` · asked ${p.requests}×` : ""}</span>
               <span className="preset-title">{p.title}</span>
               <span className="preset-prompt">{p.prompt}</span>
             </button>
           ))}
         </div>
-        <p className="fineprint">Sample data for a fictional pharma plant. The AI sees catalog metadata only, never raw production data.</p>
+        {scenarioPresets.length > 0 && <h2 className="preset-heading">Estate scenarios <span className="muted">built from real assets to show each outcome</span></h2>}
+        <div className="preset-grid">
+          {scenarioPresets.map((p) => (
+            <button key={p.id} type="button" className="preset" onClick={() => send(p.prompt, p.id)} disabled={busy}>
+              <span className="preset-dept">{p.department} · expect {p.scenario?.replace("_", " ")}</span>
+              <span className="preset-title">{p.title}</span>
+              <span className="preset-prompt">{p.prompt}</span>
+            </button>
+          ))}
+        </div>
+        <p className="fineprint">Synthetic Bayer Pharmaceuticals × Since AI 2026 data pack: 360 reports, 75 semantic models, 56 KPIs. No patient or HCP data. The AI sees catalog metadata only.</p>
       </div>
     );
   }

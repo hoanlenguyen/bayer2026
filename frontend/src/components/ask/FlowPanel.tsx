@@ -21,7 +21,7 @@ const TITLES: Record<StageId, string> = {
   intent: "Understand the request",
   discovery: "Find existing analytics",
   governance: "Check governance",
-  decision: "Decide: reuse, extend or create",
+  decision: "Decide the lifecycle action",
   actions: "Propose follow-up actions",
   deliver: "Open the existing report",
   evidence: "Gather evidence",
@@ -37,7 +37,7 @@ const AUTO_OPEN: StageId[] = ["intent", "decision", "spec", "render", "register"
 
 function stagesFor(decision: DecisionType | null): StageId[] {
   if (decision === "reuse") return [...BASE, "actions", "deliver"];
-  if (decision === "extend" || decision === "create") return [...BASE, "actions", ...BUILD];
+  if (decision) return decision === "not_feasible" ? [...BASE, "actions"] : [...BASE, "actions", ...BUILD];
   if (decision === "not_feasible") return [...BASE, "actions"];
   return BASE;
 }
@@ -88,7 +88,7 @@ export function FlowPanel({ stages, decision, health, catalog }: Props) {
       {!started && (
         <p className="flow-empty">
           Each step appears here as it runs: what the AI understood, which reports already exist, how well they are governed,
-          and why the system chose to reuse, extend or create.
+          and why the system chose to reuse, repair, consolidate, migrate or build. Every step cites Bayer's governance rules.
         </p>
       )}
 
@@ -124,7 +124,7 @@ export function FlowPanel({ stages, decision, health, catalog }: Props) {
           <li className="flow-step st-pending flow-branch">
             <span className="flow-icon" aria-hidden="true" />
             <div className="flow-body">
-              <span className="flow-name">Then: reuse it, or build with evidence → spec → approval → PBIP</span>
+              <span className="flow-name">Then: reuse it, or repair, consolidate, migrate or build with evidence → spec → approval → PBIP</span>
             </div>
           </li>
         )}

@@ -1,50 +1,55 @@
-"""The analytics catalog and department presets.
+"""The analytics catalog and presets, built from the Bayer data pack.
 
-The catalog holds metadata only (measures, dimensions, datasets, existing
-reports). It is loaded from the store at startup; when the store is empty it is
-seeded from app/data/*.json. The AI reasons over this metadata, never over raw
-production data.
+Loaded from the store at startup. When the store is empty, it is seeded from
+the workbook in materials/ (see app/datapack.py). Metadata only: the AI reasons
+over KPI definitions, models, reports, usage, lineage and governance signals.
 """
 from __future__ import annotations
 
 import copy
-import json
-from pathlib import Path
+from functools import lru_cache
 from typing import Any
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
+from . import datapack
 
-SEED_CATALOG: dict[str, Any] = {k: v for k, v in json.loads((DATA_DIR / "catalog.json").read_text(encoding="utf-8")).items()
-                                if not k.startswith("_")}
-SEED_PRESETS: list[dict[str, Any]] = json.loads((DATA_DIR / "presets.json").read_text(encoding="utf-8"))
+CATALOG: dict[str, Any] = {}
+PRESETS: list[dict[str, Any]] = []
+SHEETS: dict[str, list[dict[str, Any]]] = {}
 
-# Live, in-process copies used by the pipeline. Mutated in place so imports stay valid.
-CATALOG: dict[str, Any] = copy.deepcopy(SEED_CATALOG)
-PRESETS: list[dict[str, Any]] = copy.deepcopy(SEED_PRESETS)
 
-DATASET_DEPARTMENT = {
-    "shipments_fact": "Supply chain",
-    "inventory_snapshot": "Supply chain",
-    "production_batches_fact": "Production",
-    "line_events_fact": "Production",
-    "quality_deviations": "Quality",
-    "hr_attendance": "HR",
-    "training_records": "HR",
-    "cost_ledger": "Finance",
-}
+@lru_cache(maxsize=1)
+def _seed() -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    return datapack.load()
+
+
+def seed_catalog() -> dict[str, Any]:
+    return copy.deepcopy(_seed()[1])
+
+
+def seed_presets() -> list[dict[str, Any]]:
+    return copy.deepcopy(datapack.PRESETS + datapack.SCENARIOS)
+
+
+def reset_catalog() -> None:
+    """Restore the catalog from the workbook (used by tests and the in-memory store)."""
+    sheets, catalog = _seed()
+    CATALOG.clear()
+    CATALOG.update(copy.deepcopy(catalog))
+    PRESETS[:] = seed_presets()
+    SHEETS.clear()
+    SHEETS.update(sheets)
 
 
 async def init(store: Any) -> str:
-    """Load the catalog from the store, seeding it first if empty. Returns the source used."""
-    await store.seed_catalog(SEED_CATALOG, SEED_PRESETS)
+    """Load the catalog from the store, seeding it from the workbook first if empty."""
+    sheets, catalog = _seed()
+    await store.seed_datapack(sheets, catalog, seed_presets())
     loaded = await store.load_catalog()
-    presets = await store.load_presets()
-    if loaded:
-        CATALOG.clear()
-        CATALOG.update(loaded)
-    if presets:
-        PRESETS[:] = presets
-    # Example actions so the tracker opens in a realistic state (marked as sample data).
+    CATALOG.clear()
+    CATALOG.update(loaded or copy.deepcopy(catalog))
+    PRESETS[:] = await store.load_presets() or seed_presets()
+    SHEETS.clear()
+    SHEETS.update(sheets)
     if await store.count_artifacts("actions") == 0:
         from .actions import sample_actions
 
@@ -61,20 +66,19 @@ def measure(mid: str) -> dict[str, Any]:
     return CATALOG["measures"][mid]
 
 
-def asset_by_id(aid: str) -> dict[str, Any] | None:
-    return next((a for a in CATALOG["assets"] if a["id"] == aid), None)
+def asset_by_id(aid: str | None) -> dict[str, Any] | None:
+    return next((a for a in CATALOG.get("assets", []) if a["id"] == aid), None) if aid else None
+
+
+def model_by_id(mid: str | None) -> dict[str, Any] | None:
+    return CATALOG.get("models", {}).get(mid) if mid else None
 
 
 def department_for(measures: list[str]) -> str | None:
     for m in measures:
-        ds = CATALOG["measures"].get(m, {}).get("dataset")
-        if ds in DATASET_DEPARTMENT:
-            return DATASET_DEPARTMENT[ds]
+        if m in CATALOG.get("measures", {}):
+            return CATALOG["measures"][m]["domain"]
     return None
 
 
-def reset_catalog() -> None:
-    """Restore the seed catalog (used by tests)."""
-    CATALOG.clear()
-    CATALOG.update(copy.deepcopy(SEED_CATALOG))
-    PRESETS[:] = copy.deepcopy(SEED_PRESETS)
+reset_catalog()

@@ -112,8 +112,8 @@ export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Pr
           <h2 className="card-title">AI review flags <span className="count">{e.flags.length}</span></h2>
           {e.flags.length ? (
             <ul className="flags">
-              {e.flags.map((f) => (
-                <li key={f.title} className="flag">
+              {e.flags.map((f, i) => (
+                <li key={`${i}-${f.title}`} className="flag">
                   <div className="flag-top"><SeverityPill sev={f.sev} /><strong>{f.title}</strong></div>
                   <p>{f.text}</p>
                 </li>
