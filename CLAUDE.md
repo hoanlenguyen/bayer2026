@@ -68,8 +68,9 @@ Each agent has `run_llm` (OpenAI) and `run_rules` (offline, deterministic). Same
 
 ```
 frontend/  React + TypeScript + Vite
-  #ask       Ask page: chat, department presets, live processing-flow panel
-  #explorer  Estate Explorer: entity details + relationship graph ("molecular view"),
+  #ask       Investigations: research workbench, department presets, comparison + evidence inspector,
+             approval dock and expandable live processing record
+  #explorer  Asset index (Estate Explorer): entity details + relationship graph ("molecular view"),
              loaded from GET /api/graph (live plant catalog, same governance scoring as the Ask flow)
 backend/   Python 3.12+, FastAPI
   app/main.py        HTTP API, Server-Sent Events stream of pipeline events

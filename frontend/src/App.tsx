@@ -3,7 +3,8 @@ import { TopBar, type Page } from "./components/TopBar";
 import { AskPage } from "./pages/AskPage";
 import { ExplorerPage } from "./pages/ExplorerPage";
 
-const pageFromHash = (): Page => (window.location.hash.startsWith("#explorer") ? "explorer" : "ask");
+const pageFromHash = (): Page =>
+  window.location.hash.startsWith("#explorer") ? "explorer" : "ask";
 
 export default function App() {
   const [page, setPage] = useState<Page>(pageFromHash);
@@ -24,13 +25,24 @@ export default function App() {
     };
   }, []);
   console.log('clg')
+
+  useEffect(() => {
+    if (page === "ask") document.title = "Investigations · Analytics Manager";
+  }, [page]);
+
   return (
     <div className={`app app-${page}`}>
       <TopBar
         page={page}
-        onPick={(id) => { setFocusRequest(id); window.location.hash = "#explorer"; }}
+        onPick={(id) => {
+          setFocusRequest(id);
+          window.location.hash = "#explorer";
+        }}
       />
-      {page === "ask" ? <AskPage /> : <ExplorerPage focusRequest={focusRequest} />}
+      <div hidden={page !== "ask"}>
+        <AskPage />
+      </div>
+      {page === "explorer" && <ExplorerPage focusRequest={focusRequest} />}
     </div>
   );
 }

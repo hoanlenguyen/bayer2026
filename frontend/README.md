@@ -1,6 +1,6 @@
 # Frontend
 
-React + TypeScript + Vite app. Pages: **Ask** (`#ask`, chat with a live processing-flow panel) and **Estate Explorer** (`#explorer`, entity details and relationship graph). In development, `/api` is proxied to the backend on port 8000.
+React + TypeScript + Vite app. Pages: **Investigations** (`#ask`, a research workbench) and **Asset index** (`#explorer`, entity details and relationship graph). In development, `/api` is proxied to the backend on port 8000.
 
 ## Run
 
@@ -28,3 +28,15 @@ Start the backend first (see `../backend/README.md`). Open `http://localhost:517
 ## Graph interactions
 
 Click a node to inspect it, double-click (or press Enter) to make it the focus, drag to rearrange, scroll to zoom. Depth and entity-type filters are in the left panel.
+
+## Research workbench
+
+The investigation aligns backend catalog matches with the requested measures, dimensions and time grain. The left index selects an analysis; the centre compares its coverage; the right inspector shows governance checks, evidence, specification and the engine's decision. Inspecting an alternative never changes the backend recommendation. The decision dock preserves explicit approval/rejection, and the expandable processing record retains every stage and generated-file preview.
+
+The workbench is a presentation layer over the existing SSE events. API clients, backend scoring, thresholds, agents, persistence and PBIP generation are unchanged. Investigations remain mounted when the asset index opens, preserving the active session. The existing department presets and fictional-data labels are retained; assay content from the design mockup is not inserted into the catalog.
+
+`src/components/ask/Workbench.tsx` renders the comparison and inspector; `src/workbench.css` provides the visual layer, responsive layouts, dark mode and reduced-motion support.
+
+### Verification
+
+After installing the backend dependencies in `backend/.venv`, run `npm run test:workbench`. Set `WORKBENCH_PYTHON` to an alternative Python executable if needed. The test captures real offline backend SSE events and renders the workbench at each stage across all department presets, approval output and all four decision paths. It also verifies that partial governance events do not replace complete discovery candidates. These rendering checks complement the backend pytest suite; they do not exercise a live OpenAI key or Atlas database.
