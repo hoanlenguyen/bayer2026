@@ -30,7 +30,7 @@ function EntityRow({ entity: o, onFocus }: { entity: Entity; onFocus: (id: strin
 
 function governanceRows(e: Entity, onFocus: (id: string) => void): [string, ReactNode][] {
   const owner = ownerOf(e.id);
-  const rows: [string, ReactNode][] = [["Status", <Pill status={e.status} />]];
+  const rows: [string, ReactNode][] = [];
   if (owner) {
     rows.push(["Owner", <>
       <button type="button" className="inline-link" onClick={() => onFocus(owner.id)}>{owner.name}</button>
@@ -59,11 +59,7 @@ export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Pr
     <div className="details-grid">
       <div className="details-main">
         <article className="card">
-          <h2 className="card-title">Summary</h2>
           <p className="summary">{e.summary}</p>
-        </article>
-        <article className="card">
-          <h2 className="card-title">Properties</h2>
           <dl className="props">
             {Object.entries(e.props).map(([k, v]) => (
               <div key={k} className={`prop${WIDE_KEYS.has(k) ? " wide" : ""}`}>
@@ -76,7 +72,7 @@ export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Pr
         <article className="card">
           <div className="card-head">
             <h2 className="card-title">Relationships <span className="count">{total}</span></h2>
-            <button type="button" className="btn-ghost" onClick={onShowGraph}>View in graph</button>
+            <button type="button" className="btn-outline" onClick={onShowGraph}>View in graph</button>
           </div>
           {groups.map((g) => (
             <div key={g.label} className="rel-group">
@@ -112,7 +108,7 @@ export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Pr
           )}
         </article>
         <article className="card">
-          <h2 className="card-title">AI review flags <span className="count">{e.flags.length}</span></h2>
+          <h2 className="card-title">Review flags <span className="count">{e.flags.length}</span></h2>
           {e.flags.length ? (
             <ul className="flags">
               {e.flags.map((f) => (

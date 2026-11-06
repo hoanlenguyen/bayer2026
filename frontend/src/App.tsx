@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { TopBar, type Page } from "./components/TopBar";
+import { Sidebar, type Page } from "./components/Sidebar";
 import { AskPage } from "./pages/AskPage";
 import { ExplorerPage } from "./pages/ExplorerPage";
 
@@ -26,11 +26,10 @@ export default function App() {
   console.log('clg')
   return (
     <div className={`app app-${page}`}>
-      <TopBar
-        page={page}
-        onPick={(id) => { setFocusRequest(id); window.location.hash = "#explorer"; }}
-      />
-      {page === "ask" ? <AskPage /> : <ExplorerPage focusRequest={focusRequest} />}
+      <Sidebar page={page} />
+      <div className="app-main">
+        {page === "ask" ? <AskPage /> : <ExplorerPage focusRequest={focusRequest} />}
+      </div>
     </div>
   );
 }

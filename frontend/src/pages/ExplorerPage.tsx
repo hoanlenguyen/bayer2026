@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { DetailsTab } from "../components/DetailsTab";
 import { EntityHeader } from "../components/EntityHeader";
+import { EntitySearch } from "../components/EntitySearch";
 import { GraphTab } from "../components/GraphTab";
 import type { EntityType } from "../data/types";
 import { byId, loadEstate } from "../lib/estate";
@@ -86,8 +87,8 @@ function ExplorerView({ initialFocus, home, focusRequest }: { initialFocus: stri
 
   return (
     <>
+      <EntityHeader entity={entity} homeId={home} onFocus={(id) => setFocus(id)} search={<EntitySearch onPick={(id) => setFocus(id)} />} />
       <main className="page">
-        <EntityHeader entity={entity} homeId={home} onFocus={(id) => setFocus(id)} />
         <div className="tabs" role="tablist" aria-label="Entity views">
           {(["details", "graph"] as Tab[]).map((t) => (
             <button

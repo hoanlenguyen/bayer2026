@@ -18,7 +18,7 @@ interface Props {
   onToggleType: (t: EntityType, visible: boolean) => void;
 }
 
-const DEPTHS: [number, string][] = [[1, "1 hop"], [2, "2 hops"], [99, "All"]];
+const DEPTHS: [number, string][] = [[1, "Direct"], [2, "2 steps"], [99, "All"]];
 const EMPTY = new Set<EntityType>();
 
 function EdgeKey({ cls, label }: { cls: string; label: string }) {
@@ -47,83 +47,74 @@ export function GraphTab(p: Props) {
   const inView = links.filter((l) => l.source.id === id || l.target.id === id).length;
 
   return (
-    <div className="graph-layout">
-      <aside className="graph-filters panel" aria-label="Graph filters">
-        <div className="fgroup">
-          <h3>Depth</h3>
-          <div className="seg" role="group" aria-label="Graph depth">
-            {DEPTHS.map(([v, label]) => (
-              <button key={v} type="button" aria-pressed={p.depth === v} onClick={() => p.onDepth(v)}>{label}</button>
-            ))}
-          </div>
-        </div>
-        <div className="fgroup">
-          <h3>Entity types</h3>
-          {(Object.keys(TYPES) as EntityType[]).filter((k) => ENTITIES.some((e) => e.type === k)).map((k) => (
-            <label key={k} className={`type-toggle t-${k}${counts[k] ? "" : " zero"}`}>
-              <input type="checkbox" id={`type-${k}`} checked={!p.hidden.has(k)} onChange={(ev) => p.onToggleType(k, ev.target.checked)} />
-              <span className="tdot" />
-              {TYPES[k].plural}
-              <span className="n">{counts[k] ?? 0}</span>
-            </label>
+    <div className="graph-wrap">
+      <div className="graph-controls" aria-label="Graph filters">
+        <div className="seg" role="group" aria-label="How far to follow connections">
+          {DEPTHS.map(([v, label]) => (
+            <button key={v} type="button" aria-pressed={p.depth === v} onClick={() => p.onDepth(v)}>{label}</button>
           ))}
         </div>
-        <div className="fgroup">
-          <h3>Relationships</h3>
-          <div className="edge-key">
+        <div className="type-chips" role="group" aria-label="Show or hide item types">
+          {(Object.keys(TYPES) as EntityType[]).filter((k) => ENTITIES.some((en) => en.type === k)).map((k) => {
+            const on = !p.hidden.has(k);
+            return (
+              <button key={k} type="button" className={`type-chip-btn t-${k}`} aria-pressed={on} disabled={!counts[k]} onClick={() => p.onToggleType(k, !on)}>
+                <span className="tdot" />
+                {TYPES[k].plural}
+                <span className="n">{counts[k] ?? 0}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="stats">{visible.size} items · {shownEdges} links</p>
+      </div>
+
+      <div className="graph-layout">
+        <div className="graph-main">
+          <GraphCanvas
+            focus={p.focus}
+            depth={p.depth}
+            hidden={p.hidden}
+            selected={p.selected}
+            onSelect={p.onSelect}
+            onFocus={p.onFocus}
+            onLinks={setLinks}
+          />
+          <div className="graph-key" aria-label="Graph key">
             <EdgeKey cls="k-bad" label="Metric conflict" />
             <EdgeKey cls="k-warn" label="Duplicate or overlap" />
             <EdgeKey cls="k-accent" label="Equivalent logic" />
             <EdgeKey cls="k-base" label="Lineage, usage, ownership, joins" />
           </div>
         </div>
-        <div className="fgroup">
-          <h3>Node ring</h3>
-          <div className="edge-key">
-            <div><Pill status="certified" sm /> solid ring</div>
-            <div><Pill status="conflict" sm /> dashed ring</div>
-            <div><Pill status="stale" sm /> <Pill status="orphaned" sm /></div>
-          </div>
-        </div>
-        <p className="stats">{visible.size} entities · {shownEdges} relationships</p>
-      </aside>
 
-      <GraphCanvas
-        focus={p.focus}
-        depth={p.depth}
-        hidden={p.hidden}
-        selected={p.selected}
-        onSelect={p.onSelect}
-        onFocus={p.onFocus}
-        onLinks={setLinks}
-      />
-
-      <aside className="graph-inspector panel" aria-label="Selected entity" aria-live="polite">
-        <div className="insp-head">
-          <div className="head-kicker"><TypeChip type={e.type} /><Pill status={e.status} sm /></div>
-          <h3>{e.name}</h3>
-          {e.type !== "person" && <Meter value={e.trust} />}
-        </div>
-        <p className="empty">{e.summary}</p>
-        <dl className="insp-props">
-          {Object.entries(e.props).slice(0, 4).map(([k, v]) => (
-            <div key={k}><dt>{k}</dt><dd className={CODE_KEYS.has(k) ? "mono" : undefined}>{v}</dd></div>
-          ))}
-        </dl>
-        {e.flags.length > 0 && (
-          <div className="fgroup">
-            <h3>Flags</h3>
-            <ul className="insp-flags">
-              {e.flags.map((f) => <li key={f.title}><SeverityPill sev={f.sev} />{f.title}</li>)}
-            </ul>
+        <aside className="graph-inspector panel" aria-label="Selected item" aria-live="polite">
+          <div className="insp-head">
+            <div className="head-kicker"><TypeChip type={e.type} /><Pill status={e.status} sm /></div>
+            <h3>{e.name}</h3>
+            {e.type !== "person" && <Meter value={e.trust} />}
           </div>
-        )}
-        <p className="stats">{inView} relationship{inView === 1 ? "" : "s"} in this view</p>
-        <div className="insp-actions">
-          {id !== p.focus && <button type="button" className="btn" onClick={() => p.onFocus(id)}>Focus graph here</button>}
-          <button type="button" className="btn-ghost" onClick={() => p.onOpenDetails(id)}>Open details</button>
-        </div>
-      </aside>
+          <p className="empty">{e.summary}</p>
+          <dl className="insp-props">
+            {Object.entries(e.props).slice(0, 4).map(([k, v]) => (
+              <div key={k}><dt>{k}</dt><dd className={CODE_KEYS.has(k) ? "mono" : undefined}>{v}</dd></div>
+            ))}
+          </dl>
+          {e.flags.length > 0 && (
+            <div className="fgroup">
+              <h4>Flags</h4>
+              <ul className="insp-flags">
+                {e.flags.map((f) => <li key={f.title}><SeverityPill sev={f.sev} />{f.title}</li>)}
+              </ul>
+            </div>
+          )}
+          <p className="stats">{inView} link{inView === 1 ? "" : "s"} in this view</p>
+          <div className="insp-actions">
+            {id !== p.focus && <button type="button" className="btn" onClick={() => p.onFocus(id)}>Focus graph here</button>}
+            <button type="button" className="btn-outline" onClick={() => p.onOpenDetails(id)}>Open details</button>
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }

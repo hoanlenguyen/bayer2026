@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { CatalogMeta, DecisionType, Health, StageEvent, StageId } from "../../api/types";
+import { Icon } from "../Icon";
 import { StageDetail } from "./StageDetail";
 
 /** Who does the work in each stage. Mirrors the legend in Bayer's reference pipeline. */
@@ -18,25 +19,50 @@ const STAGE_KIND: Record<StageId, { label: string; cls: string }> = {
 
 const TITLES: Record<StageId, string> = {
   intent: "Understand the request",
-  discovery: "Find existing analytics",
-  governance: "Check governance",
-  decision: "Decide: reuse, extend or create",
+  discovery: "Find existing reports",
+  governance: "Check they can be trusted",
+  decision: "Decide what to do",
   deliver: "Open the existing report",
-  evidence: "Gather evidence",
-  spec: "Write the specification",
-  approval: "Human approval",
-  render: "Generate PBIP files",
-  register: "Register in the catalog",
+  evidence: "Check the data sources",
+  spec: "Design the report",
+  approval: "Get approval",
+  render: "Create the report files",
+  register: "Add to the catalog",
+};
+
+export const RUNNING_COPY: Record<StageId, string> = {
+  intent: "Reading your question",
+  discovery: "Looking through the catalog",
+  governance: "Checking ownership and certification",
+  decision: "Applying the decision rules",
+  deliver: "Opening the report",
+  evidence: "Checking the data sources",
+  spec: "Designing the report",
+  approval: "Waiting for approval",
+  render: "Creating the report files",
+  register: "Adding it to the catalog",
 };
 
 const BASE: StageId[] = ["intent", "discovery", "governance", "decision"];
 const BUILD: StageId[] = ["evidence", "spec", "approval", "render", "register"];
-const AUTO_OPEN: StageId[] = ["intent", "decision", "spec", "render", "register", "deliver"];
+const TECH_KEY = "am.technical";
 
 function stagesFor(decision: DecisionType | null): StageId[] {
   if (decision === "reuse") return [...BASE, "deliver"];
   if (decision === "extend" || decision === "create") return [...BASE, ...BUILD];
   return BASE;
+}
+
+function readTechnical() {
+  try { return localStorage.getItem(TECH_KEY) === "1"; } catch { return false; }
+}
+
+function summaryFor(ev: StageEvent | undefined, technical: boolean): string | null {
+  if (!ev) return null;
+  if (technical) return ev.summary;
+  if (ev.status === "running") return null;
+  if (ev.stage === "render" && ev.data?.files) return `${ev.data.files.length} files created`;
+  return ev.summary;
 }
 
 interface Props {
@@ -49,16 +75,13 @@ interface Props {
 export function FlowPanel({ stages, decision, health, catalog }: Props) {
   const order = stagesFor(decision);
   const [open, setOpen] = useState<Set<StageId>>(new Set());
+  const [technical, setTechnical] = useState(readTechnical);
 
-  // Open the important stages automatically as they complete.
+  // What the approver is signing off on opens by itself; everything else stays one click away.
+  const awaitingApproval = stages.approval?.status === "waiting";
   useEffect(() => {
-    setOpen((prev) => {
-      const next = new Set(prev);
-      AUTO_OPEN.forEach((s) => { if (stages[s]?.status === "done" || stages[s]?.status === "waiting") next.add(s); });
-      if (stages.intent?.status === "done" && stages.decision) next.delete("intent");
-      return next;
-    });
-  }, [stages]);
+    if (awaitingApproval) setOpen((prev) => new Set(prev).add("evidence").add("spec"));
+  }, [awaitingApproval]);
 
   const toggle = (s: StageId) => setOpen((prev) => {
     const next = new Set(prev);
@@ -66,13 +89,24 @@ export function FlowPanel({ stages, decision, health, catalog }: Props) {
     return next;
   });
 
-  const started = Object.keys(stages).length > 0;
+  const toggleTechnical = () => {
+    setTechnical((on) => {
+      try { localStorage.setItem(TECH_KEY, on ? "0" : "1"); } catch { /* preference only lasts this visit */ }
+      return !on;
+    });
+  };
 
   return (
-    <aside className="flow-panel" aria-label="Processing flow">
-      <div className="flow-head">
-        <h2>Processing flow</h2>
-        {health && (
+    <aside className="flow-panel" aria-label="How this was decided">
+      <div className="pane-head">
+        <h2>How this was decided</h2>
+        <button type="button" className="switch" role="switch" aria-checked={technical} onClick={toggleTechnical}>
+          Technical details<span className="switch-track" aria-hidden="true" />
+        </button>
+      </div>
+
+      <div className="flow-scroll">
+        {technical && health && (
           <div className="flow-badges">
             <span className="badge" title={health.models ? `${health.models.reasoning} / ${health.models.fast}` : "Rule-based, runs offline"}>
               {health.provider === "openai" ? "OpenAI" : "Mock model"}
@@ -80,58 +114,56 @@ export function FlowPanel({ stages, decision, health, catalog }: Props) {
             <span className="badge">{health.store === "mongodb" ? "MongoDB" : "In-memory store"}</span>
           </div>
         )}
-      </div>
 
-      {!started && (
-        <p className="flow-empty">
-          Each step appears here as it runs: what the AI understood, which reports already exist, how well they are governed,
-          and why the system chose to reuse, extend or create.
-        </p>
-      )}
-
-      <ol className="flow-steps">
-        {order.map((id) => {
-          const ev = stages[id];
-          const status = ev?.status ?? "pending";
-          const isOpen = open.has(id) && !!ev?.data;
-          return (
-            <li key={id} className={`flow-step st-${status}`}>
-              <span className="flow-icon" aria-hidden="true">
-                {status === "done" ? "✓" : status === "rejected" ? "✕" : status === "waiting" ? "…" : ""}
-              </span>
+        <ol className="flow-steps">
+          {order.map((id) => {
+            const ev = stages[id];
+            const status = ev?.status ?? "pending";
+            const isOpen = open.has(id) && !!ev?.data;
+            const summary = summaryFor(ev, technical);
+            return (
+              <li key={id} className={`flow-step st-${status}`}>
+                <span className="flow-icon" aria-hidden="true">
+                  {status === "done" && <Icon name="check" size={12} />}
+                  {status === "rejected" && <Icon name="close" size={12} />}
+                </span>
+                <div className="flow-body">
+                  <button
+                    type="button"
+                    className="flow-title"
+                    onClick={() => ev?.data && toggle(id)}
+                    aria-expanded={ev?.data ? isOpen : undefined}
+                    disabled={!ev?.data}
+                  >
+                    <span className="flow-name">{TITLES[id]}</span>
+                    {technical && <span className={`kind ${STAGE_KIND[id].cls}`}>{STAGE_KIND[id].label}</span>}
+                    {ev?.data && <span className={`flow-chevron${isOpen ? " open" : ""}`}><Icon name="chevron" size={14} /></span>}
+                  </button>
+                  {summary && <p className="flow-summary">{summary}</p>}
+                  {status === "pending" && <span className="sr-only">Not started</span>}
+                  {isOpen && <div className="flow-detail"><StageDetail stage={id} data={ev!.data} catalog={catalog} technical={technical} /></div>}
+                </div>
+              </li>
+            );
+          })}
+          {!decision && (
+            <li className="flow-step st-pending flow-branch">
+              <span className="flow-icon" aria-hidden="true" />
               <div className="flow-body">
-                <button
-                  type="button"
-                  className="flow-title"
-                  onClick={() => ev?.data && toggle(id)}
-                  aria-expanded={isOpen}
-                  disabled={!ev?.data}
-                >
-                  <span className="flow-name">{TITLES[id]}</span>
-                  <span className={`kind ${STAGE_KIND[id].cls}`}>{STAGE_KIND[id].label}</span>
-                </button>
-                {ev?.summary && <p className="flow-summary">{ev.summary}</p>}
-                {status === "pending" && <span className="sr-only">Not started</span>}
-                {isOpen && <div className="flow-detail"><StageDetail stage={id} data={ev!.data} catalog={catalog} /></div>}
+                <span className="flow-name">Then: reuse a report, or build one after your approval</span>
               </div>
             </li>
-          );
-        })}
-        {!decision && (
-          <li className="flow-step st-pending flow-branch">
-            <span className="flow-icon" aria-hidden="true" />
-            <div className="flow-body">
-              <span className="flow-name">Then: reuse it, or build with evidence → spec → approval → PBIP</span>
-            </div>
-          </li>
-        )}
-      </ol>
+          )}
+        </ol>
 
-      <div className="flow-legend" aria-label="Legend">
-        <span className="kind kind-ai">AI agent</span>
-        <span className="kind kind-py">Deterministic Python</span>
-        <span className="kind kind-human">Human</span>
-        <span className="kind kind-state">Catalog</span>
+        {technical && (
+          <div className="flow-legend" aria-label="Legend">
+            <span className="kind kind-ai">AI agent</span>
+            <span className="kind kind-py">Deterministic Python</span>
+            <span className="kind kind-human">Human</span>
+            <span className="kind kind-state">Catalog</span>
+          </div>
+        )}
       </div>
     </aside>
   );

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, streamPost } from "../api/client";
 import type { CatalogMeta, DecisionType, Health, PipelineEvent, Preset, StageEvent, StageId } from "../api/types";
-import { FlowPanel } from "../components/ask/FlowPanel";
+import { FlowPanel, RUNNING_COPY } from "../components/ask/FlowPanel";
+import { VerdictCard } from "../components/ask/VerdictCard";
+import { Icon } from "../components/Icon";
 
 interface ChatMessage {
   id: number;
@@ -14,11 +16,6 @@ interface ChatMessage {
 type ConvState = "idle" | "clarifying" | "awaiting_approval";
 
 const DEPARTMENTS = ["All", "Production", "Quality", "Supply chain", "HR", "Finance", "IT"];
-
-function greeting(d = new Date()) {
-  const h = d.getHours();
-  return h < 5 ? "Working late" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
-}
 
 /** Renders **bold** segments; everything else is plain text. */
 function RichText({ text }: { text: string }) {
@@ -57,7 +54,7 @@ function Composer({ onSend, disabled, autoFocus, placeholder }: {
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
       />
       <button type="submit" className="send" disabled={disabled || !text.trim()} aria-label="Send">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 12h13M12 5l7 7-7 7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        <Icon name="arrowUp" />
       </button>
     </form>
   );
@@ -87,8 +84,9 @@ export function AskPage() {
   }, []);
 
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, busy]);
+    // Works in both layouts: the list scrolls on desktop, the page scrolls on narrow screens.
+    listRef.current?.lastElementChild?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [messages, busy, stages]);
 
   const handleEvent = useCallback((e: PipelineEvent) => {
     switch (e.type) {
@@ -146,6 +144,8 @@ export function AskPage() {
 
   const shownPresets = useMemo(() => presets.filter((p) => dept === "All" || p.department === dept), [presets, dept]);
   const lastId = messages.length ? messages[messages.length - 1].id : -1;
+  const runningStage = (Object.values(stages) as StageEvent[]).find((s) => s.status === "running")?.stage;
+  const hasVerdict = stages.decision?.status === "done";
 
   const offlineBanner = offline && (
     <div className="banner" role="status">
@@ -157,26 +157,28 @@ export function AskPage() {
     return (
       <div className="ask-empty">
         {offlineBanner}
-        <div className="hello">
-          <h1>{greeting()}.</h1>
-          <p>What do you need to decide today?</p>
-        </div>
+        <h1>What do you need to decide?</h1>
         <Composer onSend={(t) => send(t)} disabled={busy} autoFocus placeholder="Describe the decision or the numbers you need, in your own words" />
-        <div className="dept-filter" role="group" aria-label="Filter suggestions by department">
-          {DEPARTMENTS.map((d) => (
-            <button key={d} type="button" aria-pressed={dept === d} onClick={() => setDept(d)}>{d}</button>
-          ))}
-        </div>
-        <div className="preset-grid">
-          {shownPresets.map((p) => (
-            <button key={p.id} type="button" className="preset" onClick={() => send(p.prompt, p.id)} disabled={busy}>
-              <span className="preset-dept">{p.department}</span>
-              <span className="preset-title">{p.title}</span>
-              <span className="preset-prompt">{p.prompt}</span>
-            </button>
-          ))}
-        </div>
-        <p className="fineprint">Sample data for a fictional pharma plant. The AI sees catalog metadata only, never raw production data.</p>
+        <section className="starters" aria-labelledby="starters-title">
+          <div className="starters-head">
+            <h2 id="starters-title">Common questions</h2>
+            <div className="dept-filter" role="group" aria-label="Filter questions by department">
+              {DEPARTMENTS.map((d) => (
+                <button key={d} type="button" aria-pressed={dept === d} onClick={() => setDept(d)}>{d}</button>
+              ))}
+            </div>
+          </div>
+          <div className="preset-grid">
+            {shownPresets.map((p) => (
+              <button key={p.id} type="button" className="preset" onClick={() => send(p.prompt, p.id)} disabled={busy}>
+                <span className="preset-title">{p.title}</span>
+                <span className="preset-prompt">{p.prompt}</span>
+                {dept === "All" && <span className="preset-dept">{p.department}</span>}
+              </button>
+            ))}
+          </div>
+        </section>
+        <p className="fineprint">The AI sees catalog metadata only, never raw production data.</p>
       </div>
     );
   }
@@ -184,39 +186,27 @@ export function AskPage() {
   return (
     <div className="ask-layout">
       <section className="chat" aria-label="Conversation">
-        <div className="chat-toolbar">
-          <button type="button" className="btn-ghost" onClick={newChat}>New question</button>
+        <div className="pane-head">
+          <h1>Ask</h1>
+          <button type="button" className="btn-outline" onClick={newChat} disabled={busy}><Icon name="plus" />New question</button>
         </div>
         {offlineBanner}
-        <div className="messages" ref={listRef} aria-live="polite">
+        <div className="messages" ref={listRef} aria-live="polite" aria-busy={busy}>
           {messages.map((m) => (
             <div key={m.id} className={`msg msg-${m.role}`}>
-              {m.role === "assistant" && <span className="avatar" aria-hidden="true" />}
-              <div className="msg-body">
-                <p><RichText text={m.content} /></p>
-                {m.id === lastId && !busy && m.suggestions && m.suggestions.length > 0 && (
-                  <div className="chips">
-                    {m.suggestions.map((s) => <button key={s} type="button" onClick={() => send(s)}>{s}</button>)}
-                  </div>
-                )}
-                {m.id === lastId && !busy && m.kind === "approval" && convState === "awaiting_approval" && (
-                  <div className="approve-row">
-                    <button type="button" className="btn" onClick={() => approve(true)}>
-                      Approve as {stages.approval?.data?.approver ?? "owner"}
-                    </button>
-                    <button type="button" className="btn-ghost" onClick={() => approve(false)}>Reject</button>
-                  </div>
-                )}
-              </div>
+              <p><RichText text={m.content} /></p>
+              {m.id === lastId && !busy && m.suggestions && m.suggestions.length > 0 && (
+                <div className="chips">
+                  {m.suggestions.map((s) => <button key={s} type="button" onClick={() => send(s)}>{s}</button>)}
+                </div>
+              )}
             </div>
           ))}
-          {busy && (
-            <div className="msg msg-assistant">
-              <span className="avatar thinking" aria-hidden="true" />
-              <div className="msg-body"><p className="muted">Working on it…</p></div>
-            </div>
+          {busy && !hasVerdict && (
+            <p className="working"><span className="spinner" aria-hidden="true" />{runningStage ? RUNNING_COPY[runningStage] : "Reading your question"}</p>
           )}
-          {error && <p className="bad-text small">{error}</p>}
+          <VerdictCard stages={stages} catalog={catalog} busy={busy} onApprove={approve} />
+          {error && <p className="text-bad small">{error}</p>}
         </div>
         <div className="chat-composer">
           <Composer

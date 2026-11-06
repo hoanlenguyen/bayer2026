@@ -68,7 +68,7 @@ Each agent has `run_llm` (OpenAI) and `run_rules` (offline, deterministic). Same
 
 ```
 frontend/  React + TypeScript + Vite
-  #ask       Ask page: chat, department presets, live processing-flow panel
+  #ask       Ask page: chat, department presets, verdict card (scores + approval), "How this was decided" panel
   #explorer  Estate Explorer: entity details + relationship graph ("molecular view"),
              loaded from GET /api/graph (live plant catalog, same governance scoring as the Ask flow)
 backend/   Python 3.12+, FastAPI
@@ -129,7 +129,8 @@ cd frontend && npm install && npm run dev
 ## Conventions
 - Python: type hints, Pydantic models for API payloads, pure functions for scoring.
 - TypeScript: strict mode; shared API types in `frontend/src/api/types.ts`.
-- UI copy: plain language for non-technical plant staff. No em-dashes.
+- UI copy: plain language for non-technical plant staff. No em-dashes. Agent traces, rules and raw specs sit behind the "Technical details" switch.
+- UI decisions (look, layout, what to keep consistent): `DESIGN.md`.
 - All sample data is fictional and labelled as sample data in the UI.
 - Commit messages: imperative mood, explain why.
 
