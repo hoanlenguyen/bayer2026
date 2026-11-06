@@ -172,7 +172,14 @@ class MongoStore:
                             presets: list[dict[str, Any]], reset: bool = False) -> None:
         """Write raw sheets, the derived catalog and presets. Skips if already seeded unless reset."""
         if not reset and await self.db["catalog_assets"].count_documents({}) > 0:
-            return
+            meta = await self.db["catalog_meta"].find_one({"_id": "meta"}) or {}
+            if meta.get("schema") == catalog.get("schema"):
+                return
+            # An older catalog (for example the earlier fictional plant catalog) would break the app: replace it.
+            log.warning("Catalog in MongoDB has schema %s, expected %s. Reloading it from the data pack.",
+                        meta.get("schema"), catalog.get("schema"))
+        for old in ("catalog_datasets", "catalog_relationships"):   # from the earlier plant catalog
+            await self.db[old].delete_many({})
         for name, rows in sheets.items():
             col = self.db[f"datapack_{name}"]
             await col.delete_many({})

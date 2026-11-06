@@ -128,4 +128,5 @@ Not covered: a live OpenAI key, a real Atlas cluster, and opening the generated 
 
 - **`/api/health` shows `memory` although `MONGODB_URI` is set:** the connection failed; the log says why. Check the Atlas IP access list and the password.
 - **Agents show "rules, offline":** no `OPENAI_API_KEY`, or the model call failed. The trace in the processing record shows the reason.
+- **Asset index says "/api/graph returned 500", or requests fail after updating the code:** MongoDB still holds an older catalog. The backend now reloads an outdated catalog automatically on start; to force it, run `python -m app.load_datapack --reset` and restart.
 - **Changes to the workbook are not picked up:** with MongoDB, run `python -m app.load_datapack --reset`; in-memory storage reloads on restart.

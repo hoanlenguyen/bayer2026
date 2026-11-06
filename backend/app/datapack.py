@@ -39,6 +39,9 @@ TABLE_SHEETS = [
     "Migration_Backlog", "Business_Requests", "Governance_Rules", "Data_Dictionary", "Change_Log",
 ]
 
+# Bump when the catalog structure changes, so stores holding an older catalog are reseeded.
+CATALOG_SCHEMA = 2
+
 # Usage window for adoption evidence: the last three months in the data pack.
 USAGE_MONTHS = 3
 
@@ -335,6 +338,7 @@ def build_catalog(sheets: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
 
     return {
         "source": "Bayer Pharmaceuticals × Since AI 2026 Builder Data Pack (synthetic)",
+        "schema": CATALOG_SCHEMA,
         "measures": measures,
         "dimensions": DIMENSIONS,
         "models": models,

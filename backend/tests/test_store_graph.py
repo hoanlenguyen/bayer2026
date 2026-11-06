@@ -58,3 +58,18 @@ def test_graph():
     assert ids["AST-0001"]["status"] == "conflict" and ("AST-0001", "uses", "KPI-009") in rels
     assert ids[g["focus"]]["status"] == "certified"
     assert all(e["s"] in ids and e["t"] in ids for e in g["edges"])
+
+
+async def test_outdated_catalog_in_mongo_is_reloaded():
+    store = MongoStore(AsyncMockDB())
+    # Simulate the earlier plant catalog: assets present, no schema in meta.
+    await store.db["catalog_assets"].insert_many([{"_id": "rpt_delivery_perf", "order": 0, "id": "rpt_delivery_perf", "name": "Old"}])
+    await store.db["catalog_datasets"].insert_many([{"_id": "shipments_fact"}])
+    await store.seed_datapack(read_workbook(), cat.seed_catalog(), cat.seed_presets())
+    loaded = await store.load_catalog()
+    assert len(loaded["assets"]) == 360 and loaded["schema"] == 2
+    assert await store.db["catalog_datasets"].count_documents({}) == 0
+    # A current catalog is kept (no reload on every start).
+    await store.upsert_asset({**loaded["assets"][0], "views_90d": 7})
+    await store.seed_datapack(read_workbook(), cat.seed_catalog(), cat.seed_presets())
+    assert (await store.load_catalog())["assets"][0]["views_90d"] == 7
