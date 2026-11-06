@@ -6,13 +6,37 @@ All data is synthetic (Bayer Pharmaceuticals × Since AI 2026 Builder Data Pack)
 
 ## Quick start
 
+### macOS / Linux
+
 ```bash
-python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-Check it runs: open http://localhost:8000/api/health. It should report `"provider": "mock"` and `"store": "memory"` until you add keys.
+### Windows (PowerShell)
+
+These commands call the virtual environment's own Python, so they work even when PowerShell blocks activation scripts:
+
+```powershell
+python -m venv .venv                                            # once; use "py -m venv .venv" if python is not found
+.venv\Scripts\python.exe -m pip install -r requirements.txt     # once, and again after pulling new requirements
+.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+```
+
+To use plain `uvicorn` and `pip` instead, activate the environment first. If PowerShell says "running scripts is disabled", allow it for the current window only:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.venv\Scripts\Activate.ps1
+```
+
+Other commands follow the same pattern on Windows, for example `.venv\Scripts\python.exe -m app.load_datapack` and `.venv\Scripts\python.exe -m pytest`.
+
+### Check it runs
+
+Wait for `Application startup complete.`, then open http://localhost:8000/api/health. It should report `"provider": "mock"` and `"store": "memory"` until you add keys.
 
 Then start the frontend (`../frontend`, `npm run dev`) and open http://localhost:5173.
 
@@ -125,6 +149,9 @@ They cover the data pack mapping, every decision outcome, the migration rules, a
 Not covered: a live OpenAI key, a real Atlas cluster, and opening the generated PBIP in Power BI Desktop.
 
 ## Troubleshooting
+
+- **Windows: "uvicorn is not recognized":** the virtual environment is not active, or the requirements are not installed in it. Use `.venv\Scripts\python.exe -m uvicorn …` as shown in Quick start.
+- **"localhost refused to connect" (ERR_CONNECTION_REFUSED):** the backend is not running. Start it again and read the terminal output; if it exits on startup, run the requirements install again (new packages are added over time, for example `openpyxl`).
 
 - **`/api/health` shows `memory` although `MONGODB_URI` is set:** the connection failed; the log says why. Check the Atlas IP access list and the password.
 - **Agents show "rules, offline":** no `OPENAI_API_KEY`, or the model call failed. The trace in the processing record shows the reason.
