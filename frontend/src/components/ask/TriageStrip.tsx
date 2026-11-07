@@ -25,23 +25,35 @@ function ids(list: string[], total: number): string {
   return total > 3 ? `${shown} and ${total - 3} more` : shown;
 }
 
+/** Latest triage for the request: the decision stage marks it triaged, the intent stage tags it new. */
+export function currentTriage(stages: Partial<Record<StageId, StageEvent>>): Triage | undefined {
+  return stages.decision?.data?.triage ?? stages.intent?.data?.triage;
+}
+
+/** Status and urgency tags. `compact` drops the reason, for the flow panel. */
+export function TriageTags({ triage: t, compact = false }: { triage: Triage; compact?: boolean }) {
+  return (
+    <div className="triage-tags" aria-label="Request tags">
+      <span className={`triage-tag tag-${t.status}`} title="New on arrival; triaged once the request is understood and decided">
+        {t.status === "triaged" ? "Triaged" : "New"}
+      </span>
+      <span className={`triage-tag tone-${URGENCY_TONE[t.urgency.value]}`} title={compact ? urgencySource(t.urgency) : undefined}>
+        {t.urgency.value[0].toUpperCase() + t.urgency.value.slice(1)} urgency
+        {!compact && <span className="triage-why"> · {urgencySource(t.urgency)}</span>}
+      </span>
+    </div>
+  );
+}
+
 /** Intake tags for the current request: status, urgency and earlier requests that ask the same thing. */
 export function TriageStrip({ stages }: { stages: Partial<Record<StageId, StageEvent>> }) {
-  const t: Triage | undefined = stages.decision?.data?.triage ?? stages.intent?.data?.triage;
+  const t = currentTriage(stages);
   if (!t) return null;
   const dup = t.similar?.duplicates ?? [];
   const sim = t.similar?.similar ?? [];
   return (
     <section className="triage" aria-label="Request triage">
-      <div className="triage-tags">
-        <span className={`triage-tag tag-${t.status}`} title="New on arrival; triaged once the request is understood and decided">
-          {t.status === "triaged" ? "Triaged" : "New"}
-        </span>
-        <span className={`triage-tag tone-${URGENCY_TONE[t.urgency.value]}`}>
-          {t.urgency.value[0].toUpperCase() + t.urgency.value.slice(1)} urgency
-          <span className="triage-why"> · {urgencySource(t.urgency)}</span>
-        </span>
-      </div>
+      <TriageTags triage={t} />
       {dup.length > 0 && (
         <p className="triage-note">
           <strong>Asked before:</strong> the same request is already in the queue {t.similar!.duplicate_count} times

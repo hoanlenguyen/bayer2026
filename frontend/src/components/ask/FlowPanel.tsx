@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CatalogMeta, DecisionType, Health, StageEvent, StageId } from "../../api/types";
 import { Icon } from "../Icon";
+import { currentTriage, TriageTags } from "./TriageStrip";
 import { StageDetail } from "./StageDetail";
 
 /** Who does the work in each stage. Mirrors the legend in Bayer's reference pipeline. */
@@ -77,6 +78,7 @@ interface Props {
 }
 
 export function FlowPanel({ stages, decision, health, catalog }: Props) {
+  const triage = currentTriage(stages);
   const order = stagesFor(decision, (stages.actions?.data?.proposals?.length ?? 0) > 0);
   const [open, setOpen] = useState<Set<StageId>>(new Set());
   const [technical, setTechnical] = useState(readTechnical);
@@ -144,6 +146,7 @@ export function FlowPanel({ stages, decision, health, catalog }: Props) {
                     {ev?.data && <span className={`flow-chevron${isOpen ? " open" : ""}`}><Icon name="chevron" size={14} /></span>}
                   </button>
                   {summary && <p className="flow-summary">{summary}</p>}
+                  {id === "intent" && triage && <div className="flow-tags"><TriageTags triage={triage} compact /></div>}
                   {status === "pending" && <span className="sr-only">Not started</span>}
                   {isOpen && <div className="flow-detail"><StageDetail stage={id} data={ev!.data} catalog={catalog} technical={technical} /></div>}
                 </div>
