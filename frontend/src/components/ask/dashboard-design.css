@@ -38,3 +38,27 @@
 @keyframes bh-reveal{from{opacity:.4;transform:translateY(2px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.bh-spinner{animation:none;border-top-color:var(--line-strong)}.bh-ready .bh-facts{animation:none}}
 @media (max-width:480px){.bh-facts div{grid-template-columns:1fr;gap:0}}
+/* "Preparing your dashboard": four numbered steps on a subtle connector. A neutral highlight moves down the list over
+   the reading window; the step text stays visible throughout, with or without motion. */
+.bw{display:grid;gap:8px;width:100%;min-width:0}
+.bw h3{margin:0;font-size:16px}
+.bw h3:focus{outline:none}
+.bw h3:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.bw-lede{margin:0;font-size:13px;color:var(--muted)}
+.bw-steps{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:0;position:relative}
+.bw-step{display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;padding:8px 8px 10px 0;position:relative;border-radius:var(--radius-sm);transition:background-color .4s ease}
+.bw-step:not(:last-child)::before{content:"";position:absolute;left:13px;top:34px;bottom:-4px;width:2px;background:var(--line)}
+.bw-num{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font:600 13px var(--font-sans);border:1px solid var(--line-strong);background:var(--surface);color:var(--fg);position:relative;z-index:1}
+.bw-active{background:var(--surface-2)}
+.bw-active .bw-num{border-color:var(--fg);box-shadow:0 0 0 1px var(--fg)}
+.bw-body{display:grid;gap:2px;min-width:0}
+.bw-body p{margin:0;overflow-wrap:anywhere}
+.bw-title{font-weight:600;font-size:14px}
+.bw-line{font-size:13px;color:var(--fg)}
+.bw-status{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500}
+.bw-saved .bw-status{color:var(--ok)}
+.bw-failed .bw-status{color:var(--bad)}
+.bw-final .btn{margin-top:6px;min-height:44px;justify-self:start}
+.bw-final .db-error{display:grid;gap:6px;margin-top:4px;justify-items:start}
+.bw-final .db-error p{margin:0}
+@media (prefers-reduced-motion:reduce){.bw-step{transition:none}}

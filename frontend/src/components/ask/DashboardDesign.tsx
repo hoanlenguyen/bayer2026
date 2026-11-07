@@ -82,30 +82,50 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
       .catch(e => { if (active) setError(e.message); });
     return () => { active = false; };
   }, [path, attempt]);
+  // The parent learns about the build ("Your dashboard is ready") only once the hand-off has finished,
+  // so nothing outside the workflow claims success or shows a saved link early.
+  const [finishedSession, setFinishedSession] = useState<number | null>(null);
+  const handoffActive = !!session && session.id !== finishedSession;
   useEffect(() => {
-    if (state?.status === "built" && state.dashboard_id) onBuilt(runId, !!state.reused);
-  }, [state, onBuilt, runId]);
+    if (state?.status === "built" && state.dashboard_id && !handoffActive) onBuilt(runId, !!state.reused);
+  }, [state, onBuilt, runId, handoffActive]);
   // A guided example goes straight to its reviewable brief.
   const guidedReady = !!state?.guided && state.status === "ready";
   useEffect(() => { if (guidedReady) setOpen(true); }, [guidedReady]);
 
-  /** Final Build: send at once, show the reviewed facts while saving, then the hand-off. Clarification answers use send(). */
+  /** Final Build: one POST per explicit approval, sent at once. The workflow shows while it runs; only a validated
+   *  built response marks it saved. An uncertain outcome is checked once against the run, never posted again. */
   async function buildNow(reviewed: DesignState) {
-    if (submitting.current) return;
+    if (submitting.current || !reviewed.review_token) return;
     submitting.current = true;
     const id = ++sessions.current;
     const startedAt = performance.now();
     const body = { version: reviewed.version, review_token: reviewed.review_token };
-    const update = (phase: BuildSession["phase"]) => { if (mounted.current) setSession(s => s && s.id === id ? { ...s, phase } : s); };
+    const live = () => mounted.current && sessions.current === id;  // a newer attempt or an unmount makes this one stale
+    const update = (phase: BuildSession["phase"]) => { if (live()) setSession(s => s && s.id === id ? { ...s, phase } : s); };
     setSession({ id, startedAt, brief: reviewed, phase: { kind: "saving" } });
     setError("");
+    const built = (r: unknown): boolean =>
+      !!r && typeof r === "object" && (r as DesignState).status === "built" && typeof (r as DesignState).dashboard_id === "string" && !!(r as DesignState).dashboard_id;
     const succeed = (result: DesignState) => {
       window.dispatchEvent(new Event("dashboards-changed"));
-      if (!mounted.current) return;
+      if (!live()) return;
       setState(result);
-      if (result.reused && !result.guided) { setSession(null); return; }  // an existing dashboard: its link, no new-build sequence
-      // A guided review that resolved to an identical saved dashboard is still this run's approved build: say so and open it.
-      update({ kind: "ready", dashboardId: result.dashboard_id!, savedAfterMs: performance.now() - startedAt, exactReuse: !!result.exact_reuse });
+      // Another build saved it first: stop the new-build workflow and show the ordinary existing-dashboard link.
+      if (result.reused && !result.guided) { setSession(null); return; }
+      update({ kind: "saved", dashboardId: result.dashboard_id!, exactReuse: !!result.exact_reuse });
+    };
+    const reconcile = async (why: string) => {
+      try {
+        const latest = await readHandoff<DesignState>(path);
+        if (built(latest)) { succeed(latest); return; }  // a valid recovery read counts like the original answer
+        const unchanged = latest.status === "ready" && latest.version === reviewed.version && latest.review_token === reviewed.review_token;
+        update(unchanged
+          ? { kind: "failed", message: `${why} The save could not be confirmed. Your reviewed brief is unchanged.`, recovery: "retry" }
+          : { kind: "failed", message: `${why} The save could not be confirmed, and the brief has changed since you approved it.`, recovery: "reload" });
+      } catch {
+        update({ kind: "failed", message: `${why} The save could not be confirmed, and the brief could not be checked.`, recovery: "reload" });
+      }
     };
     try {
       let response: Response | null = null;
@@ -114,26 +134,18 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
       } catch {
         response = null; // lost: the save may still have committed
       }
-      if (response?.ok) {
-        const result = await response.json() as DesignState;
-        if (result.status === "built" && result.dashboard_id) succeed(result);
-        else update({ kind: "failed", message: result.reason || "The dashboard was not saved.", stale: true });
+      if (!response) { await reconcile("The connection dropped."); return; }
+      if (response.ok) {
+        const result = await response.json().catch(() => null);
+        if (built(result)) succeed(result as DesignState);
+        else await reconcile("The server's answer could not be read.");
         return;
       }
-      if (response) {
-        const data = await response.json().catch(() => ({}));
-        const message = typeof data.detail === "string" ? data.detail : `The server returned ${response.status}. Your brief is kept.`;
-        update({ kind: "failed", message, stale: response.status === 409 });
-        return;
-      }
-      // No answer: ask the run whether the save committed before saying anything.
-      try {
-        const latest = await readHandoff<DesignState>(path);
-        if (latest.status === "built" && latest.dashboard_id) { succeed(latest); return; }
-        update({ kind: "failed", message: "The connection dropped before the save was confirmed, and nothing was saved. Your brief is kept.", stale: false });
-      } catch {
-        update({ kind: "failed", message: "The connection dropped and the result could not be checked. Your brief is kept; try again.", stale: false });
-      }
+      const data = await response.json().catch(() => ({}));
+      const detail = typeof data.detail === "string" ? data.detail : "";
+      if (response.status === 409) { update({ kind: "failed", message: detail || "The brief changed. Review it again.", recovery: "review" }); return; }
+      if (response.status >= 500) { await reconcile(`The server reported an error (${response.status}).`); return; }
+      update({ kind: "failed", message: detail || `The build was refused (${response.status}).`, recovery: "reload" });
     } finally {
       submitting.current = false;
     }
@@ -146,12 +158,14 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
     finally { setPending(false); }
   }
   const refresh = () => setAttempt(previous => previous + 1);
+  // A changed or unconfirmed brief must be loaded afresh: the old version and token are gone until it arrives.
+  const reloadBrief = () => { setSession(null); setState(null); setOpen(true); refresh(); };
   if (session && state) return <section className="db-design" aria-label="Dashboard build">
     <BuildHandoff key={session.id} session={session} conversationId={conversationId}
       onRetry={() => void buildNow(session.brief)}
-      onReviewUpdated={() => { setSession(null); setOpen(true); refresh(); }}
-      onStay={() => undefined} />
-    {session.phase.kind === "ready" && session.brief.storage_mode === "memory" && <p className="db-caption">Demo storage · The saved dashboard is available until the server restarts.</p>}
+      onReviewUpdated={reloadBrief} onReload={reloadBrief}
+      onFinished={() => setFinishedSession(session.id)} />
+    {session.phase.kind === "saved" && session.brief.storage_mode === "memory" && <p className="db-caption">Demo storage · The saved dashboard is available until the server restarts.</p>}
   </section>;
   if (!state) return <section className="db-design" aria-label="Dashboard design">{error
     ? <><p role="alert">{error}</p><button type="button" className="btn-outline" onClick={refresh}>Reload design</button></>

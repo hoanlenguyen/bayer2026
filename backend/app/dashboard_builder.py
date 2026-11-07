@@ -305,7 +305,8 @@ def build_receipt(artifact: dict) -> dict:
     records = artifact.get("source_records") or []
     rows = sorted(r["row"] for r in records)
     actual = sum(r.get("value_type") == "actual_like_synthetic" for r in records)
-    label = lambda c: f"{c['name']} ({c['unit']})" if c.get("unit") else c["name"]
+    unit = lambda u: "€m" if u in ("M EUR", "EUR M") else u
+    label = lambda c: f"{c['name']} ({unit(c['unit'])})" if c.get("unit") else c["name"]
     names = [label(c) for c in charted]
     if artifact.get("presentation") == "market_comparison" and len(groups) > 1:
         lead = next((c for c in charted if c["id"] == artifact.get("lead_measure")), charted[0] if charted else None)
@@ -321,9 +322,11 @@ def build_receipt(artifact: dict) -> dict:
         layout = f"Switch between {_join(names)} in a monthly trend."
     else:
         layout = f"A monthly trend of {names[0]}." if names else "A monthly table."
-    if len(groups) > 1:
+    comparison = artifact.get("presentation") == "market_comparison" and len(groups) > 1
+    if len(groups) > 1 and not comparison:
         layout += f" Choose one of {len(groups)} groups ({_join([g['label'] for g in groups][:4])}{', …' if len(groups) > 4 else ''}) to see its figures."
-    layout += " The table below lists the figures and their workbook rows."
+    if not comparison:  # the comparison sentence already says where the figures and rows are
+        layout += " The table below lists the figures and their workbook rows."
     scope = artifact.get("scope") or {}
     return {
         "products": scope.get("products", []), "markets": scope.get("markets", []), "period": artifact.get("period"),
