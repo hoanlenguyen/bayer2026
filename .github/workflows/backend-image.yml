@@ -4,7 +4,8 @@
 #   push to main only                                                → also deploy that image to the Container App
 #
 # Image: ghcr.io/<owner>/bayer2026-backend:latest and :<commit sha>
-# Deploy needs the repository secret AZURE_CREDENTIALS (docs/DEPLOY_FREE.md, "Automatic deploys").
+# Deploy needs the repository secrets AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID from
+# `bash deploy/azure/containerapp.sh github` (a managed identity GitHub signs in as with OIDC, no password).
 # Without it the deploy job is skipped and says so; nothing fails.
 name: Backend image
 
@@ -83,17 +84,22 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      id-token: write   # OIDC sign-in to Azure
+      contents: read
     env:
-      HAS_AZURE: ${{ secrets.AZURE_CREDENTIALS != '' }}
+      HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' }}
     steps:
       - name: Skip when Azure is not connected yet
         if: env.HAS_AZURE != 'true'
-        run: echo "::notice::AZURE_CREDENTIALS is not set, so the backend was built but not deployed. See docs/DEPLOY_FREE.md, Automatic deploys."
+        run: echo "::notice::AZURE_CLIENT_ID, AZURE_TENANT_ID or AZURE_SUBSCRIPTION_ID is not set, so the backend was built but not deployed. See docs/DEPLOY_FREE.md, Automatic deploys."
 
       - uses: azure/login@v2
         if: env.HAS_AZURE == 'true'
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy this commit's image to the Container App
         if: env.HAS_AZURE == 'true'

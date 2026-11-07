@@ -8,7 +8,7 @@
 #   bash containerapp.sh image    print the image and revision that serve production now
 #   bash containerapp.sh logs     follow the backend's console output
 #   bash containerapp.sh jev      add or replace the TypeSafe key (Jev) on an existing app
-#   bash containerapp.sh github   create the login GitHub Actions uses to deploy on push to main (AZURE_CREDENTIALS)
+#   bash containerapp.sh github   let GitHub Actions deploy on push to main (managed identity + OIDC, no password)
 #
 # Secrets are read from the keyboard, never written to a file.
 set -euo pipefail
@@ -88,15 +88,36 @@ case "${1:-}" in
     echo "Jev key set. Check: $(url)/api/health should show \"jev\": true"
     ;;
   github)
-    # A service principal that may change only this resource group. Its JSON goes into the GitHub
-    # repository secret AZURE_CREDENTIALS; it contains a password, so do not paste it anywhere else.
+    # Lets GitHub Actions deploy on push to main, without a password and without an app registration
+    # (school directories often block those): a user-assigned managed identity in this resource group,
+    # allowed to change only this resource group, trusted for this repository's main branch (OIDC).
+    ext
+    GH_REPO="${GH_REPO:-hoanlenguyen/bayer2026}"
+    ID_NAME="${ID_NAME:-bayer2026-github-deploy}"
     SUB=$(az account show --query id -o tsv)
-    echo "Creating service principal bayer2026-github-deploy (Contributor on $RG only)..."
-    az ad sp create-for-rbac --name bayer2026-github-deploy --role contributor \
-      --scopes "/subscriptions/$SUB/resourceGroups/$RG" --json-auth
+    TENANT=$(az account show --query tenantId -o tsv)
+    echo "Creating managed identity $ID_NAME in $RG..."
+    az identity create -n "$ID_NAME" -g "$RG" -l "$LOCATION" -o none
+    CLIENT_ID=$(az identity show -n "$ID_NAME" -g "$RG" --query clientId -o tsv)
+    PRINCIPAL_ID=$(az identity show -n "$ID_NAME" -g "$RG" --query principalId -o tsv)
+    echo "Allowing it to change resource group $RG (Contributor)..."
+    # A new identity can take a minute to become visible to role assignments; retry.
+    for attempt in 1 2 3 4 5 6; do
+      if az role assignment create --assignee-object-id "$PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
+           --role Contributor --scope "/subscriptions/$SUB/resourceGroups/$RG" -o none 2>/dev/null; then break; fi
+      [ "$attempt" = 6 ] && { echo "Role assignment failed. Run this command again in a minute."; exit 1; }
+      sleep 15
+    done
+    echo "Trusting GitHub Actions on $GH_REPO, branch main..."
+    az identity federated-credential create --name github-main --identity-name "$ID_NAME" -g "$RG" \
+      --issuer https://token.actions.githubusercontent.com --subject "repo:$GH_REPO:ref:refs/heads/main" \
+      --audiences api://AzureADTokenExchange -o none
     echo
-    echo "Copy the whole JSON above into GitHub: Settings > Secrets and variables > Actions > New repository secret,"
-    echo "name AZURE_CREDENTIALS. Then clear this screen with: clear"
+    echo "Add these 3 repository secrets in GitHub (Settings > Secrets and variables > Actions):"
+    echo "  AZURE_CLIENT_ID        $CLIENT_ID"
+    echo "  AZURE_TENANT_ID        $TENANT"
+    echo "  AZURE_SUBSCRIPTION_ID  $SUB"
+    echo "They are IDs, not passwords. GitHub signs in with a short-lived token for each run."
     ;;
   url)  ext; url ;;
   logs) ext; az containerapp logs show -n "$APP" -g "$RG" --follow --format text ;;
