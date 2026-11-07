@@ -2,7 +2,7 @@
 
 Product_Market_Monthly holds synthetic monthly values per product and market.
 Computed in plain Python, never by the model. Values are illustrative and must
-not be read as Bayer performance.
+not be read as SinceAI performance.
 """
 from __future__ import annotations
 
@@ -67,5 +67,5 @@ def preview(intent: dict[str, Any], limit: int = 8) -> dict[str, Any] | None:
         "rows": [{"label": g, "values": v, "previous": before.get(g, {})} for g, v in ordered],
         "not_previewed": [C["measures"][m]["name"] for m in intent.get("measures", [])
                           if m in C["measures"] and not C["measures"][m].get("fact_column")],
-        "note": "Synthetic values from the Bayer data pack (Product_Market_Monthly). Not Bayer performance.",
+        "note": "Synthetic values from the SinceAI data pack (Product_Market_Monthly). Not SinceAI performance.",
     }

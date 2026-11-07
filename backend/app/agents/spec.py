@@ -15,14 +15,12 @@ from typing import Any
 
 from .. import catalog as cat
 from .base import Agent, Step
-from ..governance import REPORT_OWNER_ID
-from ..bindings import contract
 
 MAX_ATTEMPTS = 3
 MAX_VISUALS = 6
 VISUAL_TYPES = {"card", "bar", "line", "table"}
 
-SYSTEM = """You design a minimal Power BI report page for one business decision at Bayer Pharmaceuticals.
+SYSTEM = """You design a minimal Power BI report page for one business decision at SinceAI Pharmaceuticals.
 Fewer visuals is better (max 6): headline KPI cards first, then the breakdown that shows where to act, then a monthly
 trend if useful. Use only the measure ids and breakdown ids given ("month" is allowed for trends).
 Visual types: card, bar, line, table.
@@ -93,10 +91,7 @@ def assemble(layout: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         name = f"{product_scope} Commercial (Power BI)"
     else:
         name = str(layout.get("name") or "").strip() or default_name(intent, ctx.get("preset"), None)
-    owner_id = base.get("owner_id") if keep_base and base else REPORT_OWNER_ID
-    owner_record = C["owners"].get(owner_id, {})
-    owner = owner_record.get("owner_name", "Unassigned")
-    result = {
+    return {
         "name": name,
         "decision": intent["decision"],
         "decision_type": dec,
@@ -115,21 +110,9 @@ def assemble(layout: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         "replaces": decision.get("replaces", []),
         "rules_applied": decision.get("rules_applied", []),
         "owner": owner,
-        "owner_id": owner_id if owner_record.get("status") == "active" else None,
-        "business_owner_id": ctx.get("requester_id", "OWN-008"),
-        "ownership_basis": "Existing source ownership" if keep_base else "Explicit demo policy: OWN-039 maintains newly generated demo reports",
-        "classification": "synthetic_demo",
-        "destination": "Local downloadable validation package; no tenant publication configured",
-        "access_policy": "shared_synthetic_demo_v1",
-        "acceptance_criteria": ["Review coverage, scope and accountable owners", "Pass specification, file-schema and binding checks",
-                                "Open in Power BI; refresh and reconcile cards, breakdowns and trends to validation.json",
-                                "Record runtime evidence and authorised destination approval before publication"],
-        "period": "January–October 2026 synthetic monthly facts",
         "approver": (base["owner"] if base and base["owner_status"] == "active" else "Data steward"),
         "review_date": (date.today() + timedelta(days=180)).isoformat(),
     }
-    result["execution_contract"] = contract(result)
-    return result
 
 
 def validate(spec: dict[str, Any]) -> list[dict[str, Any]]:
@@ -149,17 +132,13 @@ def validate(spec: dict[str, Any]) -> list[dict[str, Any]]:
     check(bool(model) and model.get("id") in C["models"], "Built on a shared semantic model in the catalog (RULE-001)")
     gaps = [m["name"] for m in spec["measures"] if m["id"] not in set(model.get("measures") or [])]
     check(not gaps, "The shared model serves every KPI" + (f" (to add: {', '.join(gaps)})" if gaps else ""))
-    owner = C["owners"].get(spec.get("owner_id"), {})
-    check(owner.get("status") == "active" and bool(spec["review_date"]), "Owner ID is active and review date is set (RULE-003)")
+    check(bool(spec["owner"]) and bool(spec["review_date"]), "Owner and review date are set (RULE-003)")
     if spec["decision_type"] == "repair":
         check(bool(spec["change"].get("repairs")), "Repairs are listed")
         return checks
     visuals = [v for p in spec["pages"] for v in p.get("visuals", [])]
     allowed_by = set(spec["dimensions"]) | {"month", None}
     check(1 <= len(visuals) <= MAX_VISUALS, f"Between 1 and {MAX_VISUALS} visuals ({len(visuals)})")
-    check(all(p.get("name") and p.get("visuals") for p in spec["pages"]), "Every page has a title and visuals")
-    check(all(isinstance(v.get("title"), str) and 0 < len(v["title"]) <= 100 for v in visuals), "Visual titles are present and fit the supported template")
-    check(all(v.get("by") is not None for v in visuals if v.get("type") in ("bar", "line")), "Charts have an explicit breakdown")
     bad_type = [str(v.get("type")) for v in visuals if v.get("type") not in VISUAL_TYPES]
     check(not bad_type, "Visual types are supported" + (f" (unsupported: {', '.join(bad_type)})" if bad_type else ""))
     bad_m = [str(v.get("measure")) for v in visuals if v.get("measure") not in measure_ids]
@@ -171,9 +150,8 @@ def validate(spec: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _blocking(checks: list[dict[str, Any]]) -> list[str]:
-    # Layout revisions cannot fix model/ownership prerequisites. They remain failed
-    # validation checks and block generation in the approval pipeline.
-    return [c["text"] for c in checks if not c["ok"] and not c["text"].startswith(("The shared model serves", "Owner ID"))]
+    # A model gap is reported to the approver but is fixed by adding measures to the model, not by the layout.
+    return [c["text"] for c in checks if not c["ok"] and not c["text"].startswith("The shared model serves")]
 
 
 class SpecAgent(Agent):

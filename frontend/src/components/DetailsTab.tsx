@@ -1,4 +1,3 @@
-import { SourceEvidence } from "./SourceEvidence";
 import type { ReactNode } from "react";
 import { EDGES, PROV, TYPES } from "../data/estate";
 import type { Entity } from "../data/types";
@@ -31,7 +30,7 @@ function EntityRow({ entity: o, onFocus }: { entity: Entity; onFocus: (id: strin
 
 function governanceRows(e: Entity, onFocus: (id: string) => void): [string, ReactNode][] {
   const owner = ownerOf(e.id);
-  const rows: [string, ReactNode][] = [["Status", <Pill status={e.status} />]];
+  const rows: [string, ReactNode][] = [];
   if (owner) {
     rows.push(["Owner", <>
       <button type="button" className="inline-link" onClick={() => onFocus(owner.id)}>{owner.name}</button>
@@ -43,9 +42,9 @@ function governanceRows(e: Entity, onFocus: (id: string) => void): [string, Reac
     const users = EDGES.filter((l) => l.t === e.id && l.rel === "uses").map((l) => byId[l.s]);
     const views = users.reduce((a, d) => a + (d.views ?? 0), 0);
     rows.push(["Used by", `${users.length} dashboard${users.length === 1 ? "" : "s"}`]);
-    rows.push(["Views via those", `${views.toLocaleString("en-US")} · January–October 2026`]);
+    rows.push(["Views via those", `${views.toLocaleString("en-US")} in 90 days`]);
   }
-  if (e.type === "dashboard" && e.views !== undefined) rows.push(["Audience", `${e.views.toLocaleString("en-US")} views · ${e.usage_period ?? "period not supplied"}`]);
+  if (e.type === "dashboard" && e.views !== undefined) rows.push(["Audience", `${e.views.toLocaleString("en-US")} views in 90 days`]);
   if (e.type === "person") rows.push(["Assets owned", String(EDGES.filter((l) => l.s === e.id && l.rel === "owns").length)]);
   if (e.props["Next review"]) rows.push(["Next review", e.props["Next review"]]);
   return rows;
@@ -54,17 +53,13 @@ function governanceRows(e: Entity, onFocus: (id: string) => void): [string, Reac
 export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Props) {
   const groups = relGroups(e.id);
   const total = groups.reduce((a, g) => a + g.items.length, 0);
+  const owner = ownerOf(e.id);
 
   return (
     <div className="details-grid">
       <div className="details-main">
         <article className="card">
-          <h2 className="card-title">Summary</h2>
           <p className="summary">{e.summary}</p>
-          <SourceEvidence sources={[...(e.sources ?? []), ...(e.evidence_sources ?? [])]} />
-        </article>
-        <article className="card">
-          <h2 className="card-title">Properties</h2>
           <dl className="props">
             {Object.entries(e.props).map(([k, v]) => (
               <div key={k} className={`prop${WIDE_KEYS.has(k) ? " wide" : ""}`}>
@@ -77,7 +72,7 @@ export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Pr
         <article className="card">
           <div className="card-head">
             <h2 className="card-title">Relationships <span className="count">{total}</span></h2>
-            <button type="button" className="btn-ghost" onClick={onShowGraph}>View in graph</button>
+            <button type="button" className="btn-outline" onClick={onShowGraph}>View in graph</button>
           </div>
           {groups.map((g) => (
             <div key={g.label} className="rel-group">
@@ -103,9 +98,11 @@ export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Pr
               <span className="k">Recommended action</span>
               <p>{e.action}</p>
               {sent ? (
-                <span className="done">Added to the action tracker. <a href="#actions">View actions</a></span>
+                <span className="done">
+                  Sent to {owner?.name ?? "the owner"} for approval. Nothing changes until they approve.
+                </span>
               ) : (
-                <div><button type="button" className="btn" onClick={() => onSend(e.id)}>Add to action tracker</button></div>
+                <div><button type="button" className="btn" onClick={() => onSend(e.id)}>Send to owner for approval</button></div>
               )}
             </div>
           )}
@@ -122,7 +119,7 @@ export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Pr
               ))}
             </ul>
           ) : (
-            <p className="empty">No flags are recorded for this entity. This does not establish that validation has run.</p>
+            <p className="empty">No open issues. The last review found nothing to flag.</p>
           )}
         </article>
         <article className="card">

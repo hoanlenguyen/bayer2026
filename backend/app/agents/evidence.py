@@ -15,7 +15,7 @@ from .. import catalog as cat
 from .base import Agent, Step
 from .tools import CATALOG_TOOLS, get_kpi, get_lineage, get_model, get_report
 
-SYSTEM = """You are the evidence agent for governed analytics at Bayer Pharmaceuticals.
+SYSTEM = """You are the evidence agent for governed analytics at SinceAI Pharmaceuticals.
 Given the intent and the lifecycle decision, use the tools to confirm: the approved KPI definitions (and which variants
 must not be used), the shared semantic model to build on, the existing report involved (usage, owner, signals,
 migration backlog) and the downstream impact from lineage. Use only ids returned by the tools.
@@ -79,7 +79,7 @@ def finalize(intent: dict[str, Any], decision: dict[str, Any], availability: dic
         open_sig = [s for s in base["signals"] if s["status"] == "open"]
         proofs.append({"ok": base["owner_status"] == "active",
                        "text": f"{base['id']} '{base['name']}' ({base['platform']} {base['asset_type']}, {base['product_scope']} / {base['market_scope']}): "
-                               f"{base['views_90d']:,} views in Aug–Oct 2026 (period-unique users unavailable); lifecycle {base['lifecycle']}; "
+                               f"{base['views_90d']:,} views and {base['users_90d']:,} users in 90 days; lifecycle {base['lifecycle']}; "
                                f"owner {base['owner']} ({base['owner_status']}); {len(open_sig)} open signal(s)"
                                + (f": {', '.join(s['code'] for s in open_sig)}" if open_sig else "") + "."})
         if base.get("migration"):

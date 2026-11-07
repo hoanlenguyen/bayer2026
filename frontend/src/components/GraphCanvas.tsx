@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import * as d3 from "d3";
-import { REL, STATUS, TYPES } from "../data/estate";
-import type { Edge, Entity, EntityType, RelationType } from "../data/types";
-import { byId, glyphOf, neighborhood, trunc, graphEdges, type Direction } from "../lib/estate";
+import { EDGES, REL, STATUS, TYPES } from "../data/estate";
+import type { Entity, EntityType, RelationType } from "../data/types";
+import { byId, glyphOf, neighborhood, trunc } from "../lib/estate";
 
 type Kind = "base" | "bad" | "warn" | "accent";
 
@@ -17,14 +17,9 @@ export interface GLink extends d3.SimulationLinkDatum<GNode> {
   target: GNode;
   rel: RelationType;
   kind: Kind;
-  edge: Edge;
 }
 
 interface Props {
-  revision?: number;
-  direction?: Direction;
-  candidates?: boolean;
-  onEdgeSelect?: (edge: Edge) => void;
   focus: string;
   depth: number;
   hidden: Set<EntityType>;
@@ -41,7 +36,7 @@ const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)"
  * Force-directed relationship graph. React owns the container and props;
  * d3 owns everything inside the <svg> (layout, zoom, drag, highlighting).
  */
-export function GraphCanvas({ revision, direction = "all", candidates = false, onEdgeSelect, focus, depth, hidden, selected, onSelect, onFocus, onLinks }: Props) {
+export function GraphCanvas({ focus, depth, hidden, selected, onSelect, onFocus, onLinks }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const posCache = useRef(new Map<string, { x: number; y: number }>());
@@ -49,8 +44,8 @@ export function GraphCanvas({ revision, direction = "all", candidates = false, o
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const graphRef = useRef<{ nodes: GNode[]; links: GLink[]; sim: d3.Simulation<GNode, GLink> | null }>({ nodes: [], links: [], sim: null });
   // Keep callbacks fresh without rebuilding the graph when parents re-render.
-  const cb = useRef({ onSelect, onFocus, onLinks, onEdgeSelect });
-  cb.current = { onSelect, onFocus, onLinks, onEdgeSelect };
+  const cb = useRef({ onSelect, onFocus, onLinks });
+  cb.current = { onSelect, onFocus, onLinks };
 
   const fit = (animate: boolean) => {
     const wrap = wrapRef.current, svg = svgRef.current, zoom = zoomRef.current;
@@ -111,22 +106,19 @@ export function GraphCanvas({ revision, direction = "all", candidates = false, o
     if (lastFocus.current !== focus) posCache.current.clear();
     lastFocus.current = focus;
 
-    const dist = neighborhood(focus, depth, hidden, direction, candidates);
+    const dist = neighborhood(focus, depth, hidden);
     const nodes: GNode[] = [...dist.keys()].map((id) => {
       const e = byId[id], p = posCache.current.get(id);
       return { id, e, r: id === focus ? 22 : TYPES[e.type].r,
         x: p ? p.x : W / 2 + (rand() - 0.5) * 160, y: p ? p.y : H / 2 + (rand() - 0.5) * 160 };
     });
     const nodeById = new Map(nodes.map((n) => [n.id, n]));
-    const links: GLink[] = graphEdges(direction, candidates).filter((l) => dist.has(l.s) && dist.has(l.t)).map((l) => ({
-      source: nodeById.get(l.s)!, target: nodeById.get(l.t)!, rel: l.rel, kind: l.basis === "lineage" ? "accent" : REL[l.rel].kind ?? "base", edge: l,
+    const links: GLink[] = EDGES.filter((l) => dist.has(l.s) && dist.has(l.t)).map((l) => ({
+      source: nodeById.get(l.s)!, target: nodeById.get(l.t)!, rel: l.rel, kind: REL[l.rel].kind ?? "base",
     }));
 
     const linkSel = root.select(".links").selectAll<SVGLineElement, GLink>("line").data(links).join("line")
-      .attr("class", (d) => "link k-" + d.kind + " basis-" + (d.edge.basis ?? "runtime")).attr("marker-end", (d) => `url(#arrow-${d.kind})`)
-      .style("cursor", "pointer").on("click", (ev, d) => { ev.stopPropagation(); cb.current.onEdgeSelect?.(d.edge); });
-    linkSel.selectAll("title").remove();
-    linkSel.append("title").text(d => `${d.edge.label ?? d.rel} · ${d.edge.basis ?? "runtime"}`);
+      .attr("class", (d) => "link k-" + d.kind).attr("marker-end", (d) => `url(#arrow-${d.kind})`);
     const labelSel = root.select(".link-labels").selectAll<SVGTextElement, GLink>("text").data(links).join("text")
       .attr("class", (d) => `link-label k-${d.kind}${d.kind !== "base" ? " always" : ""}`)
       .text((d) => REL[d.rel].out.toLowerCase());
@@ -193,7 +185,7 @@ export function GraphCanvas({ revision, direction = "all", candidates = false, o
     cb.current.onLinks?.(links);
     return () => { sim.stop(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focus, depth, hidden, direction, candidates, revision]);
+  }, [focus, depth, hidden]);
 
   // Highlight the selected node and its direct neighbours.
   useEffect(() => {
@@ -203,7 +195,7 @@ export function GraphCanvas({ revision, direction = "all", candidates = false, o
     const nb = new Set<string>(id ? [id] : []);
     if (id) links.forEach((l) => { if (l.source.id === id) nb.add(l.target.id); if (l.target.id === id) nb.add(l.source.id); });
     const touches = (l: GLink) => l.source.id === id || l.target.id === id;
-    root.selectAll<SVGGElement, GNode>("g.node").classed("dim", (d) => !!id && !nb.has(d.id)).classed("selected", (d) => d.id === id);
+    root.selectAll<SVGGElement, GNode>("g.node").classed("dim", (d) => !!id && !nb.has(d.id)).classed("selected", (d) => d.id === id).classed("linked", (d) => !!id && d.id !== id && nb.has(d.id));
     root.selectAll<SVGLineElement, GLink>("line.link").classed("dim", (l) => !!id && !touches(l)).classed("hot", (l) => !!id && touches(l));
     root.selectAll<SVGTextElement, GLink>("text.link-label").classed("dim", (l) => !!id && !touches(l)).classed("hot", (l) => !!id && touches(l));
   }, [selected, focus, depth, hidden]);

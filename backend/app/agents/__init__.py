@@ -10,6 +10,7 @@ show exactly what the agent did, and Python verifies what the agent proposes.
 from .base import AgentRun, Step
 from .evidence import EvidenceAgent
 from .intent import IntentAgent
+from .relevance import RelevanceAgent
 from .spec import SpecAgent
 
-__all__ = ["AgentRun", "Step", "IntentAgent", "EvidenceAgent", "SpecAgent"]
+__all__ = ["AgentRun", "Step", "RelevanceAgent", "IntentAgent", "EvidenceAgent", "SpecAgent"]

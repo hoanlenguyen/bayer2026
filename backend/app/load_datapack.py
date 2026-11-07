@@ -1,4 +1,4 @@
-"""Load the Bayer data pack into MongoDB.
+"""Load the SinceAI data pack into MongoDB.
 
     python -m app.load_datapack                     # workbook in materials/, skip if already loaded
     python -m app.load_datapack --reset             # replace catalog, raw sheets and presets

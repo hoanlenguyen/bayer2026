@@ -1,1 +1,0 @@
-Microsoft JSON schemas, MIT licensed. Vendored from https://github.com/microsoft/json-schemas at eecc60d35b9ab18b884d35c50abe7d09d2753cdf. Only the transitive schemas used by the renderer are included. Schema acceptance does not establish runtime or numerical acceptance.

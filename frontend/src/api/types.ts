@@ -1,13 +1,9 @@
 export type StageId =
-  | "intent" | "discovery" | "governance" | "decision" | "actions" | "deliver"
-  | "evidence" | "spec" | "approval" | "render" | "register";
+  | "intent" | "kpis" | "discovery" | "lineage" | "governance" | "migration" | "decision" | "actions" | "deliver";
 
 export type StageStatus = "pending" | "running" | "waiting" | "done" | "rejected";
-export type DecisionType = "reuse" | "repair" | "consolidate" | "migrate" | "new_build" | "not_feasible";
-
-export const DECISION_LABEL: Record<DecisionType, string> = {
-  reuse: "Reuse", repair: "Repair", consolidate: "Consolidate", migrate: "Migrate", new_build: "New build", not_feasible: "Not feasible",
-};
+// extend and create come from the backend before the SinceAI data pack; the rest from the data pack version.
+export type DecisionType = "reuse" | "repair" | "consolidate" | "migrate" | "new_build" | "retire" | "review" | "extend" | "create" | "not_feasible";
 
 export interface Preset {
   id: string;
@@ -17,21 +13,16 @@ export interface Preset {
   decision: string;
   measures: string[];
   dimensions: string[];
-  filters?: Record<string, string[]>;
-  /** How often this text appears in Bayer's Business_Requests sheet. */
-  requests?: number;
-  /** Set for estate scenarios built from real assets to show a specific outcome. */
-  scenario?: string;
+  grain?: string;
 }
 
-export interface Preview {
-  month: string;
-  previous_month: string | null;
-  by: "product" | "market";
-  columns: { id: string; name: string; unit: string; lower_is_better: boolean }[];
-  rows: { label: string; values: Record<string, number>; previous: Record<string, number> }[];
-  not_previewed: string[];
-  note: string;
+export interface ActionProposal {
+  key: string;
+  kind: "business" | "maintenance";
+  title: string;
+  reason: string;
+  owner: string;
+  due_date: string;
 }
 
 export interface StageEvent {
@@ -48,14 +39,14 @@ export interface MessageEvent {
   type: "message";
   role: "assistant";
   content: string;
-  kind?: "question" | "result" | "approval";
+  kind?: "question" | "result" | "retry";
   suggestions?: string[];
   decision?: DecisionType;
   ts: string;
 }
 
 export type PipelineEvent =
-  | { type: "conversation"; id: string; provider: string; store: string; revision?: number }
+  | { type: "conversation"; id: string; provider: string; store: string }
   | { type: "user_message"; content: string; ts: string }
   | StageEvent
   | MessageEvent
@@ -65,12 +56,12 @@ export type PipelineEvent =
 export interface Health {
   ok: boolean;
   provider: "mock" | "openai";
-  store: "memory" | "mongodb" | "sqlite";
+  store: "memory" | "mongodb";
   models: { reasoning: string; fast: string } | null;
+  jev?: boolean;
 }
 
 export interface CatalogMeta {
-  owners?: Record<string, { owner_name: string; status: string }>;
   measures: Record<string, { name: string; unit: string; definition: string }>;
   dimensions: Record<string, { name: string }>;
 }
@@ -78,77 +69,91 @@ export interface CatalogMeta {
 export interface Candidate {
   asset_id: string;
   name: string;
-  platform: string;
-  scope_score: number;
-  scope_note: string;
-  views_90d: number;
-  lifecycle: string;
+  owner?: string | null;
+  owner_status?: string | null;
+  platform?: string;
+  scope_note?: string;
   coverage: number;
   freshness: number;
   governance: number;
   measures_found: string[];
   measures_missing: string[];
-  dimensions_found: string[];
-  dimensions_missing: string[];
-  grain_supported: boolean;
-  gates_failed: string[];
+  dimensions_found?: string[];
+  dimensions_missing?: string[];
+  grain_supported?: boolean;
+  gates_failed?: string[];
   gates_pass: boolean;
   checks: { id: string; label: string; passed: boolean; weight: number }[];
 }
 
-export type ActionStatus = "open" | "in_progress" | "blocked" | "done" | "verified" | "dismissed";
-export type ActionKind = "business" | "maintenance";
-
-export interface VerifyTarget {
-  metric_id: string | null;
-  metric_name: string;
-  direction: "increase" | "decrease";
-  result: "improved" | "not_improved" | "confirmed" | null;
-  note: string;
-  checked_at: string | null;
-  checked_by: string | null;
-}
-
-export interface ActionProposal {
-  key: string;
-  kind: ActionKind;
-  title: string;
-  reason: string;
-  owner: string;
-  due_date: string;
-  asset_id: string | null;
-  asset_name: string | null;
-  verify: VerifyTarget | null;
-  existing_action_id: string | null;
-}
-
-export interface Action {
-  owner_id?: string;
-  version?: number;
+export interface ConversationSummary {
   _id: string;
-  key: string | null;
-  kind: ActionKind;
-  title: string;
-  reason: string;
-  owner: string;
-  due_date: string | null;
-  status: ActionStatus;
-  asset_id: string | null;
-  asset_name: string | null;
-  conversation_id: string | null;
-  blocker: string;
-  outcome: string;
-  verify: VerifyTarget | null;
-  created_at: string;
+  title: string | null;
   updated_at: string;
-  created_by: string;
-  sample: boolean;
-  overdue: boolean;
-  allowed: ActionStatus[];
-  history: { at: string; by: string; change: string; from?: string | null; to?: string | null; note?: string | null }[];
 }
 
-export interface ActionSummary {
-  open: number; in_progress: number; blocked: number; done: number; verified: number; dismissed: number;
-  overdue: number; awaiting_verification: number; active: number;
+export interface ConversationDetail extends ConversationSummary {
+  state: string;
+  messages: { role: "user" | "assistant"; content: string; kind?: "question" | "result" | "retry"; suggestions?: string[] }[];
+  runs: { events: (StageEvent | { type: "user_message" | "message" | "done" })[] }[];
+}
+
+// ---- Chat simulator (POST /api/simulator/turn)
+export type GateLabel = "off_topic" | "business_talk" | "needs_decision" | "needs_context" | "already_answered";
+export type DecidedBy = "jev" | "llm" | "rules";
+
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  calls: number;
+}
+
+export interface SimulatorRecommendation {
+  value: string;
+  label: string;
+  reason: string;
+  rule: string;
+  rules_applied: string[];
+  evidence: { step: number; task: string; summary: string }[];
+}
+
+export interface SimulatorReport {
+  id: string;
+  name: string;
+  platform: string;
+  workspace: string | null;
+  owner: string | null;
+}
+
+export type SimulatorEvent =
+  | { type: "gate"; label: GateLabel; confidence: number | null; reason: string; decided_by: DecidedBy; model: string; ms: number; usage: TokenUsage | null; cost: number; fallback_reason: string | null; jev_on: boolean }
+  | { type: "searching" }
+  | { type: "reply"; kind: "answer"; text: string; usage: TokenUsage | null; answer_key?: string; decision?: string; recommendation?: SimulatorRecommendation; report?: SimulatorReport | null; stages?: StageEvent[] }
+  | { type: "needs_context"; usage: TokenUsage | null }
+  | { type: "already_answered"; answer_key: string; usage: TokenUsage | null }
+  | { type: "done" }
+  | { type: "error"; message: string };
+
+/** One line of the chat. A and B carry what was decided about them; C carries its answer. */
+export interface SimulatorMessage {
+  id: number;
+  speaker: "A" | "B" | "C";
+  text: string;
+  label?: GateLabel;
+  confidence?: number | null;
+  ms?: number;
+  decided_by?: DecidedBy;
+  usage?: TokenUsage | null;
+  search_usage?: TokenUsage | null;
+  cost?: number;
+  searching?: boolean;
+  failed?: boolean;
+  kind?: "answer";
+  answer_key?: string;
+  decision?: string;
+  recommendation?: SimulatorRecommendation;
+  report?: SimulatorReport | null;
+  stages?: StageEvent[];
+  /** Analytics Manager only: the sentence it answered, used as the title of its steps. */
+  request?: string;
 }

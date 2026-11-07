@@ -1,52 +1,39 @@
-import { StageDetail } from "../components/ask/StageDetail";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, streamPost, getJSON, ensureSession, type DemoActor } from "../api/client";
-import type {
-  ActionProposal,
-  CatalogMeta,
-  DecisionType,
-  Health,
-  PipelineEvent,
-  Preset,
-  StageEvent,
-  StageId,
-} from "../api/types";
-import { FlowPanel } from "../components/ask/FlowPanel";
-import { ProposedActions } from "../components/ask/ProposedActions";
-import { Workbench, decisionLabel } from "../components/ask/Workbench";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, streamPost } from "../api/client";
+import type { CatalogMeta, DecisionType, Health, PipelineEvent, Preset, StageEvent, StageId } from "../api/types";
+import { FlowPanel, RUNNING_COPY } from "../components/ask/FlowPanel";
+import { TriageStrip } from "../components/ask/TriageStrip";
+import { VerdictCard } from "../components/ask/VerdictCard";
+import { Icon } from "../components/Icon";
+import { conversationsChanged, CURRENT_REMOVED_EVENT, getCurrentConversation, setAnswerInProgress, OPEN_CONVERSATION_EVENT, setCurrentConversation, stagesOf, takePendingConversation } from "../lib/conversations";
 
 interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
-  kind?: "question" | "result" | "approval";
+  kind?: "question" | "result" | "retry";
   suggestions?: string[];
 }
 
-type ConvState = "idle" | "clarifying" | "awaiting_approval";
+type ConvState = "idle" | "clarifying" | "awaiting_approval"; // awaiting_approval only exists in older saved conversations
+
+/** Each matches a preset's prompt in the backend, so a click also sends that preset's certified measures. */
+const STARTER_QUESTIONS = [
+  "Please create a Power BI replacement for our legacy Tableau Xarelto commercial workbook.",
+  "Please build a new report for market access coverage and reimbursement status by product.",
+  "We need a monthly supply-risk dashboard by medicine and country.",
+  "I need a new Kerendia management report for monthly performance in EMEA and North America.",
+  "Can we have a new finance dashboard for net sales, gross-to-net and budget variance by product?",
+];
 
 /** Renders **bold** segments; everything else is plain text. */
 function RichText({ text }: { text: string }) {
   const parts = text.split(/\*\*(.+?)\*\*/g);
-  return (
-    <>
-      {parts.map((p, i) =>
-        i % 2 ? <strong key={i}>{p}</strong> : <span key={i}>{p}</span>,
-      )}
-    </>
-  );
+  return <>{parts.map((p, i) => (i % 2 ? <strong key={i}>{p}</strong> : <span key={i}>{p}</span>))}</>;
 }
 
-function Composer({
-  onSend,
-  disabled,
-  autoFocus,
-  placeholder,
-}: {
-  onSend: (text: string) => void;
-  disabled: boolean;
-  autoFocus?: boolean;
-  placeholder: string;
+function Composer({ onSend, disabled, autoFocus, placeholder }: {
+  onSend: (text: string) => void; disabled: boolean; autoFocus?: boolean; placeholder: string;
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -63,153 +50,124 @@ function Composer({
     setText("");
   };
   return (
-    <form
-      className="composer"
-      onSubmit={(e) => {
-        e.preventDefault();
-        submit();
-      }}
-    >
-      <label htmlFor="ask-input" className="sr-only">
-        Dashboard request
-      </label>
+    <form className="composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <label htmlFor="ask-input" className="sr-only">Your question</label>
       <textarea
         id="ask-input"
         ref={ref}
         rows={1}
-        disabled={disabled}
         value={text}
         autoFocus={autoFocus}
         placeholder={placeholder}
         onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            submit();
-          }
-        }}
+        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
       />
-      <button
-        type="submit"
-        className="send"
-        disabled={disabled || !text.trim()}
-        aria-label="Send"
-      >
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-          <path
-            d="M4 12h13M12 5l7 7-7 7"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+      <button type="submit" className="send" disabled={disabled || !text.trim()} aria-label="Send">
+        <Icon name="arrowUp" />
       </button>
     </form>
   );
 }
 
-export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) {
+export function AskPage() {
   const [health, setHealth] = useState<Health | null>(null);
   const [offline, setOffline] = useState(false);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [catalog, setCatalog] = useState<CatalogMeta | null>(null);
-  const [dept, setDept] = useState("All");
 
-  const [question, setQuestion] = useState("");
-  const [revision, setRevision] = useState(0);
   const [convId, setConvId] = useState<string | null>(null);
   const [convState, setConvState] = useState<ConvState>("idle");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [stages, setStages] = useState<Partial<Record<StageId, StageEvent>>>(
-    {},
-  );
+  const [stages, setStages] = useState<Partial<Record<StageId, StageEvent>>>({});
   const [decision, setDecision] = useState<DecisionType | null>(null);
-  const [proposals, setProposals] = useState<{ runKey: number; items: ActionProposal[] } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false); // sent, and the backend has not said yet if it accepts the message
   const [error, setError] = useState<string | null>(null);
-  const [actor, setActor] = useState<DemoActor | null>(null);
-  const [history, setHistory] = useState<{_id: string; title: string; request_state: string}[]>([]);
-  const [editText, setEditText] = useState("");
   const nextId = useRef(1);
   const listRef = useRef<HTMLDivElement>(null);
+  const restoreAttempt = useRef(0);
+  const [restoring, setRestoring] = useState(() => getCurrentConversation() !== null);
 
-  useEffect(() => {
-    api
-      .health()
-      .then(setHealth)
-      .catch(() => setOffline(true));
-    api
-      .presets()
-      .then(setPresets)
-      .catch(() => setOffline(true));
-    api
-      .catalog()
-      .then(setCatalog)
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    const update = (e: Event) => setActor((e as CustomEvent<DemoActor>).detail);
-    ensureSession().then(s => setActor(s.actor)).catch(() => undefined);
-    window.addEventListener("demo-actor", update);
-    return () => window.removeEventListener("demo-actor", update);
-  }, []);
-  useEffect(() => {
-    if (!busy) getJSON<typeof history>("/api/conversations").then(setHistory).catch(() => undefined);
-  }, [busy, actor, convId]);
-  const restore = async (id: string) => {
+  /** Brings a saved conversation back as it was. Sending next continues it, with its context, in the backend. */
+  const restore = useCallback(async (id: string) => {
+    const attempt = ++restoreAttempt.current;
+    setRestoring(true);
+    setError(null);
     try {
-      const c = await getJSON<any>(`/api/conversations/${id}`);
-      setConvId(id); setRevision(c.revision ?? 1); setConvState(c.state); setQuestion(c.intent?.question ?? c.title);
-      setMessages(c.messages.map((m: ChatMessage) => ({ ...m, id: nextId.current++ })));
-      const events: StageEvent[] = (c.runs.at(-1)?.events ?? []).filter((e: PipelineEvent) => e.type === "stage");
-      const restored: Partial<Record<StageId, StageEvent>> = {};
-      events.forEach(e => { restored[e.stage] = e; });
-      setStages(restored); setDecision(restored.decision?.data?.decision ?? null);
-      setProposals(restored.actions?.data ? {runKey: Date.now(), items: restored.actions.data.proposals} : null);
-      setError(null);
-    } catch (e) { setError(String(e)); }
-  };
-  const savedRequests = <label className="request-history">Saved requests
-    <select aria-label="Saved requests" value={convId ?? ""} disabled={busy} onChange={e => { if (e.target.value) void restore(e.target.value); }}>
-      <option value="">Select a request to resume</option>
-      {history.map(c => <option key={c._id} value={c._id}>{c.title} · {c.request_state.replaceAll("_", " ")}</option>)}
-    </select>
-  </label>;
+      const conv = await api.conversation(id);
+      if (attempt !== restoreAttempt.current) return; // another conversation was picked meanwhile
+      const restored = stagesOf(conv);
+      setMessages(conv.messages.map((m) => ({ id: nextId.current++, role: m.role, content: m.content, kind: m.kind, suggestions: m.suggestions })));
+      setStages(restored);
+      setDecision(restored.decision?.data?.decision ?? null);
+      setConvId(conv._id);
+      setConvState(conv.state === "clarifying" ? "clarifying" : "idle");
+      setCurrentConversation(conv._id);
+      setOffline(false);
+    } catch (err) {
+      if ((err as { status?: number }).status === 404) { // gone, such as after a restart without MongoDB
+        if (getCurrentConversation() === id) setCurrentConversation(null);
+        conversationsChanged();
+      } else {
+        setOffline(true);
+      }
+    } finally {
+      setRestoring(false);
+    }
+  }, []);
 
   useEffect(() => {
-    listRef.current?.scrollTo({
-      top: listRef.current.scrollHeight,
-      behavior: "smooth",
-    });
-  }, [messages, busy]);
+    // A conversation picked from History. While an answer is streaming it waits, so the two don't mix.
+    if (busy) return;
+    const open = () => {
+      const id = takePendingConversation();
+      if (id) void restore(id);
+    };
+    open();
+    window.addEventListener(OPEN_CONVERSATION_EVENT, open);
+    return () => window.removeEventListener(OPEN_CONVERSATION_EVENT, open);
+  }, [busy, restore]);
+
+  useEffect(() => {
+    // Coming back: reopen the conversation that was open, unless one was just picked from the list.
+    const id = getCurrentConversation();
+    if (id) void restore(id);
+  }, [restore]);
+
+  useEffect(() => {
+    api.health().then(setHealth).catch(() => setOffline(true));
+    api.presets().then(setPresets).catch(() => setOffline(true));
+    api.catalog().then(setCatalog).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    // Works in both layouts: the list scrolls on desktop, the page scrolls on narrow screens.
+    listRef.current?.lastElementChild?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [messages, busy, stages]);
 
   const handleEvent = useCallback((e: PipelineEvent) => {
     switch (e.type) {
       case "conversation":
         setConvId(e.id);
-        if (e.revision !== undefined) setRevision(e.revision);
+        setCurrentConversation(e.id);
+        break;
+      case "user_message":
+        conversationsChanged(); // saved by now, so it can appear in the list
         break;
       case "stage":
+        setChecking(false);
+        // The first step starting means the message was accepted as a new question: only now does the last answer go.
+        if (e.stage === "intent" && e.status === "running") {
+          setStages({ intent: e });
+          setDecision(null);
+          break;
+        }
         setStages((s) => ({ ...s, [e.stage]: e }));
-        if (e.stage === "decision" && e.status === "done")
-          setDecision(e.data.decision);
-        if (e.stage === "actions" && e.status === "done")
-          setProposals({ runKey: Date.now(), items: e.data.proposals });
+        if (e.stage === "decision" && e.status === "done") setDecision(e.data.decision);
         break;
       case "message":
-        setMessages((m) => [
-          ...m,
-          {
-            id: nextId.current++,
-            role: "assistant",
-            content: e.content,
-            kind: e.kind,
-            suggestions: e.suggestions,
-          },
-        ]);
+        setChecking(false);
+        setMessages((m) => [...m, { id: nextId.current++, role: "assistant", content: e.content, kind: e.kind, suggestions: e.suggestions }]);
         break;
       case "done":
         setConvState(e.state);
@@ -220,383 +178,125 @@ export function AskPage({ onActionsChanged }: { onActionsChanged: () => void }) 
     }
   }, []);
 
-  const run = useCallback(
-    async (path: string, body: unknown) => {
-      setBusy(true);
-      setError(null);
-      try {
-        await streamPost(path, body, handleEvent);
-        setOffline(false);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-        setOffline(err instanceof TypeError);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [handleEvent],
-  );
+  const run = useCallback(async (path: string, body: unknown) => {
+    setBusy(true);
+    setAnswerInProgress(true);
+    setError(null);
+    try {
+      await streamPost(path, body, handleEvent);
+      setOffline(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setOffline(true);
+    } finally {
+      setBusy(false);
+      setChecking(false);
+      setAnswerInProgress(false);
+      conversationsChanged();
+    }
+  }, [handleEvent]);
 
-  const send = useCallback(
-    (text: string, presetId?: string) => {
-      if (convState !== "clarifying") {
-        setQuestion(text);
-        setStages({});
-        setDecision(null);
-        setProposals(null);
-      }
-      setMessages((m) => [
-        ...m,
-        { id: nextId.current++, role: "user", content: text },
-      ]);
-      void run("/api/chat", {
-        conversation_id: convId,
-        expected_revision: convId ? revision : null,
-        submission_id: crypto.randomUUID(),
-        message: text,
-        preset_id: presetId ?? null,
-      });
-    },
-    [convId, convState, run, revision],
-  );
-
-  const approve = (approved: boolean) => {
-    const approver = actor?.name ?? "Reviewer";
-    setMessages((m) => [
-      ...m,
-      {
-        id: nextId.current++,
-        role: "user",
-        content: approved ? `Approved as ${approver}` : "Rejected",
-      },
-    ]);
-    void run("/api/approve", { conversation_id: convId, approved, spec_hash: stages.approval?.data?.spec_hash });
-  };
+  const send = useCallback((text: string, presetId?: string) => {
+    setChecking(true);
+    setMessages((m) => [...m, { id: nextId.current++, role: "user", content: text }]);
+    void run("/api/chat", { conversation_id: convId, message: text, preset_id: presetId ?? null });
+  }, [convId, run]);
 
   const newChat = () => {
-    setQuestion("");
-    setConvId(null);
-    setRevision(0);
-    setConvState("idle");
-    setMessages([]);
-    setStages({});
-    setDecision(null);
-    setError(null);
-    setProposals(null);
+    setCurrentConversation(null);
+    setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null);
   };
 
-  const departments = useMemo(
-    () => ["All", ...Array.from(new Set(presets.map((p) => p.department)))],
-    [presets],
-  );
-  const shownPresets = useMemo(
-    () => presets.filter((p) => dept === "All" || p.department === dept),
-    [presets, dept],
-  );
-  const requestPresets = shownPresets.filter((p) => !p.scenario);
-  const scenarioPresets = shownPresets.filter((p) => p.scenario);
+  useEffect(() => {
+    // The chat on screen was deleted from the list.
+    const cleared = () => {
+      restoreAttempt.current++;
+      setRestoring(false);
+      setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null);
+    };
+    window.addEventListener(CURRENT_REMOVED_EVENT, cleared);
+    return () => window.removeEventListener(CURRENT_REMOVED_EVENT, cleared);
+  }, []);
+
   const lastId = messages.length ? messages[messages.length - 1].id : -1;
+  const runningStage = (Object.values(stages) as StageEvent[]).find((s) => s.status === "running")?.stage;
+  const hasVerdict = stages.decision?.status === "done";
+
+  // Messages rejected after an answer come below its verdict card, which stays because nothing new has started.
+  let tailStart = messages.length;
+  if (hasVerdict) {
+    if (checking && messages[tailStart - 1]?.role === "user") tailStart--;
+    while (tailStart >= 2 && messages[tailStart - 1].kind === "retry" && messages[tailStart - 2].role === "user") tailStart -= 2;
+  }
+  const renderMessage = (m: ChatMessage) => (
+    <div key={m.id} className={`msg msg-${m.role}`}>
+      <p><RichText text={m.content} /></p>
+      {m.id === lastId && !busy && m.suggestions && m.suggestions.length > 0 && (
+        <div className="chips">
+          {m.suggestions.map((s) => <button key={s} type="button" onClick={() => send(s, presets.find((p) => p.prompt === s)?.id)}>{s}</button>)}
+        </div>
+      )}
+    </div>
+  );
+  const working = busy && (!hasVerdict || checking) && (
+    <p className="working"><span className="spinner" aria-hidden="true" />{runningStage ? RUNNING_COPY[runningStage] : "Reading your question"}</p>
+  );
+  const answerCards = <><TriageStrip stages={stages} /><VerdictCard stages={stages} catalog={catalog} busy={busy} /></>;
 
   const offlineBanner = offline && (
     <div className="banner" role="status">
-      The backend is not reachable. Start it with{" "}
-      <code>uvicorn app.main:app --reload --port 8000</code> in{" "}
-      <code>backend/</code>, then reload.
+      The backend is not reachable. Start it with <code>uvicorn app.main:app --reload --port 8000</code> in <code>backend/</code>, then reload.
     </div>
   );
+
+  if (messages.length === 0 && restoring) {
+    return <div className="ask-empty"><p className="working"><span className="spinner" aria-hidden="true" />Opening your conversation</p></div>;
+  }
 
   if (messages.length === 0) {
     return (
       <div className="ask-empty">
-        {offlineBanner}
-        {savedRequests}
-        {error && <p role="alert">{error}</p>}
-        <div className="entry-heading">
-          <span className="folio">ANALYTICS WORKBENCH / DASHBOARD REQUEST</span>
-          <span className="folio">01</span>
+        <div className="ask-empty-above">
+          {offlineBanner}
+          <h1>What do you need to decide?</h1>
         </div>
-        <div className="hello">
-          <h1>
-            What dashboard
-            <br />
-            does your team need?
-          </h1>
-          <p>
-            Describe what you need to track. We will check existing dashboards and prepare any necessary changes.
-          </p>
-        </div>
-        <div className="entry-label">
-          <span className="folio">YOUR REQUEST</span>
-          <span>Tell us the purpose, audience and scope</span>
-        </div>
-        <Composer
-          onSend={(t) => send(t)}
-          disabled={busy}
-          autoFocus
-          placeholder="Build a dashboard of Eylea net sales and digital engagement in Japan, with monthly trends."
-        />
-        <div className="preset-heading">
-          <h2>Or start with a dashboard request</h2>
-          <span className="folio">DEPARTMENT INDEX</span>
-        </div>
-        <div
-          className="dept-filter"
-          role="group"
-          aria-label="Filter suggestions by department"
-        >
-          {departments.map((d) => (
-            <button
-              key={d}
-              type="button"
-              aria-pressed={dept === d}
-              onClick={() => setDept(d)}
-            >
-              {d}
-            </button>
-          ))}
-        </div>
-        {requestPresets.length > 0 && (
-          <div className="preset-subheading">
-            <h3>Business requests from Bayer's data pack</h3>
-            <span className="folio">BUSINESS_REQUESTS</span>
+        <Composer onSend={(t) => send(t)} disabled={busy} autoFocus placeholder="Describe the decision or the numbers you need, in your own words" />
+        <div className="ask-empty-below">
+          <div className="starter-chips" role="group" aria-label="Example questions">
+            {STARTER_QUESTIONS.map((q) => (
+              <button key={q} type="button" onClick={() => send(q, presets.find((p) => p.prompt === q)?.id)} disabled={busy}>{q}</button>
+            ))}
           </div>
-        )}
-        <div className="preset-grid">
-          {requestPresets.map((p, index) => (
-            <button
-              key={p.id}
-              type="button"
-              className="preset"
-              onClick={() => send(p.prompt, p.id)}
-              disabled={busy}
-            >
-              <span className="preset-number folio">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <span className="preset-dept">
-                {p.department}
-                {p.requests ? ` · asked ${p.requests}×` : ""}
-              </span>
-              <span className="preset-title">{p.title}</span>
-              <span className="preset-prompt">{p.prompt}</span>
-            </button>
-          ))}
+          <p className="fineprint">The AI sees catalog metadata only, never raw production data.</p>
         </div>
-        {scenarioPresets.length > 0 && (
-          <div className="preset-subheading">
-            <h3>Demo scenarios grounded in workbook records</h3>
-            <span className="folio">SCENARIOS</span>
-          </div>
-        )}
-        <div className="preset-grid">
-          {scenarioPresets.map((p, index) => (
-            <button
-              key={p.id}
-              type="button"
-              className="preset"
-              onClick={() => send(p.prompt, p.id)}
-              disabled={busy}
-            >
-              <span className="preset-number folio">
-                {String(requestPresets.length + index + 1).padStart(2, "0")}
-              </span>
-              <span className="preset-dept">
-                {p.department} · expect {p.scenario?.replace("_", " ")}
-              </span>
-              <span className="preset-title">{p.title}</span>
-              <span className="preset-prompt">{p.prompt}</span>
-            </button>
-          ))}
-        </div>
-        <p className="fineprint">
-          Synthetic Bayer Pharmaceuticals × Since AI 2026 data pack: 360
-          reports, 75 semantic models, 56 KPIs. No patient or HCP data. The AI
-          sees catalog metadata only.
-        </p>
       </div>
     );
   }
 
   return (
-    <main className="investigation">
-      <header className="question-strip">
-        <span className="folio">DASHBOARD REQUEST</span>
-        <h1>{question || messages[0]?.content}</h1>
-        <button
-          type="button"
-          className="btn-ghost"
-          disabled={busy}
-          onClick={newChat}
-        >
-          New request ↗
-        </button>
-      </header>
-      {savedRequests}
-      <section className="request-brief" aria-label="Request brief">
-        <div><span className="folio">CURRENT BRIEF</span><h2>{stages.intent?.data?.decision || "Clarifying the dashboard requirements"}</h2></div>
-        <p>KPIs: {(stages.intent?.data?.measures ?? []).map((id: string) => catalog?.measures[id]?.name ?? id).join(", ") || "Not yet specified"}</p>
-        <p>Scope: {Object.entries(stages.intent?.data?.filters ?? {}).map(([k,v]) => `${k}: ${(v as string[]).join(", ")}`).join(" · ") || (stages.intent?.data?.scope_global ? "All products" : "To confirm")}{stages.intent?.data?.scope_global ? " · All markets" : ""}</p>
-        <p>Period: January–October 2026 · monthly synthetic workbook data. Other periods require a revised binding.</p>
-        <p>Requester: {stages.intent?.data?.requester_id ?? actor?.id} · Version {stages.intent?.data?.request_revision ?? 1} · {(stages.intent?.data?.dimensions ?? []).join(", ") || "No breakdown selected"}</p>
-        {!!stages.intent?.data?.unmatched_terms?.length && <p className="bad-text">Unresolved: {stages.intent.data.unmatched_terms.join(", ")}</p>}
-        <details><summary onClick={() => { if (!editText) setEditText(question); }}>Edit requirements and reassess</summary>
-          <label>Describe the full revised request<textarea aria-label="Revised dashboard request" value={editText} onChange={e => setEditText(e.target.value)} /></label>
-          <button className="btn" type="button" disabled={busy || !editText.trim()} onClick={() => { send(editText); setEditText(""); }}>Reassess this request</button>
-          <p className="muted small">A new assessment supersedes the previous pending specification and requires a fresh review.</p>
-        </details>
-      </section>
-      <div className="processing-strip" aria-label="Processing status" aria-live="polite">
-        {Object.values(stages).filter(e => ["intent", "discovery", "governance", "evidence", "spec", "render"].includes(e.stage)).map(e => <span key={e.stage} className={`process-${e.status}`}>{e.status === "running" ? "◌" : e.status === "waiting" ? "!" : "✓"} {e.title}{e.data?.agent ? ` · ${e.data.agent.mode === "llm" ? "Live model" : "Offline rules"}` : ""}</span>)}
-      </div>
-      {stages.render?.status === "done" && <section className="request-brief"><h2>{stages.render.summary}</h2><StageDetail stage="render" data={stages.render.data} catalog={catalog} /></section>}
-      <Workbench
-        key={question}
-        stages={stages}
-        decision={decision}
-        catalog={catalog}
-      >
-        <section className="chat" aria-label="Conversation">
-          <div className="conversation-label">
-            <h2>Request notes</h2>
-            <span className="folio">
-              {busy
-                ? "PROCESSING"
-                : convState === "clarifying"
-                  ? "YOUR INPUT NEEDED"
-                  : "LIVE RECORD"}
-            </span>
-          </div>
-          {offlineBanner}
-          <div className="messages" ref={listRef} aria-live="polite">
-            {messages.map((m) => (
-              <div key={m.id} className={`msg msg-${m.role}`}>
-                <span className="note-author">
-                  {m.role === "user" ? "YOU" : "WORKBENCH"}
-                </span>
-                <div className="msg-body">
-                  <p>
-                    <RichText text={m.content} />
-                  </p>
-                  {m.id === lastId &&
-                    !busy &&
-                    m.suggestions &&
-                    m.suggestions.length > 0 && (
-                      <div className="chips">
-                        {m.suggestions.map((s) => (
-                          <button key={s} type="button" onClick={() => send(s)}>
-                            {s}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                </div>
-              </div>
-            ))}
-            {proposals && proposals.items.length > 0 && !busy && (
-              <details className="follow-up-drawer"><summary>{proposals.items.length} proposed follow-up actions</summary><ProposedActions
-                key={proposals.runKey}
-                proposals={proposals.items}
-                conversationId={convId}
-                onAdded={onActionsChanged}
-              /></details>
-            )}
-            {busy && (
-              <div className="msg msg-assistant">
-                <span className="note-author">LIVE</span>
-                <div className="msg-body">
-                  <p className="muted">Working on it…</p>
-                </div>
-              </div>
-            )}
-            {error && <p className="bad-text small">{error}</p>}
-          </div>
-          <div className="chat-composer">
-            <Composer
-              onSend={(t) => send(t)}
-              disabled={busy}
-              placeholder={
-                convState === "awaiting_approval"
-                  ? "Add a clarification to reassess the request"
-                  : convState === "clarifying"
-                    ? "Answer the question, or pick a suggestion"
-                    : "Describe a revised dashboard request"
-              }
-            />
-          </div>
-        </section>
-      </Workbench>
-      <div className="decision-dock" aria-label="Decision and next action">
-        <span className="folio">DECISION PATH</span>
-        <div className="dock-outcome">
-          <strong>{decisionLabel(decision)}</strong>
-          <span>
-            {stages.decision?.data?.reason ??
-              (busy
-                ? "Checking the catalog and your requirements…"
-                : "Clarify the dashboard requirements to continue.")}
-          </span>
+    <div className="ask-layout">
+      <section className="chat" aria-label="Conversation">
+        <div className="pane-head">
+          <h1>Ask</h1>
+          <button type="button" className="btn-outline" onClick={newChat} disabled={busy}><Icon name="plus" />New question</button>
         </div>
-        {convState === "awaiting_approval" ? (
-          <div className="approve-row">
-            {!actor?.can_review && <span className="small">Switch to the demo reviewer to review this plan.</span>}
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={busy || !actor?.can_review}
-              onClick={() => approve(false)}
-              title="Reviewer permission is checked on the server"
-            >
-              Reject
-            </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={busy || !actor?.can_review}
-              onClick={() => approve(true)}
-            >
-              Approve plan →
-            </button>
-          </div>
-        ) : stages.deliver?.data?.asset ? (
-          <button
-            type="button"
-            className="btn"
-            onClick={() =>
-              window.dispatchEvent(
-                new CustomEvent("open-entity", {
-                  detail: stages.deliver!.data.asset.id,
-                }),
-              )
-            }
-          >
-            Inspect existing report in the asset index ↗
-          </button>
-        ) : (
-          <span className="dock-status">
-            {busy
-              ? "In progress"
-              : stages.register?.status === "done"
-                ? "Draft · validation pending"
-                : stages.approval?.status === "rejected"
-                  ? "Proposal rejected"
-                  : convState === "clarifying"
-                    ? "Input required"
-                    : "Review the investigation"}
-          </span>
-        )}
-      </div>
-      <details className="audit-drawer">
-        <summary>
-          Processing record{" "}
-          <span>All stages, agent traces, scores and generated files</span>
-        </summary>
-        <FlowPanel
-          stages={stages}
-          decision={decision}
-          health={health}
-          catalog={catalog}
-        />
-      </details>
-    </main>
+        {offlineBanner}
+        <div className="messages" ref={listRef} aria-live="polite" aria-busy={busy}>
+          {messages.slice(0, tailStart).map(renderMessage)}
+          {tailStart < messages.length
+            ? <>{answerCards}{messages.slice(tailStart).map(renderMessage)}{working}</>
+            : <>{working}{answerCards}</>}
+          {error && <p className="text-bad small">{error}</p>}
+        </div>
+        <div className="chat-composer">
+          <Composer
+            onSend={(t) => send(t)}
+            disabled={busy}
+            placeholder={convState === "clarifying" ? "Answer the question, or pick a suggestion" : "Ask another question"}
+          />
+        </div>
+      </section>
+      <FlowPanel stages={stages} decision={decision} health={health} catalog={catalog} />
+    </div>
   );
 }

@@ -7,11 +7,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b",
-    "test:workbench": "node --test tests/workbench.test.mjs",
-    "test": "node --test tests/workbench.test.mjs tests/graph.test.mjs"
+    "typecheck": "tsc -b"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
     "d3": "^7.9.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

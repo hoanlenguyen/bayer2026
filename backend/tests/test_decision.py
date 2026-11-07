@@ -12,11 +12,10 @@ def _catalog():
 
 
 @pytest.mark.parametrize("preset_id, expected, asset", [
-    ("scn_reuse_eylea_jp", "repair", "AST-0079"),
-    ("demo_reuse_brazil", "reuse", "AST-0019"),
+    ("scn_reuse_eylea_jp", "reuse", "AST-0079"),
     ("scn_repair_xarelto_mx", "repair", "AST-0217"),
     ("scn_repair_canada_budget", "repair", "AST-0016"),
-    ("req_migrate_xarelto", "migrate", "AST-0220"),
+    ("req_migrate_xarelto", "migrate", "AST-0070"),
     ("req_finance_gtn", "new_build", None),
     ("req_supply_risk", "new_build", None),
     ("scn_out_of_scope", "not_feasible", None),
@@ -59,3 +58,22 @@ def test_governance_is_relative_to_requested_kpis():
     without, _ = governance(a, {"measures": ["net_sales_growth"]})
     assert without > with_conflict
     assert freshness({"refresh_status": "failed"}) < freshness({"refresh_status": "healthy"})
+
+
+def test_country_outside_the_catalog_fits_no_report():
+    cat.reset_catalog()
+    asset = next(a for a in cat.CATALOG["assets"] if a["market_scope"] == "Global" and a["product_scope"] == "Kerendia")
+    known = {"measures": ["net_sales"], "dimensions": [], "filters": {"product": ["Kerendia"], "market": ["JP"]}}
+    assert scope_match(known, asset, cat.CATALOG)[0] == 1.0  # Global covers a market it holds data for
+    unknown = {"measures": ["net_sales"], "dimensions": [], "filters": {"product": ["Kerendia"]}, "other_markets": ["Vietnam"]}
+    assert scope_match(unknown, asset, cat.CATALOG)[0] == 0.5
+
+
+def test_places():
+    from app.geo import other_markets, same_place, split_other_markets
+
+    assert other_markets("sales in vietnam and South Sudan") == ["South Sudan", "Vietnam"]
+    assert other_markets("Net sales in Germany, Indiana") == []
+    assert split_other_markets("report", ["Vietnam", "churn"]) == (["Vietnam"], ["churn"])
+    assert same_place("in Germany", "across EMEA") and same_place("Show sales", "in Japan")
+    assert not same_place("in Vietnam", "in EMEA and North America") and not same_place("in Japan", "in Mexico")

@@ -1,10 +1,12 @@
 # Only backend/ and materials/ are needed for the backend image.
+# Keys stay out of every image: .env is passed at run time.
 **/.git
 **/node_modules
 frontend/
+deploy/
 docs/
+**/.env
 backend/.venv
-backend/.env
 backend/output
 backend/tests
 **/__pycache__

@@ -1,4 +1,4 @@
-"""Bayer Pharmaceuticals × Since AI 2026 Builder Data Pack.
+"""SinceAI 2026 Builder Data Pack.
 
 Reads the workbook in ``materials/`` and builds the analytics catalog the
 pipeline reasons over. All values in the workbook are synthetic; product and
@@ -46,6 +46,9 @@ CATALOG_SCHEMA = 2
 USAGE_MONTHS = 3
 
 
+WORKBOOK_COMPANY_NAME = "Bayer"  # how the source workbook names the company; shown everywhere as SinceAI
+
+
 def snake(name: str) -> str:
     """Sheet names already use underscores: KPI_Catalog -> kpi_catalog."""
     return name.lower()
@@ -56,6 +59,8 @@ def _cell(v: Any) -> Any:
         return v.date().isoformat()
     if isinstance(v, date):
         return v.isoformat()
+    if isinstance(v, str) and not v.startswith("http"):  # the workbook is unchanged; source links must keep working
+        return v.replace(WORKBOOK_COMPANY_NAME, "SinceAI")
     return v
 
 
@@ -169,7 +174,7 @@ PRESETS = [
      "measures": ["net_sales", "net_sales_growth"], "dimensions": ["region", "month"],
      "filters": {"product": ["Kerendia"], "region": ["EMEA", "North America"]}, "scope_global": False, "requests": 14},
     {"id": "req_exec_view", "department": "Executive", "title": "Executive one-view",
-     "prompt": "We need one executive view combining net sales, forecast accuracy and inventory coverage for Bayer Pharma.",
+     "prompt": "We need one executive view combining net sales, forecast accuracy and inventory coverage for SinceAI Pharma.",
      "decision": "Give leadership one trusted view of sales, forecast quality and supply cover.",
      "measures": ["net_sales", "demand_forecast_accuracy", "inventory_coverage"], "dimensions": ["product"],
      "filters": {}, "scope_global": True, "requests": 14},
@@ -314,9 +319,7 @@ def build_catalog(sheets: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
             "audience": a["estimated_audience"], "classification": a["classification"], "delivery_model": a["delivery_model"],
             "grain": "month", "kpis": [k for k, _ in used], "measures": list(dict.fromkeys(a_measures)),
             "conflicts": conflicts, "variants": variants,
-            # Legacy field retained for scoring compatibility; this covers the workbook's final three calendar months.
-            "views_90d": u["views"], "users_90d": None, "monthly_user_sum": u["users"], "errors_90d": u["errors"],
-            "usage_period": "August–October 2026", "unique_users_period": None,
+            "views_90d": u["views"], "users_90d": u["users"], "errors_90d": u["errors"],
             "avg_load_ms": round(u["load_ms"] / u["months"]) if u["months"] else None,
             "signals": signals.get(a["asset_id"], []), "dq_issues": dq.get(a["asset_id"], []),
             "migration": {k: mig[k] for k in ("recommended_path_candidate", "candidate_target_model_id", "complexity",
@@ -339,7 +342,7 @@ def build_catalog(sheets: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
                for e in sheets["lineage_edges"]]
 
     return {
-        "source": "Bayer Pharmaceuticals × Since AI 2026 Builder Data Pack (synthetic)",
+        "source": "SinceAI 2026 Builder Data Pack (synthetic)",
         "schema": CATALOG_SCHEMA,
         "measures": measures,
         "dimensions": DIMENSIONS,

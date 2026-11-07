@@ -1,6 +1,6 @@
 # Curator: An AI Steward for Governed Analytics
 
-> Bayer Hackathon 2026: "Build Less, Build Better: AI for Governed Analytics"
+> SinceAI Hackathon 2026: "Build Less, Build Better: AI for Governed Analytics"
 
 ## 1. Problem Framing
 

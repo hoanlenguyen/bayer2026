@@ -1,0 +1,19 @@
+{
+  // Workers Free plan: frontend on Cloudflare, backend on Azure Container Apps. No Containers (paid only).
+  // Deploy:  npm run deploy:free   (in deploy/cloudflare)
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "analytics-manager",
+  "main": "src/proxy.js",
+  "compatibility_date": "2026-11-06",
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "../../frontend/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    // Azure Container Apps backend (docs/DEPLOY_FREE.md). Public HTTPS address, no trailing slash or path.
+    "BACKEND_URL": "https://analytics-manager-api.greensea-e888302f.francecentral.azurecontainerapps.io"
+  }
+}

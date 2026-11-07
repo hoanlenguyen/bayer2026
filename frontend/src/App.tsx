@@ -1,65 +1,59 @@
-import { WorkbookPage } from "./pages/WorkbookPage";
-import { useCallback, useEffect, useState } from "react";
-import { api } from "./api/client";
-import { TopBar, type Page } from "./components/TopBar";
-import { ActionsPage } from "./pages/ActionsPage";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { Sidebar, type Page } from "./components/Sidebar";
 import { AskPage } from "./pages/AskPage";
+import { CalaGraphPage } from "./pages/CalaGraphPage";
 import { ExplorerPage } from "./pages/ExplorerPage";
+import { SimulatorPage } from "./pages/SimulatorPage";
 
-const pageFromHash = (): Page =>
-  window.location.hash.startsWith("#explorer")
-    ? "explorer"
-    : window.location.hash.startsWith("#actions")
-      ? "actions"
-      : window.location.hash.startsWith("#source") ? "source" : "ask";
+const BriefingsPage = lazy(() => import("./pages/BriefingsPage").then(({ BriefingsPage }) => ({ default: BriefingsPage })));
+
+const pageFromLocation = (): Page => {
+  const path = window.location.pathname.replace(/\/+$/, "");
+  if (path === "/cala-graph") return "cala-graph";
+  if (path === "/simulator") return "simulator";
+  if (path === "/briefings") return "briefings";
+  return window.location.hash.startsWith("#explorer") ? "explorer" : "ask";
+};
 
 export default function App() {
-  const [page, setPage] = useState<Page>(pageFromHash);
+  const [page, setPage] = useState<Page>(pageFromLocation);
   const [focusRequest, setFocusRequest] = useState<string | null>(null);
-  const [activeActions, setActiveActions] = useState(0);
-
-  const refreshActions = useCallback(() => {
-    api.actions().then((d) => setActiveActions(d.summary.active)).catch(() => undefined);
-  }, []);
-  useEffect(() => { refreshActions(); }, [page, refreshActions]);
 
   useEffect(() => {
-    const onHash = () => setPage(pageFromHash());
+    const onNavigate = () => setPage(pageFromLocation());
     // Other pages can ask to open an entity: window.dispatchEvent(new CustomEvent("open-entity", { detail: id }))
     const onOpen = (e: Event) => {
       setFocusRequest((e as CustomEvent<string>).detail);
-      window.location.hash = "#explorer";
+      // Set the path too: a hash change alone would stay on /cala-graph.
+      history.pushState(null, "", "/#explorer");
+      onNavigate();
     };
-    window.addEventListener("hashchange", onHash);
+    window.addEventListener("hashchange", onNavigate);
+    window.addEventListener("popstate", onNavigate);
     window.addEventListener("open-entity", onOpen);
     return () => {
-      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener("hashchange", onNavigate);
+      window.removeEventListener("popstate", onNavigate);
       window.removeEventListener("open-entity", onOpen);
     };
   }, []);
-
   useEffect(() => {
-    if (page === "ask") document.title = "Dashboard requests · Analytics Manager";
-    if (page === "actions") document.title = "Actions · Analytics Manager";
+    if (page === "ask") document.title = "Analytics Manager";
+    if (page === "simulator") document.title = "Conversation simulation · Analytics Manager";
+    if (page === "briefings") document.title = "Team briefings · Analytics Manager";
   }, [page]);
-
+  console.log('clg')
   return (
     <div className={`app app-${page}`}>
-      <TopBar
-        page={page}
-        onPick={(id) => {
-          setFocusRequest(id);
-          window.location.hash = "#explorer";
-        }}
-        activeActions={activeActions}
-      />
-      {/* Investigations stay mounted so the active session survives a visit to the asset index. */}
-      <div hidden={page !== "ask"}>
-        <AskPage onActionsChanged={refreshActions} />
+      <Sidebar page={page} />
+      <div className="app-main">
+        {/* Ask and Simulator stay mounted so an answer keeps arriving, and the screen stays as it was, while on another page. */}
+        <div hidden={page !== "ask"}><AskPage /></div>
+        <div hidden={page !== "simulator"}><SimulatorPage /></div>
+        {page === "explorer" && <ExplorerPage focusRequest={focusRequest} />}
+        {page === "cala-graph" && <CalaGraphPage />}
+        {page === "briefings" && <Suspense fallback={<main className="page" aria-busy="true">Loading team briefings…</main>}><BriefingsPage /></Suspense>}
       </div>
-      {page === "explorer" && <ExplorerPage focusRequest={focusRequest} />}
-      {page === "source" && <WorkbookPage />}
-      {page === "actions" && <ActionsPage onChanged={refreshActions} />}
     </div>
   );
 }

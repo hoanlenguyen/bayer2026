@@ -13,10 +13,12 @@ from __future__ import annotations
 import json
 import logging
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from .settings import settings
+from .settings import DEFAULT_OPENAI_BASE_URL, settings
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +60,52 @@ def summarize(result: dict[str, Any], limit: int = 220) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+# ---------------------------------------------------------------- token usage
+_usage: ContextVar[list[dict[str, Any]] | None] = ContextVar("token_usage", default=None)
+
+
+@contextmanager
+def usage_scope():
+    """Collects token use inside the block. Do not yield from an async generator inside it: its context can change."""
+    log_: list[dict[str, Any]] = []
+    token = _usage.set(log_)
+    try:
+        yield log_
+    finally:
+        _usage.reset(token)
+
+
+def record_usage(model: str, input_tokens: int | None, output_tokens: int | None) -> None:
+    calls = _usage.get()
+    if calls is not None:
+        calls.append({"model": model, "input_tokens": input_tokens or 0, "output_tokens": output_tokens or 0})
+
+
+def record_response_usage(response: Any, model: str) -> None:
+    usage = getattr(response, "usage", None)
+    if usage is not None:
+        record_usage(model, getattr(usage, "prompt_tokens", 0), getattr(usage, "completion_tokens", 0))
+
+
+def usage_total(calls: list[dict[str, Any]]) -> dict[str, Any]:
+    total: dict[str, Any] = {"input_tokens": 0, "output_tokens": 0, "calls": 0, "by_model": {}}
+    for c in calls:
+        call = {"input_tokens": c["input_tokens"], "output_tokens": c["output_tokens"], "calls": 1}
+        total = merge_usage(total, {**call, "by_model": {c["model"].replace(".", "_"): call}})  # MongoDB keys can't hold dots
+    return total
+
+
+def merge_usage(a: dict[str, Any] | None, b: dict[str, Any]) -> dict[str, Any]:
+    a = a or {"input_tokens": 0, "output_tokens": 0, "calls": 0, "by_model": {}}
+    fields = ("input_tokens", "output_tokens", "calls")
+    by_model = {m: dict(r) for m, r in a["by_model"].items()}
+    for m, r in b["by_model"].items():
+        row = by_model.setdefault(m, dict.fromkeys(fields, 0))
+        for f in fields:
+            row[f] += r[f]
+    return {**{f: a[f] + b[f] for f in fields}, "by_model": by_model}
+
+
 class LLM:
     def __init__(self, client: Any | None = None, provider: str | None = None) -> None:
         self.provider = provider or settings.llm_provider
@@ -65,7 +113,10 @@ class LLM:
         if self.provider == "openai" and self.client is None:
             from openai import AsyncOpenAI
 
-            self.client = AsyncOpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
+            # Always pass a base URL: with None, the SDK would re-read OPENAI_BASE_URL from the environment
+            # (which .env loading fills), bypassing the validation in settings.
+            self.client = AsyncOpenAI(api_key=settings.openai_api_key,
+                                      base_url=settings.openai_base_url or DEFAULT_OPENAI_BASE_URL)
 
     @property
     def enabled(self) -> bool:
@@ -81,6 +132,7 @@ class LLM:
     async def text(self, role: str, system: str, user: str) -> str:
         resp = await self.client.chat.completions.create(
             model=self.model(role), messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
+        record_response_usage(resp, self.model(role))
         return resp.choices[0].message.content or ""
 
     async def json(self, role: str, system: str, user: str) -> dict[str, Any]:
@@ -89,6 +141,7 @@ class LLM:
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
             response_format={"type": "json_object"},
         )
+        record_response_usage(resp, self.model(role))
         return parse_json(resp.choices[0].message.content)
 
     async def tool_loop(self, role: str, system: str, user: str, tools: list[Tool],
@@ -99,6 +152,7 @@ class LLM:
         for _ in range(max_turns):
             resp = await self.client.chat.completions.create(
                 model=self.model(role), messages=messages, tools=[t.schema() for t in tools], tool_choice="auto")
+            record_response_usage(resp, self.model(role))
             msg = resp.choices[0].message
             calls = list(msg.tool_calls or [])
             if not calls:
@@ -119,8 +173,10 @@ class LLM:
         raise RuntimeError(f"agent did not finish within {max_turns} turns")
 
 
-EXPLAIN_SYSTEM = """You explain an analytics decision to a non-technical employee requesting a dashboard in 2-3 short sentences.
-Distinguish proposed catalog models from executable demo bindings. Never claim generated, validated, repaired or published without evidence. Name the report in **bold**. Say what will happen next. Plain language, no jargon, no dashes as punctuation."""
+EXPLAIN_SYSTEM = """You explain an analytics recommendation to a non-technical employee in 2-3 short sentences.
+The recommendation is one of reuse, consolidation, migration, retirement, human review or new build. Name the report in **bold**.
+This system only recommends: it builds, changes and retires nothing, so never say a report was drafted or will be built
+by you, and never ask for approval. Say what the team could do next. Plain language, no jargon, no dashes as punctuation."""
 
 
 async def explain(llm: LLM, payload: dict[str, Any]) -> str:

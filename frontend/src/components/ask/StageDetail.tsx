@@ -1,11 +1,5 @@
-import { DECISION_LABEL, type Candidate, type CatalogMeta, type DecisionType, type Preview, type StageId } from "../../api/types";
-import { useState } from "react";
-import { downloadArtifact } from "../../api/client";
-
-function Download({ url }: { url: string }) {
-  const [error, setError] = useState("");
-  return <div><button type="button" className="btn" onClick={() => downloadArtifact(url).catch(e => setError(e.message))}>Download Power BI validation package</button>{error && <p role="alert">{error}</p>}</div>;
-}
+import type { ActionProposal, Candidate, CatalogMeta, StageId } from "../../api/types";
+import { RecommendationChip } from "./RecommendationChip";
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const tone = (v: number, good = 0.9, ok = 0.6) => (v >= good ? "ok" : v >= ok ? "warn" : "bad");
@@ -35,11 +29,67 @@ function KV({ rows }: { rows: [string, React.ReactNode][] }) {
   );
 }
 
+/** Named values, or what the request implies when it names none: "by product" means every product. */
+function scope(values: string[], breakdown: string[], dimension: string, all: string): string {
+  if (values.length) return values.join(", ");
+  return breakdown.some((b) => b.startsWith(dimension)) ? all : "Not specified";
+}
+
+const REPORT_STATUS: Record<string, string> = {
+  usable: "ready to use",
+  needs_repair: "needs repair",
+  needs_migration: "needs moving to Power BI",
+  needs_review: "needs a human decision",
+  retire: "should be retired",
+};
+
+function existingReport(t: any): string {
+  const { status, report } = t.existing_report_detail;
+  if (t.existing_report === "yes") return report ? `Yes: ${report.name}, ${REPORT_STATUS[status] ?? status}` : "Yes";
+  return status === "partial_match" && report ? `No. Closest: ${report.name}, covers part of it` : "No";
+}
+
+/** The request's classification, in the same order as POST /api/v2/classify. */
+function classificationRows(t: any): [string, React.ReactNode][] {
+  const model = t.semantic_model;
+  return [
+    ["Domain", t.domain ?? "Not specified"],
+    ["Market", scope(t.market, t.breakdown, "Market", "All markets")],
+    ["Product", scope(t.product, t.breakdown, "Product", "All products")],
+    ["Governed KPIs", t.governed_kpis.length
+      ? t.governed_kpis.map((k: { kpi_id?: string; name: string }) => (k.kpi_id ? `${k.name} (${k.kpi_id})` : k.name)).join(", ")
+      : "None found"],
+    ["Semantic model", model ? `${model.name} (${model.id})${model.serves_all_kpis ? "" : ", does not serve every KPI"}` : "None found"],
+    ["Existing report", existingReport(t)],
+  ];
+}
+
+interface AnalysisStep {
+  step: number;
+  sheets: string[];
+  task: string;
+  output: string;
+  summary: string;
+  findings: string[];
+}
+
+/** One step's findings from the data pack. */
+function StepFindings({ step, technical }: { step?: AnalysisStep; technical: boolean }) {
+  if (!step) return null;
+  return (
+    <>
+      {technical && <p className="muted small">Sheets: {step.sheets.join(", ")}. Output: {step.output}.</p>}
+      {step.findings.length > 0 ? <ul className="step-findings">{step.findings.map((f) => <li key={f}>{f}</li>)}</ul> : <p className="muted">{step.summary}</p>}
+    </>
+  );
+}
+
 interface AgentTraceData {
   agent: string;
-  mode: "llm" | "rules";
+  mode: "jev" | "llm" | "rules";
   model: string;
   ms: number;
+  usage?: { input_tokens: number; output_tokens: number; calls: number } | null;
   fallback_reason: string | null;
   steps: { kind: string; name: string; detail: string; ok: boolean }[];
 }
@@ -52,10 +102,13 @@ function AgentTrace({ trace }: { trace: AgentTraceData }) {
     <details className="agent-trace" open={trace.steps.length <= 4}>
       <summary>
         <span className="agent-name">{trace.agent}</span>
-        <span className={`badge mode-${trace.mode}`}>{trace.mode === "llm" ? trace.model : "rules, offline"}</span>
-        <span className="muted small">{trace.steps.length} steps · {trace.ms} ms</span>
+        <span className={`badge mode-${trace.mode}`}>{trace.mode === "rules" ? "rules, no model" : trace.model}</span>
+        <span className="muted small">
+          {trace.steps.length} steps · {trace.ms} ms
+          {trace.usage && trace.usage.calls > 0 && ` · ${(trace.usage.input_tokens + trace.usage.output_tokens).toLocaleString("en-US")} tokens`}
+        </span>
       </summary>
-      {trace.fallback_reason && <p className="warn-text small">Model failed, used rules instead: {trace.fallback_reason}</p>}
+      {trace.fallback_reason && <p className="text-warn small">Model failed, used rules instead: {trace.fallback_reason}</p>}
       <ol className="steps">
         {trace.steps.map((st, i) => (
           <li key={i} className={st.ok ? "" : "step-bad"}>
@@ -71,99 +124,91 @@ function AgentTrace({ trace }: { trace: AgentTraceData }) {
   );
 }
 
-function OpenInExplorer({ id }: { id: string }) {
-  return (
-    <button type="button" className="btn-ghost small" onClick={() => window.dispatchEvent(new CustomEvent("open-entity", { detail: id }))}>
-      Open in Estate Explorer
-    </button>
-  );
+interface Props {
+  stage: StageId;
+  data: any;
+  catalog: CatalogMeta | null;
+  /** Agent traces, rules, weights and raw files. Off by default for plant staff. */
+  technical: boolean;
 }
 
-/** Synthetic business numbers for the request, computed in Python from the data pack. */
-function PreviewTable({ preview }: { preview: Preview | null | undefined }) {
-  if (!preview || !preview.rows.length) return null;
-  const fmt = (v: number | undefined, unit: string) =>
-    v === undefined ? "–" : unit === "M EUR" ? `€${v.toLocaleString("en-US", { maximumFractionDigits: 1 })}M`
-      : unit === "units" ? v.toLocaleString("en-US") : `${v.toLocaleString("en-US", { maximumFractionDigits: 1 })}${unit === "%" ? "%" : " " + unit}`;
-  return (
-    <div className="preview">
-      <strong className="small">Preview · {new Date(preview.month).toLocaleDateString("en-GB", { month: "long", year: "numeric" })} by {preview.by}</strong>
-      <div className="preview-scroll">
-        <table>
-          <thead><tr><th>{preview.by === "product" ? "Product" : "Market"}</th>{preview.columns.map((c) => <th key={c.id}>{c.name}</th>)}</tr></thead>
-          <tbody>
-            {preview.rows.map((r) => (
-              <tr key={r.label}>
-                <td>{r.label}</td>
-                {preview.columns.map((c) => {
-                  const v = r.values[c.id], p = r.previous[c.id];
-                  const delta = v !== undefined && p !== undefined ? v - p : null;
-                  const good = delta === null ? null : c.lower_is_better ? delta < 0 : delta > 0;
-                  return (
-                    <td key={c.id} className="num">
-                      {fmt(v, c.unit)}
-                      {delta !== null && Math.abs(delta) > 0.05 && <span className={good ? "ok-text" : "bad-text"}> {delta > 0 ? "▲" : "▼"}</span>}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="muted small">{preview.note}{preview.not_previewed.length ? ` No preview data for: ${preview.not_previewed.join(", ")}.` : ""}</p>
-    </div>
-  );
-}
-
-function filterText(filters: Record<string, string[]> | undefined): string {
-  return Object.entries(filters ?? {}).map(([k, v]) => `${k.replace("_", " ")}: ${(v ?? []).join(", ")}`).join(" · ");
-}
-
-export function StageDetail({ stage, data, catalog }: { stage: StageId; data: any; catalog: CatalogMeta | null }) {
+export function StageDetail({ stage, data, catalog, technical }: Props) {
   switch (stage) {
     case "intent":
       return (
         <div className="detail-stack">
-        {data.agent && <AgentTrace trace={data.agent} />}
+        {technical && data.agent && <AgentTrace trace={data.agent} />}
         <KV rows={[
           ["Decision", data.decision ?? "Not yet known"],
-          ["Numbers", names(data.measures, "m", catalog)],
+          ...(data.triage ? [["Urgency", `${data.triage.urgency.value} (${data.triage.urgency.source}${data.triage.urgency.evidence ? `: “${data.triage.urgency.evidence}”` : ""})`] as [string, string]] : []),
+          ...(data.classification ? classificationRows(data.classification) : [["Numbers", names(data.measures, "m", catalog)] as [string, string]]),
           ["Broken down by", names(data.dimensions, "d", catalog)],
-          ["Scope", (filterText(data.filters) || "No filter") + (data.scope_global ? " · global" : "")],
-          ...(data.migration ? [["Migration", `Replace a ${data.migration.from} workbook`] as [string, string]] : []),
-          ...(data.department ? [["Domain", data.department] as [string, string]] : []),
+          ["Time grain", data.grain ?? "Not yet known"],
+          ...(!data.classification && Object.keys(data.filters ?? {}).length
+            ? [["Filters", Object.entries(data.filters).map(([k, v]) => `${k} = ${v}`).join(", ")] as [string, string]]
+            : []),
+          ...(!data.classification && data.department ? [["Department", data.department] as [string, string]] : []),
           ...(data.unmatched_terms?.length ? [["Not in catalog", data.unmatched_terms.join(", ")] as [string, string]] : []),
+          ...(data.triage ? [
+            ...(data.triage.similar ? [["Earlier requests", data.triage.similar.duplicate_count
+              ? `same as ${data.triage.similar.duplicate_count} in the queue`
+              : data.triage.similar.similar?.length ? `similar to one asked ${data.triage.similar.similar[0].asked} times` : "none found"] as [string, string]] : []),
+            ...(technical && data.triage.similar ? [["Vector search", `${data.triage.similar.embedder} embeddings, ${data.triage.similar.search === "atlas" ? "MongoDB Atlas Vector Search" : "in-memory search"}`] as [string, string]] : []),
+          ] : []),
         ]} />
         </div>
       );
+
+    case "kpis":
+    case "lineage":
+      return <div className="detail-stack"><StepFindings step={data.step} technical={technical} /></div>;
+
+    case "migration": {
+      const rows: { id: string; name: string; recommendation: string; reason: string }[] = data.step?.data?.assets ?? [];
+      if (rows.length === 0) return <div className="detail-stack"><StepFindings step={data.step} technical={technical} /></div>;
+      return (
+        <div className="detail-stack">
+          {technical && <p className="muted small">Sheets: {data.step.sheets.join(", ")}. Output: {data.step.output}.</p>}
+          <ul className="rec-list">
+            {rows.slice(0, data.step.findings.length).map((r) => (
+              <li key={r.id}>
+                <RecommendationChip value={r.recommendation} />
+                <span><strong>{r.name}</strong><span className="muted">: {r.reason}</span></span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      );
+    }
 
     case "discovery": {
       const cands: Candidate[] = data.candidates ?? [];
       return (
         <div className="detail-stack">
-          <p className="muted">
-            {data.total_candidates ?? cands.length} of {data.searched} reports use a requested KPI; {data.in_scope ?? "–"} fit the product and market scope.
-            Showing the closest {cands.length}.
-          </p>
+          <StepFindings step={data.step} technical={technical} />
+          <p className="muted">Searched {data.searched} catalog assets. Scores compare each report with your request.</p>
           {cands.length === 0 && <p className="muted">No existing report uses these numbers.</p>}
           {cands.map((c) => (
             <div key={c.asset_id} className="cand">
-              <div className="cand-head"><strong>{c.name}</strong><span className="muted small">{c.asset_id} · {c.platform}</span></div>
-              <p className="muted small">{c.scope_note} · {c.views_90d?.toLocaleString("en-US")} views in Aug–Oct 2026 · {c.lifecycle?.replace("_", " ")}</p>
+              <div className="cand-head"><strong>{c.name}</strong></div>
               <div className="scores">
                 <Score label="Coverage" value={c.coverage} />
                 <Score label="Freshness" value={c.freshness} />
                 <Score label="Governance" value={c.governance} good={0.8} />
               </div>
-              {c.measures_missing.length > 0 && (
-                <p className="muted small">Missing KPIs: {c.measures_missing.map((m) => catalog?.measures[m]?.name ?? m).join(", ")}</p>
+              {c.scope_note && <p className="muted small">{c.scope_note}</p>}
+              {(c.measures_missing.length > 0 || (c.dimensions_missing?.length ?? 0) > 0 || c.grain_supported === false) && (
+                <p className="muted small">
+                  Missing: {[...c.measures_missing.map((m) => catalog?.measures[m]?.name ?? m),
+                    ...(c.dimensions_missing ?? []).map((d) => catalog?.dimensions[d]?.name ?? d),
+                    ...(c.grain_supported === false ? ["finer time grain"] : [])].join(", ")}
+                </p>
               )}
             </div>
           ))}
           {!data.availability?.available && (
-            <p className="warn-text small">
-              Not available: {[...(data.availability?.missing_terms ?? [])].join(", ") || "no governed KPI matched"}
+            <p className="text-warn small">
+              Data not available: {[...(data.availability?.missing_terms ?? []), ...(data.availability?.missing_dimensions ?? [])].join(", ") || "no catalog measures matched"}
             </p>
           )}
         </div>
@@ -173,187 +218,69 @@ export function StageDetail({ stage, data, catalog }: { stage: StageId; data: an
     case "governance":
       return (
         <div className="detail-stack">
+          <StepFindings step={data.step} technical={technical} />
           {(data.candidates ?? []).map((c: Candidate) => (
             <div key={c.asset_id} className="cand">
               <div className="cand-head"><strong>{c.name}</strong><Score label="Score" value={c.governance} good={0.8} /></div>
               <ul className="checks">
                 {c.checks.map((k) => (
                   <li key={k.id} className={k.passed ? "pass" : "fail"}>
-                    <span aria-hidden="true">{k.passed ? "✓" : "✕"}</span> {k.label} <span className="muted">({k.weight.toFixed(2)})</span>
+                    <span aria-hidden="true">{k.passed ? "✓" : "✕"}</span> {k.label}
+                    {technical && <span className="muted"> ({k.weight.toFixed(2)})</span>}
                   </li>
                 ))}
               </ul>
-              {c.gates_failed.map((g) => <p key={g} className="bad-text small">Blocked: {g}</p>)}
+              {(c.gates_failed ?? []).map((g) => <p key={g} className="text-bad small">Blocked: {g}</p>)}
             </div>
           ))}
         </div>
       );
 
-    case "decision": {
-      const c: Candidate | null = data.candidate;
+    case "decision":
       return (
         <div className="detail-stack">
-          <div className={`decision-badge d-${data.decision}`}>
-            {DECISION_LABEL[data.decision as DecisionType]}
-          </div>
           <p>{data.reason}</p>
           <p className="rule"><span className="muted">Rule applied: </span>{data.rule}</p>
-          {data.rules_applied?.length > 0 && (
-            <div className="rule-chips">{data.rules_applied.map((r: string) => <span key={r} className="badge">{r}</span>)}</div>
+          {data.triage?.status && (
+            <KV rows={[
+              ["Status", data.triage.status === "triaged" ? "Triaged" : "New"],
+              ...(data.triage.request_id ? [["Request", data.triage.request_id] as [string, string]] : []),
+              ...(technical && data.triage.request_store ? [["Saved for search", data.triage.request_store === "atlas"
+                ? "MongoDB Atlas (request_vectors)" : "in-memory, until the backend restarts"] as [string, string]] : []),
+            ]} />
           )}
-          {c && (
-            <div className="scores">
-              <Score label="Coverage" value={c.coverage} />
-              <Score label="Freshness" value={c.freshness} />
-              <Score label="Governance" value={c.governance} good={0.8} />
-            </div>
+          {technical && (
+            <details className="thresholds">
+              <summary>Thresholds</summary>
+              <KV rows={Object.entries(data.thresholds ?? {}).map(([k, v]) => [k.replace(/_/g, " "), String(v)])} />
+            </details>
           )}
-          <PreviewTable preview={data.preview} />
-          {data.flags?.length > 0 && (
-            <div className="flags-box">
-              <strong className="small">Also flagged ({data.flags.length})</strong>
-              {data.flags.map((f: { asset_id: string; name: string; message: string }) => (
-                <p key={f.asset_id} className="small"><strong>{f.name}</strong>: {f.message}</p>
-              ))}
-            </div>
-          )}
-          <details className="thresholds">
-            <summary>Thresholds</summary>
-            <KV rows={Object.entries(data.thresholds ?? {}).map(([k, v]) => [k.replace(/_/g, " "), String(v)])} />
-          </details>
         </div>
       );
-    }
 
     case "actions":
       return (
-        <ul className="checks">
-          {(data.proposals ?? []).map((p: { key: string; kind: string; title: string; owner: string }) => (
-            <li key={p.key}><span className={`kind ${p.kind === "business" ? "kind-biz" : "kind-maint"}`}>{p.kind === "business" ? "Business" : "Maintenance"}</span> {p.title} <span className="muted">· {p.owner}</span></li>
+        <div className="detail-stack">
+          <p className="muted">Suggestions only. Nothing is assigned, because this screen has no action tracker yet.</p>
+          {(data.proposals ?? []).map((p: ActionProposal) => (
+            <div key={p.key} className="cand">
+              <div className="cand-head"><strong>{p.title}</strong></div>
+              <p className="muted small">{p.owner} · due {p.due_date}</p>
+            </div>
           ))}
-          {!(data.proposals ?? []).length && <li className="muted">No follow-up needed.</li>}
-        </ul>
+        </div>
       );
 
     case "deliver": {
       const a = data.asset;
       return (
-        <div className="detail-stack">
-        <OpenInExplorer id={a.id} />
         <KV rows={[
-          ["Report", <strong key="n">{a.name}</strong>],
-          ["Asset", `${a.id} · ${a.platform} ${a.asset_type}`],
           ["Workspace", a.workspace],
-          ["Scope", `${a.product_scope} / ${a.market_scope}`],
-          ["Owner", `${a.owner} (${a.owner_status})`],
-          ["Views (Aug–Oct 2026)", a.views_90d?.toLocaleString("en-US") ?? "0"],
-          ["Semantic model", a.model_id],
+          ["Views (90 days)", a.views_90d?.toLocaleString("en-US") ?? "0"],
+          [a.last_review ? "Last reviewed" : "Last changed", a.last_review ?? a.last_modified ?? "Not recorded"],
         ]} />
-        <PreviewTable preview={data.preview} />
-        </div>
       );
     }
 
-    case "evidence":
-      return (
-        <div className="detail-stack">
-          {data.agent && <AgentTrace trace={data.agent} />}
-          {data.summary && <p>{data.summary}</p>}
-          <strong className="small">Proof from the catalog</strong>
-          <ul className="checks">
-            {data.proofs.map((p: { ok: boolean; text: string }) => (
-              <li key={p.text} className={p.ok ? "pass" : "fail"}><span aria-hidden="true">{p.ok ? "✓" : "!"}</span> {p.text}</li>
-            ))}
-          </ul>
-          <strong className="small">Python verification of the agent's choice</strong>
-          <ul className="checks">
-            {(data.verification ?? []).map((v: { ok: boolean; text: string }) => (
-              <li key={v.text} className={v.ok ? "pass" : "fail"}><span aria-hidden="true">{v.ok ? "✓" : "!"}</span> {v.text}</li>
-            ))}
-          </ul>
-          <KV rows={Object.entries(data.columns as Record<string, string[]>).map(([t, cols]) => [t, <code key={t}>{cols.join(", ")}</code>])} />
-        </div>
-      );
-
-    case "spec":
-      return (
-        <div className="detail-stack">
-          {data.agent && <AgentTrace trace={data.agent} />}
-          <KV rows={[
-            ["Name", <strong key="n">{data.name}</strong>],
-            ["Type", DECISION_LABEL[data.decision_type as DecisionType] ?? data.decision_type],
-            ...(data.semantic_model ? [["Shared model", `${data.semantic_model.id} · ${data.semantic_model.name} (${data.semantic_model.endorsement})`] as [string, string]] : []),
-            ["KPIs", data.measures.map((m: { name: string; kpi_id: string }) => `${m.name} (${m.kpi_id})`).join(", ")],
-            ["Scope", `${data.product_scope} / ${data.market_scope}`],
-            ...(data.replaces?.length ? [["Replaces", data.replaces.join(", ")] as [string, string]] : []),
-            ...(data.change?.repairs ? [["Repairs", data.change.repairs] as [string, string]] : []),
-            ["Report owner", `${data.owner} · ${data.owner_id ?? "unassigned"}`],
-            ["Business owner", data.business_owner_id ?? "Unassigned"],
-            ["Execution", data.execution_contract?.supported ? "Bound synthetic demo model · BayerDemo" : "Blocked: external execution or missing bindings"],
-            ["Review date", data.review_date],
-            ...(data.pages.length ? [["Pages", data.pages.map((p: { name: string; visuals: unknown[] }) => `${p.name} (${p.visuals.length} visuals)`).join(", ")] as [string, string]] : []),
-          ]} />
-          {data.rationale && <p className="muted">{data.rationale}</p>}
-          {data.validation && (
-            <details open={!data.validation.passed}>
-              <summary>
-                Validation: {data.validation.passed ? "all checks pass" : "failed"}
-                {data.validation.attempts > 1 ? ` after ${data.validation.attempts} attempts` : ""}
-              </summary>
-              <ul className="checks">
-                {data.validation.checks.map((c: { ok: boolean; text: string }) => (
-                  <li key={c.text} className={c.ok ? "pass" : "fail"}><span aria-hidden="true">{c.ok ? "✓" : "✕"}</span> {c.text}</li>
-                ))}
-              </ul>
-            </details>
-          )}
-          <details>
-            <summary>DashboardSpec (JSON)</summary>
-            <pre className="code">{JSON.stringify({ ...data, agent: undefined }, null, 2)}</pre>
-          </details>
-        </div>
-      );
-
-    case "approval":
-      return <KV rows={[["Approver", data.approver], ...(data.approved_at ? [["Approved at", data.approved_at] as [string, string]] : [])]} />;
-
-    case "render":
-      return (
-        <div className="detail-stack">
-          <p><strong>{(data.artifact_state ?? "validation_pending").replaceAll("_", " ")}</strong> · Plan approval does not certify or publish this dashboard.</p>
-          {data.blockers?.map((b: string) => <p className="bad-text" key={b}>{b}</p>)}
-          {data.action_id && <a href="#actions">Resolve the linked prerequisite action ↗</a>}
-          {data.download_url && <Download url={data.download_url} />}
-          {data.validation && <p>Automated specification, file structure, data bindings and layout checks passed. A reviewer must still open the report in Power BI and reconcile the numbers.</p>}
-          <details><summary>Validation evidence and generated files</summary>
-          {data.validation && <KV rows={Object.entries(data.validation.layers).map(([k, v]) => [k.replaceAll("_", " "), String(v).replaceAll("_", " ")])} />}
-          <ul className="files">
-            {data.files.map((f: { path: string; bytes: number }) => (
-              <li key={f.path}><code>{f.path}</code><span className="muted">{f.bytes.toLocaleString("en-US")} B</span></li>
-            ))}
-          </ul>
-          </details>
-          <details>
-            <summary>{data.maintenance ? "Maintenance change" : "Connection to the shared model (definition.pbir)"}</summary>
-            <pre className="code">{data.preview.model}</pre>
-          </details>
-          {!data.validated_in_power_bi && <p className="muted small">Power BI rendering and numerical acceptance have not been run. The package contains source mappings, expected totals and artifact hashes for that review.</p>}
-        </div>
-      );
-
-    case "register":
-      return (
-        <div className="detail-stack">
-        <OpenInExplorer id={data.id} />
-        <KV rows={[
-          ["Asset", <strong key="n">{data.name}</strong>],
-          ["Workspace", data.workspace],
-          ["Owner", data.owner],
-          ["Next review", data.next_review],
-          ["Artifact state", data.artifact_state ?? "Unknown"],
-          ["Endorsement", data.endorsement ?? "None"],
-        ]} />
-        </div>
-      );
   }
 }

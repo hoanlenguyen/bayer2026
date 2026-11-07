@@ -1,54 +1,59 @@
 # Agentic Analytics Manager
 
-An internal dashboard request workbench for the Bayer × Since AI challenge. An employee describes what their team needs. The application checks the existing repository, explains what can be reused or changed, prepares a specification, and records the review and follow-up work.
+SinceAI Hackathon 2026 entry for "Build Less, Build Better: AI for Governed Analytics".
 
-The MVP uses the supplied **synthetic Pharmaceuticals workbook**. It combines intent, evidence and specification agents with deterministic discovery, governance, lifecycle decisions and validation. The molecular view exposes reports, models, KPI definitions, owners, lineage and original source rows.
+An AI workspace for a pharma manufacturing plant. Before anything is built it checks what already exists, decides with a transparent formula whether to reuse, extend or create, and only then generates version-controlled Power BI (PBIP) files, with a human approval step.
 
-## What works
+- `CLAUDE.md`: scope, architecture, decision formula and conventions (source of truth)
+- `backend/`: FastAPI pipeline, decision rules, PBIP generator. See `backend/README.md`
+- `frontend/`: React app with the Ask page (chat + live processing flow) and the Estate Explorer. See `frontend/README.md`
+- `docs/PROPOSAL.md`: earlier concept write-up
+- Build plan (published page): https://claude.ai/artifact/NWgjoee8m5ZYAYoBkDmYCC
 
-- Dashboard request, clarification, editable requirements, reassessment and saved request recovery.
-- Evidence-backed reuse, repair, consolidation, migration and new-build proposals. Conflicting source scope needs steward review.
-- Signed **demo sessions**, stable owner IDs, a separate reviewer, version-bound approval and immutable audit events.
-- Two generated Power BI demo packages: portfolio sales/shipments and Nubeqa sales/shipments. Both have explicit synthetic data bindings, controlled layouts, offline Microsoft-schema checks, reference totals and authenticated downloads.
-- Persistent local SQLite storage, with the existing optional MongoDB adapter.
+For the team briefing, employee reports, and BI register, see the [review walkthrough](docs/BRIEFINGS_REVIEW.md).
 
-**Generated does not mean validated or published.** Power BI runtime rendering, numerical acceptance, production SSO and tenant publication are pending external integrations. Repairs are tracked as pending work; imported refresh and ownership facts are not rewritten by approval. Offline agent execution is labelled in the interface.
-
-## Run locally
-
-From the repository root:
+## Quick start
 
 ```bash
-python -m venv .venv
-.venv/bin/python -m pip install -r backend/requirements.txt
-npm ci --prefix frontend
-npm run dev
+cd backend && python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
 ```
-
-The root script starts FastAPI on 8013 and Vite on its printed URL. For Windows or separate server startup, see [backend setup](backend/README.md) and [frontend setup](frontend/README.md). Runtime keys belong in ignored `backend/.env` or the host's secret store.
-
-## Demo and validation
-
-Use **Oliver Martin / requester** to select **Commercial demo → Portfolio sales and shipments**. Inspect coverage, evidence and specification. Switch to **Sofia Rossi / reviewer**, approve the plan, and download the validation package. It remains a draft excluded from trusted reuse. Repeat with **Nubeqa sales and shipments**.
-
-Use **Reuse Brazil portfolio reporting** to show an existing match with no generated copy. Use **Finance dashboard** to show an approved plan blocked by missing executable bindings. Use **Review Eylea Japan scope conflict** to show why similar metadata is insufficient for reuse.
 
 ```bash
-.venv/bin/python -m pytest backend/tests -q
-WORKBENCH_PYTHON="$PWD/.venv/bin/python" npm test --prefix frontend
-npm run build --prefix frontend
-cd backend
-../.venv/bin/python -m app.validate_demo
+cd frontend && npm install && npm run dev    # http://localhost:5173
 ```
 
-The last command writes two portable demo projects, repeats their generation and writes `output/acceptance/acceptance-results.json`. The packages include exact expected card and monthly/market values for a teammate to verify in Power BI Desktop. [Observed automated results](docs/validation-results.json).
+## Run with Docker
 
-## Team references
+Starts the backend and the frontend together. You need Docker with Compose v2 (`docker compose version`).
 
-- [Implementation handover, product journey and deployment](docs/IMPLEMENTATION_HANDOVER.md)
-- [Molecular view and workbook provenance](docs/BAYER_MOLECULAR.md)
-- [Implementation brief and acceptance requirements](docs/Bayer_Challenge_Implementation_Prompt.md)
-- [Engineering context and invariants](CLAUDE.md)
-- [Power BI schema attribution](backend/app/schemas/README.md)
+1. Create the settings file once. Fill in the keys you have. Leaving every key empty also works: the app then runs offline, with rules instead of models and in-memory storage.
 
-The workbench is a hackathon demo, not a Bayer production service. All imported numeric values and people/ownership records are challenge fixtures.
+   ```bash
+   cp backend/.env.example backend/.env
+   ```
+
+2. Start both services from the repository root:
+
+   ```bash
+   docker compose up --build
+   ```
+
+3. Open http://localhost:5173. The API is also on http://localhost:8000/api/health.
+
+Stop with `Ctrl+C`, or `docker compose down` if you started with `-d`.
+
+How it fits together: the frontend container (nginx) serves the built app and forwards `/api` to the backend container. Keys are read from `backend/.env` when the container starts. They are never copied into an image (`.dockerignore` leaves out every `.env`).
+
+### Avoiding common errors
+
+| Error | Cause | Fix |
+|---|---|---|
+| `env file backend/.env not found` | No settings file | Step 1 above |
+| `failed to read backend/.env: line N: key cannot contain a space` | A comment line in `.env` without `#` in front. Python accepts it, Docker does not | Start every comment line with `#`. Each other line must be `KEY=value` |
+| `port is already allocated` / `address already in use` | The local dev servers (uvicorn on 8000, Vite on 5173) are still running | Stop them, or pick other ports: `BACKEND_PORT=8001 FRONTEND_PORT=5174 docker compose up --build` |
+| Frontend waits and never starts | The backend health check fails | `docker compose logs backend` shows why, usually a wrong `MONGODB_URI` |
+| MongoDB connection refused with `MONGODB_URI=mongodb://localhost:...` | Inside a container, `localhost` is the container itself | Use `mongodb://host.docker.internal:27017` for a database on your machine, or an Atlas URI |
+| Old code after a change | Images were not rebuilt | Run with `--build` |
+
+Don't set `DATAPACK_PATH` or `OUTPUT_DIR` for Docker: `docker-compose.yml` sets the paths inside the container. Generated PBIP files are kept in the `pbip-output` volume.

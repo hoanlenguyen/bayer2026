@@ -1,4 +1,4 @@
-"""Persistence: MongoDB when configured, otherwise durable single-worker SQLite.
+"""Persistence: MongoDB when MONGODB_URI is set, otherwise in memory.
 
 Collections
   conversations        chat messages, current intent, runs with every streamed event
@@ -7,25 +7,24 @@ Collections
   specs                DashboardSpec versions with status draft / approved / rejected
   agent_runs           audit log: agent, mode, model, steps, duration
   actions              follow-up actions with owner, due date, status history and verification
-  catalog_<key>        the analytics catalog built from the Bayer data pack: measures, dimensions,
+  catalog_<key>        the analytics catalog built from the SinceAI data pack: measures, dimensions,
                        models, assets, owners, workspaces, products, markets, lineage, rules
   datapack_<sheet>     every table sheet of the workbook, row for row (raw, for querying)
-  presets              Bayer business requests plus labelled team demo scenarios
+  presets              the 10 SinceAI business requests plus estate scenarios
 """
 from __future__ import annotations
 
 import copy
 import logging
-import json
-import sqlite3
-from pathlib import Path
 from typing import Any
 
 from .settings import settings
 
 log = logging.getLogger(__name__)
 
-ARTIFACTS = ("intents", "evidence", "specs", "agent_runs", "actions", "audit", "outputs", "submissions")
+ARTIFACTS = ("intents", "evidence", "specs", "agent_runs", "actions", "briefing_selections")
+# Deleted along with a conversation. Actions stay: a person accepted them, and they outlive the chat that proposed them.
+CONVERSATION_ARTIFACTS = ("intents", "evidence", "specs", "agent_runs")
 CATALOG_MAPS = ("measures", "dimensions", "models", "owners", "workspaces", "products", "markets")
 CATALOG_LISTS = ("assets", "lineage", "rules")
 
@@ -51,15 +50,33 @@ class MemoryStore:
         docs = sorted(self.conversations.values(), key=lambda d: d.get("updated_at", ""), reverse=True)[:limit]
         return [{"_id": d["_id"], "title": d.get("title"), "updated_at": d.get("updated_at")} for d in docs]
 
+    async def delete(self, conv_id: str) -> bool:
+        if self.conversations.pop(conv_id, None) is None:
+            return False
+        for kind in CONVERSATION_ARTIFACTS:
+            self.artifacts[kind] = {k: d for k, d in self.artifacts[kind].items() if d.get("conversation_id") != conv_id}
+        return True
+
     # pipeline artifacts
     async def save_artifact(self, kind: str, doc: dict[str, Any]) -> None:
-        if kind == "audit" and doc["_id"] in self.artifacts[kind]:
-            raise ValueError("Audit events are immutable")
         self.artifacts[kind][doc["_id"]] = copy.deepcopy(doc)
 
+    async def insert_action_once(self, action: dict[str, Any]) -> dict[str, Any]:
+        saved = self.artifacts["actions"].setdefault(action["_id"], copy.deepcopy(action))
+        return copy.deepcopy(saved)
+
+    async def replace_briefing_action(self, action: dict[str, Any], prior_history: list) -> bool:
+        current = self.artifacts["actions"].get(action["_id"])
+        if not current or current["history"] != prior_history:
+            return False
+        self.artifacts["actions"][action["_id"]] = copy.deepcopy(action)
+        return True
+
+    async def list_briefing_actions(self, team: str, limit: int) -> list[dict[str, Any]]:
+        items = [a for a in self.artifacts["actions"].values() if a.get("briefing_snapshot", {}).get("team") == team]
+        return copy.deepcopy(sorted(items, key=lambda a: (a["created_at"], a["_id"]), reverse=True)[:limit])
+
     async def update_artifact(self, kind: str, doc_id: str, fields: dict[str, Any]) -> None:
-        if kind == "audit":
-            raise ValueError("Audit events are immutable")
         if doc_id in self.artifacts[kind]:
             self.artifacts[kind][doc_id].update(copy.deepcopy(fields))
 
@@ -139,16 +156,33 @@ class MongoStore:
         cursor = self.db["conversations"].find({}, {"title": 1, "updated_at": 1}).sort("updated_at", -1).limit(limit)
         return [d async for d in cursor]
 
+    async def delete(self, conv_id: str) -> bool:
+        result = await self.db["conversations"].delete_one({"_id": conv_id})
+        if not result.deleted_count:
+            return False
+        for kind in CONVERSATION_ARTIFACTS:
+            await self.db[kind].delete_many({"conversation_id": conv_id})
+        return True
+
     # pipeline artifacts
     async def save_artifact(self, kind: str, doc: dict[str, Any]) -> None:
-        if kind == "audit":
-            await self.db[kind].insert_one(doc)
-            return
         await self.db[kind].replace_one({"_id": doc["_id"]}, doc, upsert=True)
 
+    async def insert_action_once(self, action: dict[str, Any]) -> dict[str, Any]:
+        from pymongo import ReturnDocument
+
+        return await self.db["actions"].find_one_and_update(
+            {"_id": action["_id"]}, {"$setOnInsert": action}, upsert=True, return_document=ReturnDocument.AFTER)
+
+    async def replace_briefing_action(self, action: dict[str, Any], prior_history: list) -> bool:
+        result = await self.db["actions"].replace_one({"_id": action["_id"], "history": prior_history}, action)
+        return bool(result.matched_count)
+
+    async def list_briefing_actions(self, team: str, limit: int) -> list[dict[str, Any]]:
+        cursor = self.db["actions"].find({"briefing_snapshot.team": team}).sort([("created_at", -1), ("_id", -1)])
+        return [a async for a in cursor.limit(limit)]
+
     async def update_artifact(self, kind: str, doc_id: str, fields: dict[str, Any]) -> None:
-        if kind == "audit":
-            raise ValueError("Audit events are immutable")
         await self.db[kind].update_one({"_id": doc_id}, {"$set": fields})
 
     async def get_artifact(self, kind: str, doc_id: str) -> dict[str, Any] | None:
@@ -224,54 +258,7 @@ class MongoStore:
         await self.db["catalog_models"].update_one({"_id": model_id}, {"$set": fields})
 
 
-class SQLiteStore(MemoryStore):
-    """Durable single-worker demo store. One atomic JSON snapshot per write."""
-    name = "sqlite"
-
-    def __init__(self, path: Path) -> None:
-        super().__init__()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(path, check_same_thread=False)
-        self.connection.execute("CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY, body TEXT NOT NULL)")
-        row = self.connection.execute("SELECT body FROM state WHERE id=1").fetchone()
-        if row:
-            data = json.loads(row[0])
-            self.conversations = data["conversations"]
-            self.artifacts.update(data["artifacts"])
-            self.catalog, self.presets = data["catalog"], data["presets"]
-
-    def flush(self):
-        data = {"conversations": self.conversations, "artifacts": self.artifacts,
-                "catalog": self.catalog, "presets": self.presets}
-        with self.connection:
-            self.connection.execute("INSERT OR REPLACE INTO state VALUES (1, ?)", (json.dumps(data),))
-
-    async def save(self, conv):
-        await super().save(conv)
-        self.flush()
-
-    async def save_artifact(self, kind, doc):
-        await super().save_artifact(kind, doc)
-        self.flush()
-
-    async def update_artifact(self, kind, doc_id, fields):
-        await super().update_artifact(kind, doc_id, fields)
-        self.flush()
-
-    async def seed_datapack(self, sheets, catalog, presets, reset=False):
-        await super().seed_datapack(sheets, catalog, presets, reset)
-        self.flush()
-
-    async def upsert_asset(self, asset):
-        await super().upsert_asset(asset)
-        self.flush()
-
-    async def update_model(self, model_id, fields):
-        await super().update_model(model_id, fields)
-        self.flush()
-
-
-Store = MemoryStore | MongoStore | SQLiteStore
+Store = MemoryStore | MongoStore
 
 
 async def create_store() -> Store:
@@ -283,7 +270,5 @@ async def create_store() -> Store:
             log.info("Using MongoDB database '%s'", settings.mongodb_db)
             return store
         except Exception as exc:
-            raise RuntimeError("Configured MongoDB is unavailable; refusing silent data loss") from exc
-    if settings.store_mode == "memory":
-        return MemoryStore()
-    return SQLiteStore(settings.sqlite_path)
+            log.warning("MongoDB unavailable (%s). Falling back to in-memory storage.", exc)
+    return MemoryStore()

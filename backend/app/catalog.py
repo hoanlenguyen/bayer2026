@@ -1,4 +1,4 @@
-"""The analytics catalog and presets, built from the Bayer data pack.
+"""The analytics catalog and presets, built from the SinceAI data pack.
 
 Loaded from the store at startup. When the store is empty, it is seeded from
 the workbook in materials/ (see app/datapack.py). Metadata only: the AI reasons
@@ -27,24 +27,7 @@ def seed_catalog() -> dict[str, Any]:
 
 
 def seed_presets() -> list[dict[str, Any]]:
-    scenarios = copy.deepcopy(datapack.SCENARIOS)
-    for scenario in scenarios:
-        if scenario["id"] == "scn_reuse_eylea_jp":
-            scenario.update(scenario="repair", title="Review Eylea Japan scope conflict", prompt="Build a dashboard of Eylea net sales and digital engagement in Japan, with monthly trends.")
-    return copy.deepcopy(datapack.PRESETS + scenarios + [
-        {"id": "demo_reuse_brazil", "department": "Commercial demo", "title": "Reuse Brazil portfolio reporting",
-         "prompt": "Build a monthly dashboard of net sales and units shipped for all products in Brazil for our commercial portfolio review.",
-         "decision": "Commercial team monthly Brazil portfolio review", "measures": ["net_sales", "units_shipped"],
-         "dimensions": ["month"], "filters": {"market": ["BR"]}, "scope_global": False, "scenario": "reuse"},
-        {"id": "demo_portfolio_sales_units", "department": "Commercial demo", "title": "Portfolio sales and shipments",
-         "prompt": "Build a monthly dashboard of net sales and units shipped for all products and all markets, by market, for the commercial team's portfolio review.",
-         "decision": "Commercial team monthly portfolio review", "measures": ["net_sales", "units_shipped"],
-         "dimensions": ["market", "month"], "filters": {}, "scope_global": True, "scenario": "new_build"},
-        {"id": "demo_nubeqa_sales_units", "department": "Commercial demo", "title": "Nubeqa sales and shipments",
-         "prompt": "Build a monthly dashboard of Nubeqa net sales and units shipped across all markets, by market, for the commercial team's product review.",
-         "decision": "Commercial team monthly product review", "measures": ["net_sales", "units_shipped"],
-         "dimensions": ["market", "month"], "filters": {"product": ["Nubeqa"]}, "scope_global": True, "scenario": "new_build"},
-    ])
+    return copy.deepcopy(datapack.PRESETS + datapack.SCENARIOS)
 
 
 def reset_catalog() -> None:
@@ -64,9 +47,7 @@ async def init(store: Any) -> str:
     loaded = await store.load_catalog()
     CATALOG.clear()
     CATALOG.update(loaded or copy.deepcopy(catalog))
-    loaded_presets = {p["id"]: p for p in (await store.load_presets() or [])}
-    loaded_presets.update({p["id"]: p for p in seed_presets()})
-    PRESETS[:] = list(loaded_presets.values())
+    PRESETS[:] = await store.load_presets() or seed_presets()
     SHEETS.clear()
     SHEETS.update(sheets)
     if await store.count_artifacts("actions") == 0:

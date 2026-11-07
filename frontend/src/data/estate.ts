@@ -1,47 +1,17 @@
-// Live graph data from the shared, filtered analytics catalogue.
+// Display vocabulary for the Estate Explorer. Entity data comes from the backend catalog.
 import type { Edge, Entity, EntityType, RelationType, Status } from "./types";
 
-export const TYPES: Record<
-  EntityType,
-  { label: string; plural: string; r: number; glyph: string | null }
-> = {
-  model: { label: "Semantic model", plural: "Models", r: 18, glyph: "SM" },
-  workspace: { label: "Workspace", plural: "Workspaces", r: 15, glyph: "WS" },
-  product: { label: "Product", plural: "Products", r: 13, glyph: "P" },
-  market: { label: "Market", plural: "Markets", r: 13, glyph: "MK" },
-  request: { label: "Request", plural: "Requests", r: 13, glyph: "R" },
-  action: { label: "Action", plural: "Actions", r: 13, glyph: "A" },
-  evidence: { label: "Evidence", plural: "Evidence", r: 11, glyph: "E" },
-  metric: { label: "Metric", plural: "Metrics", r: 15, glyph: "M" },
-  dashboard: { label: "Dashboard", plural: "Dashboards", r: 14, glyph: "D" },
-  dataset: { label: "Dataset", plural: "Datasets", r: 13, glyph: "DS" },
-  source: {
-    label: "Source system",
-    plural: "Source systems",
-    r: 12,
-    glyph: "SS",
-  },
-  person: { label: "Person", plural: "People", r: 12, glyph: null },
-  glossary: {
-    label: "Glossary term",
-    plural: "Glossary terms",
-    r: 12,
-    glyph: "G",
-  },
-  domain: {
-    label: "Business domain",
-    plural: "Business domains",
-    r: 13,
-    glyph: "BD",
-  },
+export const TYPES: Record<EntityType, { label: string; plural: string; r: number; glyph: string | null }> = {
+  metric: { label: "KPI", plural: "KPIs", r: 14, glyph: "K" },
+  dashboard: { label: "Report", plural: "Reports", r: 13, glyph: "R" },
+  dataset: { label: "Semantic model", plural: "Semantic models", r: 15, glyph: "SM" },
+  source: { label: "Source system", plural: "Source systems", r: 12, glyph: "SS" },
+  person: { label: "Owner", plural: "Owners", r: 12, glyph: null },
+  glossary: { label: "Glossary term", plural: "Glossary terms", r: 12, glyph: "G" },
+  domain: { label: "Workspace", plural: "Workspaces", r: 13, glyph: "WS" },
 };
 
-export const STATUS: Record<
-  Status,
-  { label: string; tone: "ok" | "warn" | "bad" | "neutral" }
-> = {
-  inactive: { label: "Inactive", tone: "warn" },
-  retired: { label: "Retired", tone: "neutral" },
+export const STATUS: Record<Status, { label: string; tone: "ok" | "warn" | "bad" | "neutral" }> = {
   certified: { label: "Certified", tone: "ok" },
   conflict: { label: "Conflict", tone: "bad" },
   stale: { label: "Stale", tone: "warn" },
@@ -52,16 +22,7 @@ export const STATUS: Record<
   left: { label: "Left company", tone: "neutral" },
 };
 
-export const REL: Record<
-  RelationType,
-  { out: string; in: string; kind?: "bad" | "warn" | "accent" }
-> = {
-  variant_of: { out: "Variant of", in: "Variants" },
-  context: { out: "Declared context", in: "Context for" },
-  candidate_target: { out: "Candidate destination", in: "Proposed source", kind: "warn" },
-  joins: { out: "Joins", in: "Joins" },
-  tracks: { out: "Tracks", in: "Tracked by" },
-  supports: { out: "Supports", in: "Evidence from" },
+export const REL: Record<RelationType, { out: string; in: string; kind?: "bad" | "warn" | "accent" }> = {
   uses: { out: "Uses", in: "Used by" },
   feeds: { out: "Feeds", in: "Fed by" },
   sources: { out: "Supplies", in: "Sourced from" },
@@ -70,31 +31,27 @@ export const REL: Record<
   conflicts_with: { out: "Conflicts with", in: "Conflicts with", kind: "bad" },
   equivalent_to: { out: "Equivalent to", in: "Equivalent to", kind: "accent" },
   duplicate_of: { out: "Duplicate of", in: "Duplicated by", kind: "warn" },
-  overlaps: {
-    out: "Shares metrics with",
-    in: "Shares metrics with",
-    kind: "warn",
-  },
+  overlaps: { out: "Overlaps with", in: "Overlaps with", kind: "warn" },
   defines: { out: "Defines", in: "Defined by" },
   belongs_to: { out: "Belongs to", in: "Contains" },
+  joins: { out: "Joins", in: "Joined by" },
 };
 
 export const SEV = { bad: "High", warn: "Medium", info: "Info" } as const;
 
+/** Live estate, filled from GET /api/graph by `loadEstate()` in lib/estate.ts. Mutated in place. */
 export const ENTITIES: Entity[] = [];
 export const EDGES: Edge[] = [];
-export const PROV: Record<
-  EntityType,
-  (e: Entity) => [string, string, string][]
-> = Object.fromEntries(
-  Object.keys(TYPES).map((k) => [
-    k,
-    (e: Entity) => [
-      [
-        "Shared analytics record",
-        e.props["Evidence scope"] ?? "Imported fictional sample metadata",
-        e.updated,
-      ],
-    ],
-  ]),
-) as Record<EntityType, (e: Entity) => [string, string, string][]>;
+
+export const PROV: Record<EntityType, (e: Entity) => [string, string, string][]> = {
+  metric: (e) => [["SinceAI data pack", `KPI_Catalog / ${e.id}`, "Synthetic"]],
+  dashboard: (e) => [
+    ["SinceAI data pack", "Analytics_Assets, Asset_Usage, Governance_Signals, Migration_Backlog", `Modified ${e.updated || "–"}`],
+    ["Governance score", "decision.py, same rules as the Ask flow", "Computed on load"],
+  ],
+  dataset: () => [["SinceAI data pack", "Semantic_Models, Data_Quality, Lineage_Edges", "Synthetic"]],
+  source: () => [["Integration registry", "Connector inventory", "Computed on load"]],
+  person: () => [["SinceAI data pack", "Owners", "Synthetic"]],
+  glossary: () => [["Business glossary", "Approved terms list", "Computed on load"]],
+  domain: () => [["SinceAI data pack", "Workspaces", "Synthetic"]],
+};

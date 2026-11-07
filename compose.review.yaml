@@ -1,0 +1,24 @@
+# Optional local review stack. Use together with docker-compose.yml.
+services:
+  backend:
+    environment:
+      MONGODB_URI: mongodb://review-db:27017
+      MONGODB_DB: briefings_review
+      LLM_PROVIDER: mock
+      EMBEDDINGS: local
+      OPENAI_API_KEY: ""
+      TYPESAFE_API_KEY: ""
+    depends_on:
+      review-db:
+        condition: service_healthy
+  review-db:
+    image: mongo:7.0
+    volumes:
+      - review-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+volumes:
+  review-data:
