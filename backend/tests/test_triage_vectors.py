@@ -203,3 +203,18 @@ def test_request_endpoints():
         assert c.get("/api/requests/clusters").json()["distinct_asks"] == 10
         assert c.get("/api/requests/similar", params={"q": TABLEAU}).json()["duplicate_count"] == 22
         assert c.get("/api/requests/label-check").json()["status"]["majority_baseline"] == 0.52
+
+
+async def test_openai_embedding_failure_falls_back_to_local():
+    async def boom(model, input):
+        raise ConnectionError("Connection error.")
+    store = VectorStore(OpenAIEmbedder(SimpleNamespace(embeddings=SimpleNamespace(create=boom))))
+    r = await similar_requests(store, TABLEAU)
+    assert r["embedder"] == "local" and r["duplicate_count"] == 22 and "ConnectionError" in store.fallback_reason
+
+
+def test_embeddings_local_setting(monkeypatch):
+    from app import vectors
+    monkeypatch.setattr(vectors, "settings", SimpleNamespace(embeddings="local", embed_model="m", embed_dims=8))
+    llm = SimpleNamespace(enabled=True, client=SimpleNamespace(embeddings=object()))
+    assert isinstance(vectors.get_embedder(llm), LocalEmbedder)

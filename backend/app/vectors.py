@@ -92,6 +92,9 @@ class OpenAIEmbedder:
 
 
 def get_embedder(llm: Any) -> LocalEmbedder | OpenAIEmbedder:
+    """EMBEDDINGS=local forces offline embeddings; auto uses OpenAI when a key is configured."""
+    if settings.embeddings == "local":
+        return LocalEmbedder()
     if getattr(llm, "enabled", False) and hasattr(getattr(llm, "client", None), "embeddings"):
         return OpenAIEmbedder(llm.client)
     return LocalEmbedder()
@@ -129,6 +132,7 @@ class VectorStore:
         self.db = mongo_db
         self._mem: dict[str, list[tuple[dict[str, Any], list[float]]]] = {}
         self.backend: dict[str, str] = {}
+        self.fallback_reason: str | None = None
 
     async def _ensure_memory(self, corpus: str) -> None:
         if corpus in self._mem:
@@ -136,7 +140,7 @@ class VectorStore:
         docs = CORPORA[corpus]()
         # Embed distinct texts once (the 150 requests share 10 texts).
         texts = list(dict.fromkeys(d["text"] for d in docs))
-        vecs = dict(zip(texts, await self.embedder.embed(texts))) if texts else {}
+        vecs = dict(zip(texts, await self._embed(texts))) if texts else {}
         self._mem[corpus] = [(d, vecs[d["text"]]) for d in docs]
 
     async def _atlas_ready(self, corpus: str) -> bool:
@@ -149,8 +153,20 @@ class VectorStore:
         except Exception:
             return False
 
+    async def _embed(self, texts: list[str]) -> list[list[float]]:
+        """Embed with the configured embedder; if OpenAI cannot be reached, switch to local embeddings for this run."""
+        try:
+            return await self.embedder.embed(texts)
+        except Exception as exc:
+            if isinstance(self.embedder, LocalEmbedder):
+                raise
+            log.warning("OpenAI embeddings failed (%s). Switching vector search to local embeddings.", exc)
+            self.embedder, self._mem = LocalEmbedder(), {}
+            self.fallback_reason = f"{type(exc).__name__}: {exc}"[:200]
+            return await self.embedder.embed(texts)
+
     async def search(self, corpus: str, text: str, k: int = 5) -> list[Hit]:
-        qv = (await self.embedder.embed([text]))[0]
+        qv = (await self._embed([text]))[0]
         if await self._atlas_ready(corpus):
             try:
                 pipeline = [

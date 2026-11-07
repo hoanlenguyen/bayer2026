@@ -17,6 +17,8 @@ class Settings:
     openai_base_url: str | None = field(default_factory=lambda: os.getenv("OPENAI_BASE_URL") or None)
     model_reasoning: str = field(default_factory=lambda: os.getenv("MODEL_REASONING", "gpt-6-astra"))
     model_fast: str = field(default_factory=lambda: os.getenv("MODEL_FAST", "gpt-6-luna"))
+    # Embeddings for vector search: auto (OpenAI if a key is set), openai, or local (offline).
+    embeddings: str = field(default_factory=lambda: os.getenv("EMBEDDINGS", "auto").lower())
     embed_model: str = field(default_factory=lambda: os.getenv("EMBED_MODEL", "text-embedding-3-small"))
     embed_dims: int = field(default_factory=lambda: int(os.getenv("EMBED_DIMS", "1536")))
     llm_provider_raw: str = field(default_factory=lambda: os.getenv("LLM_PROVIDER", "auto").lower())
