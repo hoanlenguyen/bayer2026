@@ -4,38 +4,44 @@ Project context for Claude Code and for the team. Keep this file current: it is 
 
 ## Project
 
-**Agentic Analytics Manager** (working name). Bayer Hackathon 2026, challenge "Build Less, Build Better: AI for Governed Analytics".
+**Agentic Analytics Manager** (working name). SinceAI Hackathon 2026, challenge "Build Less, Build Better: AI for Governed Analytics".
 
 An AI workspace that helps a pharma manufacturing plant ask the right business question, reuse or create trustworthy analytics, and manage the follow-up actions. It decides what deserves to exist before anything is built.
 
-### Bayer context (from the briefing)
-- Setting: Bayer manufacturing plant in Turku, Finland (contraceptives, IUDs, implants).
+### SinceAI context (from the briefing)
+- Setting: SinceAI manufacturing plant in Turku, Finland (contraceptives, IUDs, implants).
 - Problem: overlapping dashboards, unclear ownership, no lifecycle for BI. Point-and-click BI cannot be version controlled or debugged.
-- Stack at Bayer: Power BI, Microsoft Fabric. Target output is **.PBIP** (Power BI Project, text files, Git friendly).
+- Stack at SinceAI: Power BI, Microsoft Fabric. Target output is **.PBIP** (Power BI Project, text files, Git friendly).
 - Users: any department (production, quality, supply chain, HR, finance, IT). Mostly non-technical. Ask about decisions, not specifications.
 - Principle: reduce cognitive load. Show only what matters now. Limit content; do not maximise it.
-- Bayer reference pipeline: Prompt → /grill-me → Intent → /explore (Fabric) → Evidence → /to-spec → Spec (`DashboardSpec` dataclass) → render_preview (plain Python, no AI) → Report (.PBIP).
-- Bayer provides a synthetic dataset. Any extra data is allowed.
+- SinceAI reference pipeline: Prompt → /grill-me → Intent → /explore (Fabric) → Evidence → /to-spec → Spec (`DashboardSpec` dataclass) → render_preview (plain Python, no AI) → Report (.PBIP).
+- SinceAI provides a synthetic dataset. Any extra data is allowed.
 
 ## Processing flow (team design)
 
+The system only recommends. It builds, changes and retires nothing, and there is no approval step: people act on the recommendation.
+
 ```
-User intent (free text or department preset)
-  → Intent agent (/grill-me)               AI, asks at most 2 questions
-  → Analytics discovery                    catalog search + scoring (Python)
-  → Governance check (per candidate)       deterministic Python
-  → Decision formula                       deterministic Python
-       ├─ Reuse        → link to existing report (no new PBIP)
-       ├─ Extend       → Evidence agent → Spec agent (change) → approval → updated PBIP
-       ├─ Create       → Evidence agent → Spec agent (new)    → approval → new PBIP → register
-       └─ Not feasible → ask the user to adjust the intent
+User request (free text or preset)
+  → 0 Check the message            relevance agent (AI), rejected messages change nothing
+  → 1 Parse business question      Business_Requests                  intent agent (AI), at most 2 questions
+  → 2 Resolve metric definitions   KPI_Catalog                        Python
+  → 3 Find existing analytics      Analytics_Assets + Asset_Usage     Python
+  → 4 Trace data dependencies      Semantic_Models + Lineage_Edges    Python
+  → 5 Check trust and ownership    Governance_Signals + Data_Quality  Python
+  → 6 Handle Tableau → Power BI    Migration_Backlog                  Python
+  → Recommendation with evidence:  reuse / consolidation / migration / retirement / human review / new build (or not feasible)
 ```
 
 Rules:
-- The AI extracts facts (intent fields, matching measures). **Python decides.** Same inputs, same decision.
-- Agents propose, Python verifies: unknown catalog IDs, tables and columns are removed; numbers shown as proof come from the catalog, never from the model.
-- Every decision shows its scores in the UI.
-- A human approves Extend, Create, certification and retirement.
+- The AI extracts facts (intent fields). **Python decides.** Same inputs, same recommendation.
+- Agents propose, Python verifies: unknown catalog IDs are removed; numbers shown as evidence come from the catalog, never from the model.
+- Every recommendation shows its scores, rules applied and the evidence from all six steps (RULE-008).
+- Classification can use Jev (TypeSafe AI, `app/decider.py`), off unless `TYPESAFE_API_KEY` is set and `JEV_PHASES` names phases (`relevance`, `kpis`, `urgency`). Order: Jev if confident, else GPT, else rules. Jev cannot write text, so follow-up questions, decision text and explanations stay with GPT or templates. Thresholds live in `JEV_THRESHOLDS`. Turn a phase on only if it passes `python scripts/eval_classification.py --modes rules,gpt,jev`.
+- A preset's own text skips the Intent model call: its intent is already known.
+- Token use is recorded per agent run (`usage` in `agent_runs`) and per question (`runs[].tokens`).
+- `repair` stays an internal decision, shown as "Reuse after repair". Follow-up actions are proposed, and a person accepts them.
+- `app/agents/evidence.py`, `app/agents/spec.py` and `app/pbip.py` are no longer part of the flow.
 
 ## Decision formula (`backend/app/decision.py`)
 
@@ -47,6 +53,8 @@ Rules:
 - **Extend (business)**: gates pass, 0.60 ≤ Coverage < 0.90, Governance ≥ 0.80. Add the missing measures, dimensions or grain.
 - **Extend (maintenance)**: gates pass, Coverage ≥ 0.90, Governance ≥ 0.80 but Freshness < 0.90. Fix the refresh schedule instead of building a copy.
 - **Create**: required data exists in the catalog. Otherwise **Not feasible**.
+- **Country outside the catalog** (`app/geo.py`): a request naming a country the catalog has no data for fits no report, not even a Global one, so it ends in a new build that says the data must be added first. No preview, and nothing is flagged or replaced. Earlier requests for clearly different places are not shown as similar.
+- **Human review** (Tableau requests): a report the backlog marks HUMAN_REVIEW is never the one picked to migrate. If nothing else is cleared to move, the recommendation itself is Human review.
 - Side flag (any decision): assets with Coverage ≥ 0.40 that are poorly governed (Governance < 0.60) or fail a gate are flagged for merge or retirement.
 - Thresholds live in one config dict (`THRESHOLDS`). Change them there only.
 
@@ -60,6 +68,7 @@ Each agent has `run_llm` (OpenAI) and `run_rules` (offline, deterministic). Same
 
 | Agent | Model role | What it does | Python verification |
 |---|---|---|---|
+| Relevance | fast (`gpt-6-luna`) | Verdict on each typed message before anything else: accept, meaningless, off_topic, not_enough. Preset prompts skip it; suggestions and messages with no words need no model call | Unknown verdicts fall back to rules. Python writes the retry message and repeats the open question. A rejection starts no run, changes no intent, keeps the last result, and a chat holding only rejected messages stays out of the history |
 | Intent (/grill-me) | fast (`gpt-6-luna`) | JSON extraction of decision, measures, dimensions, grain, filters; max 2 questions | `sanitize_intent` drops IDs not in the catalog |
 | Evidence (/explore) | reasoning (`gpt-6-astra`) | Tool loop over read-only catalog tools: `search_catalog`, `get_measure`, `get_dataset`, `get_relationships`, `get_report` | `finalize`: removes unknown tables/columns, adds required ones, builds proof lines from catalog facts |
 | Spec (/to-spec) | reasoning | Designs the page (visuals, name, rationale); Python assembles the rest from evidence | `validate`: 11 checks; errors go back to the model, up to 3 attempts |
@@ -79,7 +88,7 @@ backend/   Python 3.12+, FastAPI
   app/agents/        intent, evidence, spec agents + read-only catalog tools
   app/llm.py         OpenAI access: text, JSON and tool-calling loop; "mock" = offline
   app/graph.py       catalog → Explorer graph (entities, edges, status, flags)
-  app/seed.py        python -m app.seed [--reset]: load catalog + presets into MongoDB
+  app/load_datapack.py  python -m app.load_datapack [--reset]: load catalog + presets into MongoDB
   app/decision.py    scores, gates, decision (pure functions, unit tested)
   app/pbip.py        Spec → PBIP folder (plain Python, no AI)
   app/store.py       MongoDB (pymongo async) or in-memory fallback
@@ -91,8 +100,10 @@ backend/   Python 3.12+, FastAPI
 - `GET  /api/presets` – department presets
 - `GET  /api/catalog` – sample catalog
 - `POST /api/chat` – body `{conversation_id?, message, preset_id?}`; streams SSE events: `stage` (started/done with payload), `message`, `question`, `done`, `error`
-- `POST /api/approve` – body `{conversation_id, approved, approver}`; streams approval → render → register
-- `GET  /api/conversations`, `GET /api/conversations/{id}` – stored conversations with runs and events
+- `POST /api/v2/chat` – same body; returns JSON showing the input as understood (`received`, `question`, `source`, `length`, `new_conversation`). Runs no agents and saves nothing
+- `POST /api/v2/classify` – body `{request}`; returns urgency (vector vote, or deadline words), domain, market, product, governed KPIs, semantic model, existing report (yes/no), plus `steps`: SinceAI's six analysis steps (`app/steps.py`), also shown in the Ask flow's first step. No chat model and nothing saved
+- `GET  /api/conversations?limit=`, `GET /api/conversations/{id}` – chat history: saved as soon as a question arrives, with messages, runs and state, so a conversation can be reopened and continued (`frontend/src/lib/conversations.ts`)
+- `DELETE /api/conversations/{id}` – removes the chat, its intents, evidence, specs, agent runs and its live requests in the vector store. Accepted actions, SinceAI's data and the catalog stay
 - `GET  /api/graph` – Estate Explorer entities and edges from the live catalog
 - `GET  /api/specs?conversation_id=` – DashboardSpec versions with status (draft / approved / rejected / superseded)
 - `GET  /api/agent-runs?conversation_id=` – audit log of agent runs
@@ -100,11 +111,12 @@ backend/   Python 3.12+, FastAPI
 ### Models
 - OpenAI GPT-6 family. `MODEL_REASONING` (default `gpt-6-astra`) for discovery reasoning and spec; `MODEL_FAST` (default `gpt-6-luna`) for grill-me and summaries. Verify exact IDs in the OpenAI dashboard.
 - `LLM_PROVIDER=mock` runs fully offline with rule-based extraction. Default when no `OPENAI_API_KEY` is set.
-- Privacy position: the model sees catalog metadata and the user's question, not raw production data. Production path: models hosted in Bayer's own Azure tenant (EU region).
+- Jev requests go to TypeSafe, hosted in the US: no EU option is stated and zero retention is enterprise-only. Fine for this synthetic data; review before production.
+- Privacy position: the model sees catalog metadata and the user's question, not raw production data. Production path: models hosted in SinceAI's own Azure tenant (EU region).
 
 ### Database
 - MongoDB when `MONGODB_URI` is set, otherwise in-memory (data lost on restart). Database name: `MONGODB_DB` (default `analytics_manager`).
-- The catalog lives in MongoDB. On startup an empty database is seeded from `app/data/*.json`; `python -m app.seed --reset` reloads it.
+- The catalog lives in MongoDB. On startup an empty database is seeded from `app/data/*.json`; `python -m app.load_datapack --reset` reloads it.
 - Collections: `conversations`, `intents`, `evidence`, `specs`, `agent_runs`, `catalog_measures`, `catalog_dimensions`, `catalog_datasets`, `catalog_assets`, `catalog_relationships`, `presets`.
 - Registered or extended reports are written back to `catalog_assets`, so they survive restarts and are reused.
 - Tests use `mongomock` through an async adapter (`tests/fakes.py`); the real Atlas connection has not been exercised yet.
@@ -127,7 +139,7 @@ cd backend && python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 pytest                 # 28 tests: decision rules, agents (incl. scripted OpenAI tool calls), MongoDB store, graph, API flows
-python -m app.seed     # load catalog into MongoDB (needs MONGODB_URI)
+python -m app.load_datapack     # load catalog into MongoDB (needs MONGODB_URI)
 
 # frontend (proxies /api to :8000)
 cd frontend && npm install && npm run dev
@@ -152,6 +164,6 @@ cd frontend && npm install && npm run dev
 - [x] MongoDB persistence for catalog, conversations, intents, evidence, specs, agent runs
 - [ ] Test the OpenAI provider with a real key (model path tested only with a scripted fake client)
 - [ ] Connect to the team's MongoDB Atlas (code tested with mongomock only)
-- [ ] Load Bayer synthetic dataset into the catalog
+- [ ] Load SinceAI synthetic dataset into the catalog
 - [ ] Action tracker (follow-up actions with owners)
 - [ ] Validate generated PBIP in Power BI Desktop

@@ -15,17 +15,25 @@ def decision_text(p: dict[str, Any]) -> str:
     if dec == "reuse":
         return f"Good news: **{cand.get('name')}** ({cand.get('asset_id')}) already answers this with approved KPIs, so nothing new needs to be built.{tail}"
     if dec == "repair":
-        return f"**{cand.get('name')}** ({cand.get('asset_id')}) covers your request and is well used, but it needs repair first. {d.get('reason', '')}{tail}"
+        return f"**{cand.get('name')}** ({cand.get('asset_id')}) covers your request and is well used, so I recommend reusing it after a repair. {d.get('reason', '')}{tail}"
     if dec == "consolidate":
         missing = [cat.CATALOG["measures"][m]["name"] for m in cand.get("measures_missing", []) if m in cat.CATALOG["measures"]]
-        return (f"**{cand.get('name')}** covers most of this. I propose extending it with {', '.join(missing) or 'the missing KPIs'} "
+        return (f"**{cand.get('name')}** covers most of this. I recommend extending it with {', '.join(missing) or 'the missing KPIs'} "
                 f"and folding overlapping reports into it.{tail}")
     if dec == "migrate":
-        return f"Migration plan: {d.get('reason', '')}"
+        return f"I recommend a migration. {d.get('reason', '')}"
     if dec == "new_build":
         model = cat.model_by_id(d.get("target_model_id")) or {}
-        return (f"No existing report is both close enough and well governed. I drafted one thin report on the shared model "
-                f"**{model.get('name', d.get('target_model_id'))}** using approved KPIs only.{tail}")
+        others = ", ".join((p.get("intent") or {}).get("other_markets") or [])
+        if others:
+            return (f"No existing report covers {others}, and the catalog holds no data for it yet. I recommend one new thin report on the "
+                    f"shared model **{model.get('name', d.get('target_model_id'))}** once that data is added. Nothing has been built.{tail}")
+        return (f"No existing report is both close enough and well governed. I recommend one new thin report on the shared model "
+                f"**{model.get('name', d.get('target_model_id'))}** using approved KPIs only. Nothing has been built.{tail}")
+    if dec == "review":
+        return f"I recommend a human review first. {d.get('reason', '')}"
+    if dec == "retire":
+        return f"I recommend retirement. {d.get('reason', '')}{tail}"
     terms = ", ".join((d.get("availability") or {}).get("missing_terms") or [])
     return ("This can't be answered from the governed estate"
             + (f": it needs {terms}" if terms else "") +

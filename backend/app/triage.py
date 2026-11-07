@@ -1,6 +1,6 @@
 """Triage tags for incoming requests: urgency and status.
 
-Why rules and not a trained classifier: in Bayer's Business_Requests sheet the
+Why rules and not a trained classifier: in SinceAI's Business_Requests sheet the
 same request text carries every urgency and both statuses (for example the 22
 copies of the Tableau replacement request are 16 normal, 2 high, 4 urgent and
 14 new, 8 triaged), and product, market and date do not explain the labels

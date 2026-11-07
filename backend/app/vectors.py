@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import catalog as cat
+from .llm import record_response_usage
+from .geo import same_place
 from .settings import settings
 
 log = logging.getLogger(__name__)
@@ -88,6 +90,7 @@ class OpenAIEmbedder:
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         resp = await self.client.embeddings.create(model=self.model, input=texts)
+        record_response_usage(resp, self.model)
         return [_normalise(list(d.embedding)) for d in resp.data]
 
 
@@ -164,6 +167,21 @@ class VectorStore:
             except Exception as exc:
                 log.warning("Could not write the request to Atlas: %s", exc)
         return "memory"
+
+    async def remove_conversation_requests(self, conv_id: str) -> None:
+        """Forget the requests a deleted conversation added. Only live ones: SinceAI's labelled rows are never touched."""
+        def mine(d: dict[str, Any]) -> bool:
+            return d.get("source") == "live" and d.get("conversation_id") == conv_id
+
+        live = await self.live_requests()
+        live[:] = [d for d in live if not mine(d)]
+        if "requests" in self._mem:
+            self._mem["requests"] = [(d, v) for d, v in self._mem["requests"] if not mine(d)]
+        if await self._atlas_ready("requests"):
+            try:
+                await self.db[COLLECTIONS["requests"]].delete_many({"source": "live", "conversation_id": conv_id})
+            except Exception as exc:
+                log.warning("Could not remove the conversation's requests from Atlas: %s", exc)
 
     async def set_request_status(self, request_id: str, status: str, **fields: Any) -> None:
         """Update the status tag (and any other tags) of a live request, in memory and in Atlas."""
@@ -245,9 +263,10 @@ async def similar_requests(store: VectorStore, text: str, k: int = 30) -> dict[s
         if h.doc["text"] in groups:
             continue
         same_text = [rid for rid, t in rows if t == h.doc["text"]]
+        # Embeddings barely weigh a country, so a request for elsewhere can score high: it is still a different ask.
+        match = "unrelated" if not same_place(text, h.doc["text"]) else "same" if h.score >= dup_t else "similar" if h.score >= sim_t else "unrelated"
         groups[h.doc["text"]] = {"text": h.doc["text"], "similarity": h.score, "asked": len(same_text),
-                                 "request_ids": same_text[:12],
-                                 "match": "same" if h.score >= dup_t else "similar" if h.score >= sim_t else "unrelated"}
+                                 "request_ids": same_text[:12], "match": match}
     ordered = sorted(groups.values(), key=lambda g: -g["similarity"])
     dupes = [g for g in ordered if g["match"] == "same"]
     related = [g for g in ordered if g["match"] == "similar"]

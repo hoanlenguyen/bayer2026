@@ -1,15 +1,23 @@
-import type { CatalogMeta, Health, PipelineEvent, Preset } from "./types";
+import type { CatalogMeta, ConversationDetail, ConversationSummary, Health, PipelineEvent, Preset } from "./types";
 
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(path);
-  if (!res.ok) throw new Error(`${path} returned ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(`${path} returned ${res.status}`), { status: res.status });
   return res.json() as Promise<T>;
+}
+
+async function deleteJSON(path: string): Promise<void> {
+  const res = await fetch(path, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) throw new Error(`${path} returned ${res.status}`); // 404: already gone
 }
 
 export const api = {
   health: () => getJSON<Health>("/api/health"),
   presets: () => getJSON<Preset[]>("/api/presets"),
   catalog: () => getJSON<CatalogMeta>("/api/catalog"),
+  conversations: () => getJSON<ConversationSummary[]>("/api/conversations"),
+  deleteConversation: (id: string) => deleteJSON(`/api/conversations/${encodeURIComponent(id)}`),
+  conversation: (id: string) => getJSON<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`),
 };
 
 /** POST a JSON body and read the Server-Sent Events stream it returns. */

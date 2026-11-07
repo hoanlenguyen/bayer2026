@@ -5,17 +5,17 @@ import { FlowPanel, RUNNING_COPY } from "../components/ask/FlowPanel";
 import { TriageStrip } from "../components/ask/TriageStrip";
 import { VerdictCard } from "../components/ask/VerdictCard";
 import { Icon } from "../components/Icon";
-import { addUserMessage, applyEvent, beginQuestion, continueQuestion, findSavedAnswer, finishQuestion, getHistoryEntry, moveToTop, OPEN_ENTRY_EVENT, restartLatestQuestion, takePendingEntry, type QuestionEntry } from "../lib/history";
+import { conversationsChanged, CURRENT_REMOVED_EVENT, getCurrentConversation, setAnswerInProgress, OPEN_CONVERSATION_EVENT, setCurrentConversation, stagesOf, takePendingConversation } from "../lib/conversations";
 
 interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
-  kind?: "question" | "result" | "approval";
+  kind?: "question" | "result" | "retry";
   suggestions?: string[];
 }
 
-type ConvState = "idle" | "clarifying" | "awaiting_approval";
+type ConvState = "idle" | "clarifying" | "awaiting_approval"; // awaiting_approval only exists in older saved conversations
 
 /** Each matches a preset's prompt in the backend, so a click also sends that preset's certified measures. */
 const STARTER_QUESTIONS = [
@@ -81,37 +81,60 @@ export function AskPage() {
   const [stages, setStages] = useState<Partial<Record<StageId, StageEvent>>>({});
   const [decision, setDecision] = useState<DecisionType | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false); // sent, and the backend has not said yet if it accepts the message
   const [error, setError] = useState<string | null>(null);
   const nextId = useRef(1);
   const listRef = useRef<HTMLDivElement>(null);
-  const entryId = useRef<string | null>(null); // the saved History entry for what is on screen
-  const [savedAt, setSavedAt] = useState<string | null>(null); // set while showing a saved answer rather than a new one
+  const restoreAttempt = useRef(0);
+  const [restoring, setRestoring] = useState(() => getCurrentConversation() !== null);
 
-  const showSaved = useCallback((entry: QuestionEntry) => {
-    entryId.current = entry.id;
-    setMessages(entry.result.messages.map((m) => ({ ...m, id: nextId.current++ })));
-    setStages(entry.result.stages);
-    setDecision(entry.result.decision);
-    setError(entry.result.error);
-    setConvId(entry.request.conversation_id);
-    setConvState(entry.status === "needs_answer" ? "clarifying" : entry.status === "awaiting_approval" ? "awaiting_approval" : "idle");
-    setSavedAt(entry.status === "needs_answer" ? null : entry.updated_at); // a follow-up question isn't an answer yet
+  /** Brings a saved conversation back as it was. Sending next continues it, with its context, in the backend. */
+  const restore = useCallback(async (id: string) => {
+    const attempt = ++restoreAttempt.current;
+    setRestoring(true);
+    setError(null);
+    try {
+      const conv = await api.conversation(id);
+      if (attempt !== restoreAttempt.current) return; // another conversation was picked meanwhile
+      const restored = stagesOf(conv);
+      setMessages(conv.messages.map((m) => ({ id: nextId.current++, role: m.role, content: m.content, kind: m.kind, suggestions: m.suggestions })));
+      setStages(restored);
+      setDecision(restored.decision?.data?.decision ?? null);
+      setConvId(conv._id);
+      setConvState(conv.state === "clarifying" ? "clarifying" : "idle");
+      setCurrentConversation(conv._id);
+      setOffline(false);
+    } catch (err) {
+      if ((err as { status?: number }).status === 404) { // gone, such as after a restart without MongoDB
+        if (getCurrentConversation() === id) setCurrentConversation(null);
+        conversationsChanged();
+      } else {
+        setOffline(true);
+      }
+    } finally {
+      setRestoring(false);
+    }
   }, []);
 
   useEffect(() => {
-    // A question picked from History. While an answer is streaming it waits, so the two don't mix.
+    // A conversation picked from History. While an answer is streaming it waits, so the two don't mix.
     if (busy) return;
     const open = () => {
-      const entry = takePendingEntry();
-      if (entry) showSaved(entry);
+      const id = takePendingConversation();
+      if (id) void restore(id);
     };
     open();
-    window.addEventListener(OPEN_ENTRY_EVENT, open);
-    return () => window.removeEventListener(OPEN_ENTRY_EVENT, open);
-  }, [busy, showSaved]);
+    window.addEventListener(OPEN_CONVERSATION_EVENT, open);
+    return () => window.removeEventListener(OPEN_CONVERSATION_EVENT, open);
+  }, [busy, restore]);
 
   useEffect(() => {
-    document.title = "Analytics Manager";
+    // Coming back: reopen the conversation that was open, unless one was just picked from the list.
+    const id = getCurrentConversation();
+    if (id) void restore(id);
+  }, [restore]);
+
+  useEffect(() => {
     api.health().then(setHealth).catch(() => setOffline(true));
     api.presets().then(setPresets).catch(() => setOffline(true));
     api.catalog().then(setCatalog).catch(() => undefined);
@@ -123,16 +146,27 @@ export function AskPage() {
   }, [messages, busy, stages]);
 
   const handleEvent = useCallback((e: PipelineEvent) => {
-    if (entryId.current) applyEvent(entryId.current, e);
     switch (e.type) {
       case "conversation":
         setConvId(e.id);
+        setCurrentConversation(e.id);
+        break;
+      case "user_message":
+        conversationsChanged(); // saved by now, so it can appear in the list
         break;
       case "stage":
+        setChecking(false);
+        // The first step starting means the message was accepted as a new question: only now does the last answer go.
+        if (e.stage === "intent" && e.status === "running") {
+          setStages({ intent: e });
+          setDecision(null);
+          break;
+        }
         setStages((s) => ({ ...s, [e.stage]: e }));
         if (e.stage === "decision" && e.status === "done") setDecision(e.data.decision);
         break;
       case "message":
+        setChecking(false);
         setMessages((m) => [...m, { id: nextId.current++, role: "assistant", content: e.content, kind: e.kind, suggestions: e.suggestions }]);
         break;
       case "done":
@@ -146,84 +180,78 @@ export function AskPage() {
 
   const run = useCallback(async (path: string, body: unknown) => {
     setBusy(true);
+    setAnswerInProgress(true);
     setError(null);
-    setSavedAt(null);
-    const entry = entryId.current;
     try {
       await streamPost(path, body, handleEvent);
       setOffline(false);
-      if (entry) finishQuestion(entry);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message);
+      setError(err instanceof Error ? err.message : String(err));
       setOffline(true);
-      if (entry) finishQuestion(entry, message);
     } finally {
       setBusy(false);
+      setChecking(false);
+      setAnswerInProgress(false);
+      conversationsChanged();
     }
   }, [handleEvent]);
 
-  const send = useCallback((text: string, presetId?: string, isSuggestion = false) => {
-    // Asked before, even with a follow-up open: show the saved answer at once, with no call to the backend or the model.
-    // A suggestion chip is always a reply to the follow-up, and a question can't be answered by itself.
-    const saved = isSuggestion ? undefined : findSavedAnswer(text);
-    if (saved && saved.id !== entryId.current) {
-      moveToTop(saved.id);
-      showSaved(saved);
-      return;
-    }
-    if (convState === "clarifying" && entryId.current) {
-      addUserMessage(entryId.current, text); // an answer to a follow-up question continues the same entry
-    } else {
-      if (saved) { // the question already on screen, asked again
-        moveToTop(saved.id);
-        showSaved(saved);
-        return;
-      }
-      // Typed inside an open entry: it continues that entry. Only a fresh start makes a new one.
-      if (entryId.current && getHistoryEntry(entryId.current)) continueQuestion(entryId.current, text);
-      else entryId.current = beginQuestion(text, presetId ?? null);
-    }
-    if (convState !== "clarifying") {
-      setStages({});
-      setDecision(null);
-    }
+  const send = useCallback((text: string, presetId?: string) => {
+    setChecking(true);
     setMessages((m) => [...m, { id: nextId.current++, role: "user", content: text }]);
     void run("/api/chat", { conversation_id: convId, message: text, preset_id: presetId ?? null });
-  }, [convId, convState, run, showSaved]);
-
-  /** Asks the latest question again, replacing its saved answer in the same entry. */
-  const refresh = () => {
-    const restarted = entryId.current ? restartLatestQuestion(entryId.current) : null;
-    if (!restarted) return;
-    setStages({}); setDecision(null); setConvState("idle");
-    setMessages(restarted.messages.map((m) => ({ ...m, id: nextId.current++ })));
-    void run("/api/chat", { conversation_id: convId, message: restarted.text, preset_id: restarted.presetId });
-  };
-
-  const approve = (approved: boolean) => {
-    const approver = stages.approval?.data?.approver ?? "Report owner";
-    const said = approved ? `Approved as ${approver}` : "Rejected";
-    if (entryId.current) addUserMessage(entryId.current, said);
-    setMessages((m) => [...m, { id: nextId.current++, role: "user", content: said }]);
-    void run("/api/approve", { conversation_id: convId, approved, approver });
-  };
+  }, [convId, run]);
 
   const newChat = () => {
-    entryId.current = null;
-    setSavedAt(null);
+    setCurrentConversation(null);
     setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null);
   };
+
+  useEffect(() => {
+    // The chat on screen was deleted from the list.
+    const cleared = () => {
+      restoreAttempt.current++;
+      setRestoring(false);
+      setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null);
+    };
+    window.addEventListener(CURRENT_REMOVED_EVENT, cleared);
+    return () => window.removeEventListener(CURRENT_REMOVED_EVENT, cleared);
+  }, []);
 
   const lastId = messages.length ? messages[messages.length - 1].id : -1;
   const runningStage = (Object.values(stages) as StageEvent[]).find((s) => s.status === "running")?.stage;
   const hasVerdict = stages.decision?.status === "done";
+
+  // Messages rejected after an answer come below its verdict card, which stays because nothing new has started.
+  let tailStart = messages.length;
+  if (hasVerdict) {
+    if (checking && messages[tailStart - 1]?.role === "user") tailStart--;
+    while (tailStart >= 2 && messages[tailStart - 1].kind === "retry" && messages[tailStart - 2].role === "user") tailStart -= 2;
+  }
+  const renderMessage = (m: ChatMessage) => (
+    <div key={m.id} className={`msg msg-${m.role}`}>
+      <p><RichText text={m.content} /></p>
+      {m.id === lastId && !busy && m.suggestions && m.suggestions.length > 0 && (
+        <div className="chips">
+          {m.suggestions.map((s) => <button key={s} type="button" onClick={() => send(s, presets.find((p) => p.prompt === s)?.id)}>{s}</button>)}
+        </div>
+      )}
+    </div>
+  );
+  const working = busy && (!hasVerdict || checking) && (
+    <p className="working"><span className="spinner" aria-hidden="true" />{runningStage ? RUNNING_COPY[runningStage] : "Reading your question"}</p>
+  );
+  const answerCards = <><TriageStrip stages={stages} /><VerdictCard stages={stages} catalog={catalog} busy={busy} /></>;
 
   const offlineBanner = offline && (
     <div className="banner" role="status">
       The backend is not reachable. Start it with <code>uvicorn app.main:app --reload --port 8000</code> in <code>backend/</code>, then reload.
     </div>
   );
+
+  if (messages.length === 0 && restoring) {
+    return <div className="ask-empty"><p className="working"><span className="spinner" aria-hidden="true" />Opening your conversation</p></div>;
+  }
 
   if (messages.length === 0) {
     return (
@@ -250,29 +278,14 @@ export function AskPage() {
       <section className="chat" aria-label="Conversation">
         <div className="pane-head">
           <h1>Ask</h1>
-          {savedAt && <p className="saved-note">Saved answer from {new Date(savedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</p>}
-          <div className="pane-actions">
-            {savedAt && <button type="button" className="btn-outline" onClick={refresh}>Get a fresh answer</button>}
-            <button type="button" className="btn-outline" onClick={newChat} disabled={busy}><Icon name="plus" />New question</button>
-          </div>
+          <button type="button" className="btn-outline" onClick={newChat} disabled={busy}><Icon name="plus" />New question</button>
         </div>
         {offlineBanner}
         <div className="messages" ref={listRef} aria-live="polite" aria-busy={busy}>
-          {messages.map((m) => (
-            <div key={m.id} className={`msg msg-${m.role}`}>
-              <p><RichText text={m.content} /></p>
-              {m.id === lastId && !busy && m.suggestions && m.suggestions.length > 0 && (
-                <div className="chips">
-                  {m.suggestions.map((s) => <button key={s} type="button" onClick={() => send(s, undefined, true)}>{s}</button>)}
-                </div>
-              )}
-            </div>
-          ))}
-          {busy && !hasVerdict && (
-            <p className="working"><span className="spinner" aria-hidden="true" />{runningStage ? RUNNING_COPY[runningStage] : "Reading your question"}</p>
-          )}
-          <TriageStrip stages={stages} />
-          <VerdictCard stages={stages} catalog={catalog} busy={busy} onApprove={approve} />
+          {messages.slice(0, tailStart).map(renderMessage)}
+          {tailStart < messages.length
+            ? <>{answerCards}{messages.slice(tailStart).map(renderMessage)}{working}</>
+            : <>{working}{answerCards}</>}
           {error && <p className="text-bad small">{error}</p>}
         </div>
         <div className="chat-composer">

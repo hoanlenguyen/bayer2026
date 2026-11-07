@@ -1,6 +1,6 @@
 # Agentic Analytics Manager
 
-Bayer Hackathon 2026 entry for "Build Less, Build Better: AI for Governed Analytics".
+SinceAI Hackathon 2026 entry for "Build Less, Build Better: AI for Governed Analytics".
 
 An AI workspace for a pharma manufacturing plant. Before anything is built it checks what already exists, decides with a transparent formula whether to reuse, extend or create, and only then generates version-controlled Power BI (PBIP) files, with a human approval step.
 

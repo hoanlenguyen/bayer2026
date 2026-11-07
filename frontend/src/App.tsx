@@ -31,12 +31,16 @@ export default function App() {
       window.removeEventListener("open-entity", onOpen);
     };
   }, []);
+  useEffect(() => {
+    if (page === "ask") document.title = "Analytics Manager";
+  }, [page]);
   console.log('clg')
   return (
     <div className={`app app-${page}`}>
       <Sidebar page={page} />
       <div className="app-main">
-        {page === "ask" && <AskPage />}
+        {/* Stays mounted so an answer keeps arriving, and the screen stays as it was, while on another page. */}
+        <div hidden={page !== "ask"}><AskPage /></div>
         {page === "explorer" && <ExplorerPage focusRequest={focusRequest} />}
         {page === "cala-graph" && <CalaGraphPage />}
       </div>

@@ -1,64 +1,72 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { CatalogMeta, DecisionType, Health, StageEvent, StageId } from "../../api/types";
 import { Icon } from "../Icon";
+import { RecommendationChip } from "./RecommendationChip";
 import { currentTriage, TriageTags } from "./TriageStrip";
 import { StageDetail } from "./StageDetail";
 
-/** Who does the work in each stage. Mirrors the legend in Bayer's reference pipeline. */
+/** Who does the work in each stage. Mirrors the legend in SinceAI's reference pipeline. */
 const STAGE_KIND: Record<StageId, { label: string; cls: string }> = {
   intent: { label: "Intent agent", cls: "kind-ai" },
-  discovery: { label: "Catalog + Python", cls: "kind-state" },
-  governance: { label: "Python", cls: "kind-py" },
+  kpis: { label: "KPI_Catalog", cls: "kind-state" },
+  discovery: { label: "Analytics_Assets + Asset_Usage", cls: "kind-state" },
+  lineage: { label: "Semantic_Models + Lineage_Edges", cls: "kind-state" },
+  governance: { label: "Governance_Signals + Data_Quality", cls: "kind-state" },
+  migration: { label: "Migration_Backlog", cls: "kind-state" },
   decision: { label: "Python", cls: "kind-py" },
   actions: { label: "Python", cls: "kind-py" },
   deliver: { label: "Python", cls: "kind-py" },
-  evidence: { label: "Evidence agent", cls: "kind-ai" },
-  spec: { label: "Spec agent", cls: "kind-ai" },
-  approval: { label: "Human", cls: "kind-human" },
-  render: { label: "Python", cls: "kind-py" },
-  register: { label: "Python", cls: "kind-py" },
 };
 
 const TITLES: Record<StageId, string> = {
-  intent: "Understand the request",
-  discovery: "Find existing reports",
-  governance: "Check they can be trusted",
-  decision: "Decide what to do",
+  intent: "Parse business question",
+  kpis: "Resolve metric definitions",
+  discovery: "Find existing analytics",
+  lineage: "Trace data dependencies",
+  governance: "Check trust and ownership",
+  migration: "Handle Tableau → Power BI",
+  decision: "Recommend what to do",
   actions: "Suggest follow-up work",
   deliver: "Open the existing report",
-  evidence: "Check the data sources",
-  spec: "Design the report",
-  approval: "Get approval",
-  render: "Create the report files",
-  register: "Add to the catalog",
 };
 
 export const RUNNING_COPY: Record<StageId, string> = {
   intent: "Reading your question",
+  kpis: "Resolving metric definitions",
   discovery: "Looking through the catalog",
-  governance: "Checking ownership and certification",
+  lineage: "Tracing data dependencies",
+  governance: "Checking trust and ownership",
+  migration: "Checking for Tableau reports",
   decision: "Applying the decision rules",
   actions: "Suggesting follow-up work",
   deliver: "Opening the report",
-  evidence: "Checking the data sources",
-  spec: "Designing the report",
-  approval: "Waiting for approval",
-  render: "Creating the report files",
-  register: "Adding it to the catalog",
 };
 
-const BASE: StageId[] = ["intent", "discovery", "governance", "decision"];
-const BUILD: StageId[] = ["evidence", "spec", "approval", "render", "register"];
+const BASE: StageId[] = ["intent", "kpis", "discovery", "lineage", "governance", "migration", "decision"];
 const TECH_KEY = "am.technical";
+const COLLAPSED_KEY = "am.flow.collapsed";
 
 function stagesFor(decision: DecisionType | null, hasActions: boolean): StageId[] {
   const base: StageId[] = hasActions ? [...BASE, "actions"] : BASE;
-  if (!decision || decision === "not_feasible") return base;
-  return decision === "reuse" ? [...base, "deliver"] : [...base, ...BUILD];
+  return decision === "reuse" ? [...base, "deliver"] : base;
+}
+
+function readCollapsed() {
+  try { return localStorage.getItem(COLLAPSED_KEY) === "1"; } catch { return false; }
 }
 
 function readTechnical() {
   try { return localStorage.getItem(TECH_KEY) === "1"; } catch { return false; }
+}
+
+/** The recommendation step shows its outcome, and the Tableau step its per-report outcomes, as chips instead of a sentence. */
+function recommendationChips(ev: StageEvent | undefined) {
+  if (ev?.status !== "done") return null;
+  if (ev.stage === "decision") return <RecommendationChip value={String(ev.data?.decision)} />;
+  const counts: Record<string, number> = ev.stage === "migration" ? ev.data?.step?.data?.counts ?? {} : {};
+  const entries = Object.entries(counts);
+  if (entries.length === 0) return null;
+  return entries.map(([value, count]) => <RecommendationChip key={value} value={value} count={count} />);
 }
 
 function summaryFor(ev: StageEvent | undefined, technical: boolean): string | null {
@@ -66,7 +74,6 @@ function summaryFor(ev: StageEvent | undefined, technical: boolean): string | nu
   if (technical) return ev.summary;
   if (ev.status === "running") return null;
   if (ev.stage === "actions") return `${ev.data?.proposals?.length ?? 0} suggestions`;
-  if (ev.stage === "render" && ev.data?.files) return `${ev.data.files.length} files created`;
   return ev.summary;
 }
 
@@ -82,12 +89,14 @@ export function FlowPanel({ stages, decision, health, catalog }: Props) {
   const order = stagesFor(decision, (stages.actions?.data?.proposals?.length ?? 0) > 0);
   const [open, setOpen] = useState<Set<StageId>>(new Set());
   const [technical, setTechnical] = useState(readTechnical);
+  const [collapsed, setCollapsed] = useState(readCollapsed);
 
-  // What the approver is signing off on opens by itself; everything else stays one click away.
-  const awaitingApproval = stages.approval?.status === "waiting";
-  useEffect(() => {
-    if (awaitingApproval) setOpen((prev) => new Set(prev).add("evidence").add("spec"));
-  }, [awaitingApproval]);
+  const toggleCollapsed = () => {
+    setCollapsed((on) => {
+      try { localStorage.setItem(COLLAPSED_KEY, on ? "0" : "1"); } catch { /* preference only lasts this visit */ }
+      return !on;
+    });
+  };
 
   const toggle = (s: StageId) => setOpen((prev) => {
     const next = new Set(prev);
@@ -103,12 +112,17 @@ export function FlowPanel({ stages, decision, health, catalog }: Props) {
   };
 
   return (
-    <aside className="flow-panel" aria-label="How this was decided">
+    <aside className={`flow-panel${collapsed ? " collapsed" : ""}`} aria-label="How this was decided">
       <div className="pane-head">
         <h2>How this was decided</h2>
+        <div className="flow-head-actions">
         <button type="button" className="switch" role="switch" aria-checked={technical} onClick={toggleTechnical}>
           Technical details<span className="switch-track" aria-hidden="true" />
         </button>
+          <button type="button" className="flow-collapse" aria-expanded={!collapsed} aria-label={collapsed ? "Show how this was decided" : "Hide how this was decided"} title={collapsed ? "Show how this was decided" : "Hide how this was decided"} onClick={toggleCollapsed}>
+            <Icon name="panel" />
+          </button>
+        </div>
       </div>
 
       <div className="flow-scroll">
@@ -127,6 +141,7 @@ export function FlowPanel({ stages, decision, health, catalog }: Props) {
             const status = ev?.status ?? "pending";
             const isOpen = open.has(id) && !!ev?.data;
             const summary = summaryFor(ev, technical);
+            const chips = recommendationChips(ev);
             return (
               <li key={id} className={`flow-step st-${status}`}>
                 <span className="flow-icon" aria-hidden="true">
@@ -145,8 +160,9 @@ export function FlowPanel({ stages, decision, health, catalog }: Props) {
                     {technical && <span className={`kind ${STAGE_KIND[id].cls}`}>{STAGE_KIND[id].label}</span>}
                     {ev?.data && <span className={`flow-chevron${isOpen ? " open" : ""}`}><Icon name="chevron" size={14} /></span>}
                   </button>
-                  {summary && <p className="flow-summary">{summary}</p>}
-                  {id === "intent" && triage && <div className="flow-tags"><TriageTags triage={triage} compact only="urgency" /></div>}
+                  {summary && !chips && <p className="flow-summary">{summary}</p>}
+                  {chips && <div className="rec-chips">{chips}</div>}
+                  {id === "intent" && triage &&<div className="flow-tags"><TriageTags triage={triage} compact only="urgency" /></div>}
                   {id === "decision" && status === "done" && triage?.status && <div className="flow-tags"><TriageTags triage={triage} compact only="status" /></div>}
                   {status === "pending" && <span className="sr-only">Not started</span>}
                   {isOpen && <div className="flow-detail"><StageDetail stage={id} data={ev!.data} catalog={catalog} technical={technical} /></div>}
@@ -158,7 +174,7 @@ export function FlowPanel({ stages, decision, health, catalog }: Props) {
             <li className="flow-step st-pending flow-branch">
               <span className="flow-icon" aria-hidden="true" />
               <div className="flow-body">
-                <span className="flow-name">Then: reuse a report, or build one after your approval</span>
+                <span className="flow-name">Then: a recommendation with its evidence</span>
               </div>
             </li>
           )}

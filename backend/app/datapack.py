@@ -1,4 +1,4 @@
-"""Bayer Pharmaceuticals × Since AI 2026 Builder Data Pack.
+"""SinceAI 2026 Builder Data Pack.
 
 Reads the workbook in ``materials/`` and builds the analytics catalog the
 pipeline reasons over. All values in the workbook are synthetic; product and
@@ -46,6 +46,9 @@ CATALOG_SCHEMA = 2
 USAGE_MONTHS = 3
 
 
+WORKBOOK_COMPANY_NAME = "Bayer"  # how the source workbook names the company; shown everywhere as SinceAI
+
+
 def snake(name: str) -> str:
     """Sheet names already use underscores: KPI_Catalog -> kpi_catalog."""
     return name.lower()
@@ -56,6 +59,8 @@ def _cell(v: Any) -> Any:
         return v.date().isoformat()
     if isinstance(v, date):
         return v.isoformat()
+    if isinstance(v, str) and not v.startswith("http"):  # the workbook is unchanged; source links must keep working
+        return v.replace(WORKBOOK_COMPANY_NAME, "SinceAI")
     return v
 
 
@@ -169,7 +174,7 @@ PRESETS = [
      "measures": ["net_sales", "net_sales_growth"], "dimensions": ["region", "month"],
      "filters": {"product": ["Kerendia"], "region": ["EMEA", "North America"]}, "scope_global": False, "requests": 14},
     {"id": "req_exec_view", "department": "Executive", "title": "Executive one-view",
-     "prompt": "We need one executive view combining net sales, forecast accuracy and inventory coverage for Bayer Pharma.",
+     "prompt": "We need one executive view combining net sales, forecast accuracy and inventory coverage for SinceAI Pharma.",
      "decision": "Give leadership one trusted view of sales, forecast quality and supply cover.",
      "measures": ["net_sales", "demand_forecast_accuracy", "inventory_coverage"], "dimensions": ["product"],
      "filters": {}, "scope_global": True, "requests": 14},
@@ -337,7 +342,7 @@ def build_catalog(sheets: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
                for e in sheets["lineage_edges"]]
 
     return {
-        "source": "Bayer Pharmaceuticals × Since AI 2026 Builder Data Pack (synthetic)",
+        "source": "SinceAI 2026 Builder Data Pack (synthetic)",
         "schema": CATALOG_SCHEMA,
         "measures": measures,
         "dimensions": DIMENSIONS,

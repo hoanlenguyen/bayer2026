@@ -1,8 +1,8 @@
 # Backend
 
-FastAPI service for the Agentic Analytics Manager. It reads Bayer's synthetic data pack, decides for each business request whether to **reuse, repair, consolidate, migrate or build** analytics, and streams every step to the frontend as Server-Sent Events.
+FastAPI service for the Agentic Analytics Manager. It reads SinceAI's synthetic data pack, decides for each business request whether to **reuse, repair, consolidate, migrate or build** analytics, and streams every step to the frontend as Server-Sent Events.
 
-All data is synthetic (Bayer Pharmaceuticals × Since AI 2026 Builder Data Pack). There is no patient or HCP data, and figures are not Bayer performance.
+All data is synthetic (SinceAI 2026 Builder Data Pack). There is no patient or HCP data, and figures are not SinceAI performance.
 
 ## Quick start
 
@@ -75,7 +75,7 @@ Conversations, specs and actions are kept on reset. For MongoDB Atlas, add your 
 |---|---|
 | `datapack_<sheet>` | Every table sheet of the workbook, row for row (22 sheets) |
 | `catalog_measures`, `catalog_models`, `catalog_assets`, `catalog_owners`, `catalog_workspaces`, `catalog_products`, `catalog_markets`, `catalog_lineage`, `catalog_rules`, `catalog_dimensions`, `catalog_meta` | The catalog the pipeline reasons over. Approved and repaired reports are written back to `catalog_assets` |
-| `presets` | 10 Bayer business requests + 4 estate scenarios |
+| `presets` | 10 SinceAI business requests + 4 estate scenarios |
 | `conversations` | Messages, intent and every streamed event per run |
 | `intents`, `evidence`, `specs` | Pipeline outputs; specs carry status draft / approved / rejected / superseded |
 | `agent_runs` | Audit log: agent, mode, model, steps, duration |
@@ -94,7 +94,7 @@ request ─▶ intent agent ─▶ discovery ─▶ governance ─▶ decision �
 
 - **The AI extracts, Python decides.** Agents turn words into a structured intent, gather evidence and design the page. Scores, gates and the decision are plain functions in `app/decision.py`, so the same input always gives the same decision.
 - **Agents propose, Python verifies.** Unknown KPIs, products, markets and models are removed; proof lines come from catalog facts, never from the model.
-- Each decision cites the Bayer rules it applies (RULE-001 to RULE-008). The full rules and thresholds are in `../CLAUDE.md`.
+- Each decision cites the SinceAI rules it applies (RULE-001 to RULE-008). The full rules and thresholds are in `../CLAUDE.md`.
 - New reports are **thin reports** that connect to an existing shared semantic model (RULE-001), so a PBIP has a `.pbip` file and a `.Report` folder only. A repair is a maintenance change with no files.
 
 ## Code map
@@ -122,7 +122,7 @@ request ─▶ intent agent ─▶ discovery ─▶ governance ─▶ decision �
 |---|---|
 | `GET /api/health` | Model provider and store in use |
 | `GET /api/presets` | Request presets and estate scenarios |
-| `GET /api/datapack` | Sheet row counts, Bayer rules, usage window |
+| `GET /api/datapack` | Sheet row counts, SinceAI rules, usage window |
 | `GET /api/requests` | The 150 business requests from the workbook |
 | `GET /api/catalog` | Full catalog (measures, models, assets, …) |
 | `GET /api/graph` | Entities and edges for the asset index |

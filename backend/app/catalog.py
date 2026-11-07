@@ -1,4 +1,4 @@
-"""The analytics catalog and presets, built from the Bayer data pack.
+"""The analytics catalog and presets, built from the SinceAI data pack.
 
 Loaded from the store at startup. When the store is empty, it is seeded from
 the workbook in materials/ (see app/datapack.py). Metadata only: the AI reasons

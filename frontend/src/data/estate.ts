@@ -44,14 +44,14 @@ export const ENTITIES: Entity[] = [];
 export const EDGES: Edge[] = [];
 
 export const PROV: Record<EntityType, (e: Entity) => [string, string, string][]> = {
-  metric: (e) => [["Bayer data pack", `KPI_Catalog / ${e.id}`, "Synthetic"]],
+  metric: (e) => [["SinceAI data pack", `KPI_Catalog / ${e.id}`, "Synthetic"]],
   dashboard: (e) => [
-    ["Bayer data pack", "Analytics_Assets, Asset_Usage, Governance_Signals, Migration_Backlog", `Modified ${e.updated || "–"}`],
+    ["SinceAI data pack", "Analytics_Assets, Asset_Usage, Governance_Signals, Migration_Backlog", `Modified ${e.updated || "–"}`],
     ["Governance score", "decision.py, same rules as the Ask flow", "Computed on load"],
   ],
-  dataset: () => [["Bayer data pack", "Semantic_Models, Data_Quality, Lineage_Edges", "Synthetic"]],
+  dataset: () => [["SinceAI data pack", "Semantic_Models, Data_Quality, Lineage_Edges", "Synthetic"]],
   source: () => [["Integration registry", "Connector inventory", "Computed on load"]],
-  person: () => [["Bayer data pack", "Owners", "Synthetic"]],
+  person: () => [["SinceAI data pack", "Owners", "Synthetic"]],
   glossary: () => [["Business glossary", "Approved terms list", "Computed on load"]],
-  domain: () => [["Bayer data pack", "Workspaces", "Synthetic"]],
+  domain: () => [["SinceAI data pack", "Workspaces", "Synthetic"]],
 };

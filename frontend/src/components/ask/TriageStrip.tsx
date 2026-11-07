@@ -5,7 +5,7 @@ interface Triage {
   status: "new" | "triaged" | null;
   request_id?: string | null;
   request_store?: "atlas" | "memory" | null;
-  urgency: { value: "normal" | "high" | "urgent"; source: "stated" | "inferred" | "default"; evidence: string | null };
+  urgency: { value: "normal" | "high" | "urgent"; source: "stated" | "inferred" | "model" | "default"; evidence: string | null };
   similar: {
     duplicates: { text: string; asked: number; request_ids: string[]; similarity: number }[];
     similar: { text: string; asked: number; request_ids: string[]; similarity: number }[];
@@ -20,6 +20,7 @@ const URGENCY_TONE = { urgent: "bad", high: "warn", normal: "muted" } as const;
 function urgencySource(u: Triage["urgency"]): string {
   if (u.source === "stated") return "you said so";
   if (u.source === "inferred") return `from “${u.evidence}”`;
+  if (u.source === "model") return "estimated from your wording";
   return "no deadline mentioned";
 }
 
@@ -55,18 +56,17 @@ export function TriageTags({ triage: t, compact = false, only }: { triage: Triag
   );
 }
 
-/** Intake tags for the current request: status, urgency and earlier requests that ask the same thing. */
+/** Earlier requests that ask the same thing. Only there when it has one to show; the tags live in the flow panel. */
 export function TriageStrip({ stages }: { stages: Partial<Record<StageId, StageEvent>> }) {
   const t = currentTriage(stages);
-  if (!t) return null;
-  const dup = t.similar?.duplicates ?? [];
-  const sim = t.similar?.similar ?? [];
+  const dup = t?.similar?.duplicates ?? [];
+  const sim = t?.similar?.similar ?? [];
+  if (dup.length === 0 && sim.length === 0) return null;
   return (
-    <section className="triage" aria-label="Request triage">
-      <TriageTags triage={t} />
+    <section className="triage" aria-label="Earlier requests">
       {dup.length > 0 && (
         <p className="triage-note">
-          <strong>Asked before:</strong> the same request is already in the queue {t.similar!.duplicate_count} times
+          <strong>Asked before:</strong> the same request is already in the queue {t!.similar!.duplicate_count} times
           ({ids(dup[0].request_ids, dup[0].asked)}). Join it instead of adding another.
         </p>
       )}

@@ -24,7 +24,7 @@ async def test_store_roundtrip(make):
     loaded = await store.load_catalog()
     assert [a["id"] for a in loaded["assets"]][:3] == ["AST-0001", "AST-0002", "AST-0003"]
     assert loaded["measures"]["net_sales"]["kpi_id"] == "KPI-001" and len(loaded["models"]) == 75
-    assert len(loaded["lineage"]) == 438 and loaded["source"].startswith("Bayer")
+    assert len(loaded["lineage"]) == 438 and loaded["source"].startswith("SinceAI")
     assert [p["id"] for p in await store.load_presets()] == [p["id"] for p in cat.PRESETS]
     if isinstance(store, MongoStore):
         assert await store.db["datapack_asset_usage"].count_documents({}) == 3600
@@ -73,3 +73,20 @@ async def test_outdated_catalog_in_mongo_is_reloaded():
     await store.upsert_asset({**loaded["assets"][0], "views_90d": 7})
     await store.seed_datapack(read_workbook(), cat.seed_catalog(), cat.seed_presets())
     assert (await store.load_catalog())["assets"][0]["views_90d"] == 7
+
+
+@pytest.mark.parametrize("make", [MemoryStore, lambda: MongoStore(AsyncMockDB())])
+async def test_delete_conversation_keeps_actions_and_other_chats(make):
+    store = make()
+    for conv in ("c1", "c2"):
+        await store.save({"_id": conv, "title": conv, "updated_at": "2026-01-01"})
+        for kind in ("intents", "evidence", "specs", "agent_runs", "actions"):
+            await store.save_artifact(kind, {"_id": f"{kind}-{conv}", "conversation_id": conv, "created_at": "2026-01-01"})
+
+    assert await store.delete("c1") is True
+    assert await store.get("c1") is None and await store.get("c2")
+    for kind in ("intents", "evidence", "specs", "agent_runs"):
+        assert await store.list_artifacts(kind, "c1") == []
+        assert len(await store.list_artifacts(kind, "c2")) == 1
+    assert len(await store.list_artifacts("actions", "c1")) == 1  # a person accepted it, so it outlives the chat
+    assert await store.delete("c1") is False

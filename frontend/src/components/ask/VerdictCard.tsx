@@ -1,24 +1,23 @@
 import type { Candidate, CatalogMeta, StageEvent, StageId } from "../../api/types";
 import { Icon } from "../Icon";
 import { RUNNING_COPY } from "./FlowPanel";
+import { RecommendationChip } from "./RecommendationChip";
 
 interface Props {
   stages: Partial<Record<StageId, StageEvent>>;
   catalog: CatalogMeta | null;
   busy: boolean;
-  onApprove: (approved: boolean) => void;
 }
 
 const VERDICTS = {
-  reuse: { tag: "Reuse", title: "Use the existing report", tone: "ok" },
-  extend: { tag: "Extend", title: "Extend an existing report", tone: "accent" },
-  maintenance: { tag: "Extend", title: "Fix the refresh schedule, no new report", tone: "accent" },
-  create: { tag: "Create", title: "Build a new report", tone: "accent" },
-  repair: { tag: "Repair", title: "Repair the existing report, no new report", tone: "accent" },
-  consolidate: { tag: "Consolidate", title: "Merge the overlapping reports into one", tone: "accent" },
-  migrate: { tag: "Migrate", title: "Rebuild this report in Power BI", tone: "accent" },
-  new_build: { tag: "New build", title: "Build a new report", tone: "accent" },
-  not_feasible: { tag: "Not feasible", title: "This can't be answered with today's data", tone: "bad" },
+  reuse: "Use the existing report",
+  repair: "Repair the existing report, then use it",
+  consolidate: "Merge the overlapping reports into one",
+  migrate: "Move this report to Power BI",
+  retire: "Retire this report",
+  review: "Have someone review this report first",
+  new_build: "Build a new report",
+  not_feasible: "This can't be answered with today's data",
 } as const;
 
 const openEntity = (id: string) => window.dispatchEvent(new CustomEvent("open-entity", { detail: id }));
@@ -46,29 +45,25 @@ function ScoreMeter({ label, hint, value, target, floor }: { label: string; hint
   );
 }
 
-/** The answer to "do we already have this?": verdict, scores and the one action that follows. */
-export function VerdictCard({ stages, catalog, busy, onApprove }: Props) {
+/** The answer to "do we already have this?": the recommendation and its scores. The evidence is in the steps beside it. It only recommends. */
+export function VerdictCard({ stages, catalog, busy }: Props) {
   const stage = stages.decision;
   if (!stage || stage.status !== "done") return null;
 
   const d = stage.data;
-  const v = d.decision === "extend" && d.change_type === "maintenance"
-    ? VERDICTS.maintenance
-    : VERDICTS[d.decision as keyof typeof VERDICTS] ?? { tag: String(d.decision), title: stage.summary, tone: "accent" as const };
+  const title = VERDICTS[d.decision as keyof typeof VERDICTS] ?? stage.summary;
   const c: Candidate | null = d.candidate ?? null;
-  // On a new build the candidate is only the closest old report, not the report being built.
-  const building = d.decision === "new_build" || d.decision === "create";
+  // On a new build the candidate is only the closest old report, not the report to build.
+  const building = d.decision === "new_build";
   const t = d.thresholds ?? {};
 
   const asset = stages.deliver?.data?.asset;
-  const spec = stages.spec?.status === "done" ? stages.spec.data : null;
-  const evidence = stages.evidence?.status === "done" ? stages.evidence.data : null;
-  const approval = stages.approval;
-  const registered = stages.register?.status === "done" ? stages.register.data : null;
-  const files: number | null = stages.render?.status === "done" ? stages.render.data.files.length : null;
-
-  const reportName: string | null = asset?.name ?? (building ? spec?.name : c?.name ?? spec?.name) ?? null;
-  const owner: string | null = asset?.owner ?? spec?.owner ?? null;
+  const reportName: string | null = asset?.name ?? (building ? null : c?.name) ?? null;
+  const targetModel: { name: string; owner?: string | null; owner_status?: string | null } | null = d.target_model ?? null;
+  const owner: string | null = asset?.owner ?? (building ? targetModel?.owner : c?.owner) ?? null;
+  const ownerStatus: string | null | undefined = asset?.owner_status ?? (building ? targetModel?.owner_status : c?.owner_status);
+  const ownerText = owner && `Owner: ${owner}${ownerStatus && ownerStatus !== "active" ? ` (${ownerStatus})` : ""}`;
+  const reportId: string | null = asset?.id ?? (building ? null : c?.asset_id) ?? null;
 
   const missing = c && !building
     ? [
@@ -85,22 +80,27 @@ export function VerdictCard({ stages, catalog, busy, onApprove }: Props) {
     : [];
 
   const running = (Object.values(stages) as StageEvent[]).find((s) => s.status === "running");
-  const proofs: { ok: boolean }[] = evidence?.proofs ?? [];
-  const proofsOk = proofs.filter((p) => p.ok).length;
-  const waiting = approval?.status === "waiting" && !busy;
 
   return (
-    <article className={`verdict verdict-${v.tone}`} aria-label="Decision">
+    <article className="verdict" aria-label="Decision">
       <header className="verdict-head">
-        <span className={`verdict-tag tag-${v.tone}`}>{v.tag}</span>
-        <h2>{v.title}</h2>
+        <RecommendationChip value={String(d.decision)} />
+        <h2>{title}</h2>
         {reportName && (
           <p className="verdict-subject">
             <strong>{reportName}</strong>
-            {owner && <span className="muted"> · Owner: {owner}</span>}
+            {ownerText && <span className="muted"> · {ownerText}</span>}
+          </p>
+        )}
+        {!reportName && building && targetModel && (
+          <p className="verdict-subject">
+            <span className="muted">Shared model: </span><strong>{targetModel.name}</strong>
+            {ownerText && <span className="muted"> · {ownerText}</span>}
           </p>
         )}
       </header>
+
+      {d.reason && <p className="verdict-note">{d.reason}</p>}
 
       {building && c && (
         <p className="muted verdict-note">Closest existing report, which can't be reused: <strong>{c.name}</strong></p>
@@ -138,45 +138,15 @@ export function VerdictCard({ stages, catalog, busy, onApprove }: Props) {
         <p className="verdict-progress"><span className="spinner" aria-hidden="true" />{running ? RUNNING_COPY[running.stage] : "Working on the next step"}</p>
       )}
 
-      {waiting && spec && (
-        <section className="approval" aria-label="Approval needed">
-          <h3>Your approval is needed</h3>
-          <p className="muted">Nothing is built until you approve.</p>
-          <ul className="approval-facts">
-            <li><span className="muted">Report</span>{spec.name}</li>
-            <li>
-              <span className="muted">Content</span>
-              {spec.pages.map((p: { name: string; visuals: unknown[] }) => `${p.name} (${p.visuals.length} visuals)`).join(", ")}
-            </li>
-            <li><span className="muted">First review</span>{spec.review_date}</li>
-            {proofs.length > 0 && <li><span className="muted">Data checks</span>{proofsOk} of {proofs.length} passed</li>}
-          </ul>
-          {!spec.validation?.passed && (
-            <p className="text-warn">The design did not pass every check. See "Design the report" in the steps before you approve.</p>
-          )}
-          <div className="approval-actions">
-            <button type="button" className="btn" onClick={() => onApprove(true)}>
-              <Icon name="check" />Approve as {approval.data?.approver ?? "owner"}
-            </button>
-            <button type="button" className="btn-outline" onClick={() => onApprove(false)}>Reject</button>
-          </div>
-        </section>
+      {d.rules_applied?.length > 0 && <p className="muted small verdict-fine">Rules applied: {d.rules_applied.join(", ")}</p>}
+
+      {d.decision !== "reuse" && d.decision !== "not_feasible" && (
+        <p className="muted small verdict-fine">This is a recommendation. Nothing has been built, changed or retired.</p>
       )}
 
-      {approval?.status === "rejected" && (
-        <p className="verdict-outcome"><Icon name="close" />{approval.summary}. Nothing was built.</p>
-      )}
-
-      {registered && (
-        <p className="verdict-outcome text-ok">
-          <Icon name="check" />
-          Approved and added to the catalog{files !== null ? ` (${files} PBIP files)` : ""}. Next review: {registered.next_review}.
-        </p>
-      )}
-
-      {(registered || asset) && (
+      {reportId && (
         <div className="verdict-actions">
-          <button type="button" className="btn" onClick={() => openEntity(registered?.id ?? asset.id)}>
+          <button type="button" className="btn" onClick={() => openEntity(reportId)}>
             View in Estate Explorer<Icon name="arrowRight" />
           </button>
         </div>

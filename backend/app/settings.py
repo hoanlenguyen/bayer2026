@@ -35,6 +35,10 @@ class Settings:
     openai_base_url: str | None = field(default_factory=lambda: _base_url(os.getenv("OPENAI_BASE_URL")))
     model_reasoning: str = field(default_factory=lambda: os.getenv("MODEL_REASONING", "gpt-6-astra"))
     model_fast: str = field(default_factory=lambda: os.getenv("MODEL_FAST", "gpt-6-luna"))
+    # Jev (TypeSafe AI) for classification. Off unless a key is set and JEV_PHASES names phases: relevance, kpis, urgency.
+    typesafe_api_key: str | None = field(default_factory=lambda: os.getenv("TYPESAFE_API_KEY") or None)
+    jev_model: str = field(default_factory=lambda: os.getenv("JEV_MODEL", "jev-1.14.0"))  # pinned: jev-latest moves
+    jev_phases: set[str] = field(default_factory=lambda: {p.strip().lower() for p in os.getenv("JEV_PHASES", "").split(",") if p.strip()})
     # Embeddings for vector search: auto (OpenAI if a key is set), openai, or local (offline).
     embeddings: str = field(default_factory=lambda: os.getenv("EMBEDDINGS", "auto").lower())
     embed_model: str = field(default_factory=lambda: os.getenv("EMBED_MODEL", "text-embedding-3-small"))

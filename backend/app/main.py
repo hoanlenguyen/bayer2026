@@ -6,7 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from . import actions as act
 from . import catalog as cat
 from .graph import build_graph
+from .decider import get_decider
 from .llm import get_llm
 from .pipeline import STAGES, Pipeline
 from .settings import settings
@@ -52,17 +53,15 @@ class ActionUpdate(BaseModel):
     by: str = "You"
 
 
-class ApprovalRequest(BaseModel):
-    conversation_id: str
-    approved: bool = True
-    approver: str = Field(default="Report owner", max_length=80)
+class ClassifyRequest(BaseModel):
+    request: str = Field(max_length=2000)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     store = await create_store()
     await cat.init(store)
-    app.state.pipeline = Pipeline(store, get_llm())
+    app.state.pipeline = Pipeline(store, get_llm(), get_decider())
     yield
 
 
@@ -144,7 +143,7 @@ async def requests_label_check() -> dict[str, Any]:
 
 @app.get("/api/datapack")
 async def datapack_summary() -> dict[str, Any]:
-    """What was loaded from the Bayer data pack."""
+    """What was loaded from the SinceAI data pack."""
     C = cat.CATALOG
     return {"source": C.get("source"), "sheets": {k: len(v) for k, v in cat.SHEETS.items()},
             "assets": len(C["assets"]), "models": len(C["models"]), "measures": len(C["measures"]),
@@ -231,14 +230,42 @@ async def chat(req: ChatRequest) -> StreamingResponse:
     return stream(pipeline().chat(req.conversation_id, req.message, req.preset_id))
 
 
-@app.post("/api/approve")
-async def approve(req: ApprovalRequest) -> StreamingResponse:
-    return stream(pipeline().approve(req.conversation_id, req.approved, req.approver))
+@app.post("/api/v2/chat")
+async def chat_v2(req: ChatRequest) -> dict[str, Any]:
+    """Shows the input as the API understood it. Runs no agents and saves nothing, so it costs nothing to call."""
+    message = req.message.strip()
+    preset = cat.preset_by_id(req.preset_id)
+    if not message and not req.preset_id:
+        raise HTTPException(400, "Send a message or choose a preset.")
+    if not message and not preset:
+        raise HTTPException(400, f"Unknown preset: {req.preset_id}")
+    question = message or preset["prompt"]
+    return {"received": req.model_dump(), "question": question, "source": "message" if message else "preset",
+            "length": len(question), "new_conversation": req.conversation_id is None}
+
+
+@app.post("/api/v2/classify")
+async def classify(req: ClassifyRequest) -> dict[str, Any]:
+    """Tags for one business request. Runs no chat model and saves nothing; only the embedding is an outside call."""
+    from .classify import classify_request
+
+    text = req.request.strip()
+    if not text:
+        raise HTTPException(400, "Send a business request.")
+    return await classify_request(text, pipeline().vectors, pipeline().decider)
 
 
 @app.get("/api/conversations")
-async def conversations() -> list[dict[str, Any]]:
-    return await pipeline().store.list()
+async def conversations(limit: int = Query(50, ge=1, le=200)) -> list[dict[str, Any]]:
+    return await pipeline().store.list(limit)
+
+
+@app.delete("/api/conversations/{conv_id}", status_code=204)
+async def delete_conversation(conv_id: str) -> None:
+    """Removes a chat and what it produced. Accepted follow-up actions, SinceAI's data and the catalog stay."""
+    if not await pipeline().store.delete(conv_id):
+        raise HTTPException(404, "Conversation not found")
+    await pipeline().vectors.remove_conversation_requests(conv_id)
 
 
 @app.get("/api/conversations/{conv_id}")

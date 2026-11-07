@@ -20,7 +20,7 @@ MAX_ATTEMPTS = 3
 MAX_VISUALS = 6
 VISUAL_TYPES = {"card", "bar", "line", "table"}
 
-SYSTEM = """You design a minimal Power BI report page for one business decision at Bayer Pharmaceuticals.
+SYSTEM = """You design a minimal Power BI report page for one business decision at SinceAI Pharmaceuticals.
 Fewer visuals is better (max 6): headline KPI cards first, then the breakdown that shows where to act, then a monthly
 trend if useful. Use only the measure ids and breakdown ids given ("month" is allowed for trends).
 Visual types: card, bar, line, table.

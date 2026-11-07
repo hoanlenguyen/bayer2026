@@ -2,13 +2,15 @@
 
 The AI extracts the intent; this module decides. Same inputs always give the
 same decision, and every score, check and rule is shown to the user
-(Bayer RULE-008: explain every lifecycle action).
+(SinceAI RULE-008: explain every lifecycle action).
 
 Outcomes (from the data pack): reuse, repair, consolidate, migrate, new build,
 not feasible. Retirement appears as flags on overlapping assets and becomes a
 maintenance action. Thresholds and weights live here only.
 """
 from __future__ import annotations
+
+import re
 
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -59,8 +61,13 @@ RULES_BY_DECISION = {
     "consolidate": ["RULE-001", "RULE-002", "RULE-004"],
     "migrate": ["RULE-006", "RULE-001", "RULE-004"],
     "new_build": ["RULE-001", "RULE-002", "RULE-007"],
+    "retire": ["RULE-006", "RULE-004", "RULE-008"],
+    "review": ["RULE-006", "RULE-008"],
     "not_feasible": ["RULE-008"],
 }
+
+
+RETIRE_WORDS = re.compile(r"\b(retire|retiring|decommission\w*|sunset\w*|switch(ing)? off|shut(ting)? down)\b", re.I)
 
 
 class Decision(str, Enum):
@@ -69,6 +76,8 @@ class Decision(str, Enum):
     CONSOLIDATE = "consolidate"
     MIGRATE = "migrate"
     NEW_BUILD = "new_build"
+    RETIRE = "retire"
+    REVIEW = "review"
     NOT_FEASIBLE = "not_feasible"
 
 
@@ -94,6 +103,8 @@ class AssetScore:
     scope_note: str
     views_90d: int
     lifecycle: str
+    owner: str | None = None
+    owner_status: str | None = None
     checks: list[Check] = field(default_factory=list)
     gates_failed: list[str] = field(default_factory=list)
     repairable: list[str] = field(default_factory=list)
@@ -153,7 +164,9 @@ def scope_match(intent: dict[str, Any], asset: dict[str, Any], catalog: dict[str
     markets, regions = f.get("market") or [], f.get("region") or []
     ms = asset["market_scope"]
     needs_global = intent.get("scope_global") or "market" in intent.get("dimensions", []) or len(markets) > 1 or len(regions) > 1
-    if ms == "Global":
+    if intent.get("other_markets"):
+        m_ok = 0.0  # no report covers a country the catalog holds no data for, not even a Global one
+    elif ms == "Global":
         m_ok = 1.0
     elif needs_global:
         m_ok = 0.0
@@ -219,7 +232,8 @@ def score_asset(intent: dict[str, Any], asset: dict[str, Any], catalog: dict[str
     failed, repairable = gates(asset, intent)
     return AssetScore(asset_id=asset["id"], name=asset["name"], platform=asset["platform"], coverage=cov,
                       freshness=freshness(asset), governance=gov, views_90d=asset.get("views_90d", 0),
-                      lifecycle=asset.get("lifecycle", ""), checks=checks, gates_failed=failed,
+                      lifecycle=asset.get("lifecycle", ""), owner=asset.get("owner"),
+                      owner_status=asset.get("owner_status"), checks=checks, gates_failed=failed,
                       repairable=repairable, **det)
 
 
@@ -301,6 +315,11 @@ def decide(candidates: list[AssetScore], availability: dict[str, Any], intent: d
     intent = intent or {}
     best_model = availability.get("best_model")
 
+    if catalog is not None:
+        result = _decide_retirement(candidates, intent, catalog)
+        if result:
+            return result
+
     # Migration requests: never migrate 1:1 without checking for reuse first (RULE-006).
     if intent.get("migration") and catalog is not None:
         result = _decide_migration(candidates, availability, intent, catalog)
@@ -352,18 +371,54 @@ def decide(candidates: list[AssetScore], availability: dict[str, Any], intent: d
                 c, change_type="business", flags=flags, replaces=[f["asset_id"] for f in flags])
 
     if availability["available"] and best_model:
-        flags = _flags(candidates, None)
-        why = ("No existing report is both close enough and well governed." if candidates
+        others = intent.get("other_markets") or []
+        named_market = others or (intent.get("filters") or {}).get("market")
+        # A report for another country is not an overlap, and a new report for this one does not replace it.
+        flags = _flags(in_scope if named_market else candidates, None)
+        names = ", ".join(others)
+        why = (f"No existing report covers {names}." if others
+               else "No existing report is both close enough and well governed." if candidates
                else "Nothing in the estate answers this request yet.")
         return DecisionResult(
             Decision.NEW_BUILD, f"no asset passes reuse, repair or consolidate rules; shared model {best_model['id']} serves "
-                                f"{len(best_model['measures_served'])} of {len(intent.get('measures', []))} measures",
-            why + f" Build one thin report on the shared model '{best_model['name']}' with approved KPIs only.",
+                                f"{len(best_model['measures_served'])} of {len(intent.get('measures', []))} measures"
+                                + (f"; {names} not in the catalog's markets" if others else ""),
+            why + f" Build one thin report on the shared model '{best_model['name']}' with approved KPIs only."
+            + (f" The catalog holds no data for {names} yet, so that data has to be added first." if others else ""),
             candidates[0] if candidates else None, flags=flags, target_model_id=best_model["id"],
             replaces=[f["asset_id"] for f in flags])
 
     return DecisionResult(Decision.NOT_FEASIBLE, "required KPIs are missing or not approved",
                           "The catalog has no approved KPI or semantic model for this request.", None, flags=_flags(candidates, None))
+
+
+def _decide_retirement(candidates: list[AssetScore], intent: dict[str, Any], catalog: dict[str, Any]) -> DecisionResult | None:
+    """Someone asks to retire a report: recommend it only if the evidence supports it, and say so if it does not."""
+    t = THRESHOLDS
+    question = intent.get("question") or ""
+    if not RETIRE_WORDS.search(question):
+        return None
+    low = question.lower()
+    named = [a for a in catalog["assets"] if a["name"].lower() in low]
+    if named:
+        target = score_asset(intent, max(named, key=lambda a: len(a["name"])), catalog)
+    else:
+        target = next((c for c in candidates if c.scope_score >= t["min_scope"]), None)
+    if not target:
+        return None
+    reasons = []
+    if target.lifecycle == "candidate_retire":
+        reasons.append("it is already marked for retirement")
+    if target.views_90d < t["low_usage_views_90d"]:
+        reasons.append(f"it has low usage ({target.views_90d} views in 90 days)")
+    if target.governance < t["flag_governance_below"]:
+        reasons.append(f"it is poorly governed ({target.governance:.2f})")
+    if reasons:
+        return DecisionResult(Decision.RETIRE, "; ".join(reasons), f"Retire '{target.name}': " + " and ".join(reasons) + ".", target,
+                              flags=_flags(candidates, target), replaces=[target.asset_id])
+    return DecisionResult(Decision.REUSE, f"{target.views_90d} views in 90 days, governance {target.governance:.2f}: no retirement criterion met",
+                          f"Keep '{target.name}': it is in use and well governed, so the evidence does not support retiring it.", target,
+                          flags=_flags(candidates, target))
 
 
 def _decide_migration(candidates: list[AssetScore], availability: dict[str, Any], intent: dict[str, Any],
@@ -378,8 +433,11 @@ def _decide_migration(candidates: list[AssetScore], availability: dict[str, Any]
     def path(a: dict[str, Any]) -> str:
         return (a.get("migration") or {}).get("recommended_path_candidate") or "not in backlog"
 
-    keep = sorted([a for a in legacy if path(a) != "RETIRE" and a["views_90d"] >= t["low_usage_views_90d"]
-                   and a["lifecycle"] != "candidate_retire"], key=lambda a: a["views_90d"], reverse=True)
+    worth_keeping = sorted([a for a in legacy if path(a) != "RETIRE" and a["views_90d"] >= t["low_usage_views_90d"]
+                            and a["lifecycle"] != "candidate_retire"], key=lambda a: a["views_90d"], reverse=True)
+    # A report the backlog holds for a human decision is not cleared to move, however much it is used.
+    keep = [a for a in worth_keeping if path(a) != "HUMAN_REVIEW"]
+    in_review = [a for a in worth_keeping if path(a) == "HUMAN_REVIEW"]
     flags = []
     for a in sorted(legacy, key=lambda a: a["views_90d"], reverse=True):
         if a in keep[:1]:
@@ -402,8 +460,24 @@ def _decide_migration(candidates: list[AssetScore], availability: dict[str, Any]
             Decision.REUSE, "a governed Power BI report already covers the request (RULE-006: do not migrate waste)",
             f"No migration needed: '{pbi[0].name}' already covers it in Power BI. Retire the {len(legacy)} Tableau assets instead.",
             pbi[0], flags=flags, replaces=[a["id"] for a in legacy])
+    if not keep and in_review:
+        top = in_review[0]
+        return DecisionResult(
+            Decision.REVIEW, f"{len(legacy)} Tableau assets for {', '.join(sorted(products))}; none is cleared to migrate, "
+                             f"{len(in_review)} wait for a human decision in the backlog (RULE-006)",
+            f"Have someone review '{top['name']}' before anything moves: the backlog holds it for a human decision, "
+            f"and no other Tableau report here is cleared to migrate.",
+            next((c for c in candidates if c.asset_id == top["id"]), None) or score_asset(intent, top, catalog),
+            flags=flags, replaces=[])
     if not keep:
-        return None
+        if not legacy:
+            return None
+        top = max(legacy, key=lambda a: a["views_90d"])
+        return DecisionResult(
+            Decision.RETIRE, f"{len(legacy)} Tableau assets for {', '.join(sorted(products))}; none has real usage or a migration path (RULE-006)",
+            f"Retire the {len(legacy)} Tableau assets instead of moving them: none is worth migrating.",
+            next((c for c in candidates if c.asset_id == top["id"]), None) or score_asset(intent, top, catalog),
+            flags=flags, replaces=[a["id"] for a in legacy])
     src = keep[0]
     source_score = next((c for c in candidates if c.asset_id == src["id"]), None) or score_asset(intent, src, catalog)
     target = (src.get("migration") or {}).get("candidate_target_model_id") or (availability.get("best_model") or {}).get("id")

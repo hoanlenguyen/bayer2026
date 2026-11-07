@@ -1,0 +1,316 @@
+{
+  "info": {
+    "name": "Analytics Manager - POST /api/chat",
+    "description": "Tests for POST /api/chat, which streams Server-Sent Events.\n\nSet baseUrl to your backend, then send a request or run the collection. Open the Visualize tab on a response for a readable summary of the stream.\n\nCost: against a backend with LLM_PROVIDER=openai every successful request calls the model, and with MongoDB it saves a conversation. Use a backend in mock mode for repeated runs.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000", "type": "string" },
+    { "key": "conversation_id", "value": "", "type": "string" }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Runs after every request: turns the event stream into a list the request's own tests can read.",
+          "const events = pm.response.text()",
+          "  .split(/\\r?\\n\\r?\\n/)",
+          "  .map((block) => block.split(/\\r?\\n/).filter((l) => l.startsWith('data: ')).map((l) => l.slice(6)).join('\\n'))",
+          "  .filter(Boolean)",
+          "  .flatMap((data) => { try { return [JSON.parse(data)]; } catch (e) { return []; } });",
+          "pm.variables.set('events', JSON.stringify(events));",
+          "",
+          "const conversation = events.find((e) => e.type === 'conversation');",
+          "if (conversation) pm.collectionVariables.set('conversation_id', conversation.id);",
+          "",
+          "if (events.length) {",
+          "  const rows = events",
+          "    .filter((e) => e.type === 'stage' ? e.status !== 'running' : ['message', 'done', 'error'].includes(e.type))",
+          "    .map((e) => ({",
+          "      type: e.stage || e.type,",
+          "      status: e.status || e.kind || e.state || '',",
+          "      text: e.summary || e.content || e.message || ''",
+          "    }));",
+          "  rows.forEach((r) => console.log(`${r.type} [${r.status}] ${r.text}`));",
+          "  pm.visualizer.set(",
+          "    '<table style=\"border-collapse:collapse;font:13px sans-serif\"><tr><th align=\"left\">Event</th><th align=\"left\">Status</th><th align=\"left\">Detail</th></tr>' +",
+          "    '{{#each rows}}<tr><td style=\"padding:4px 12px 4px 0;vertical-align:top\">{{type}}</td><td style=\"padding:4px 12px 4px 0;vertical-align:top\">{{status}}</td><td style=\"padding:4px 0\">{{text}}</td></tr>{{/each}}</table>',",
+          "    { rows }",
+          "  );",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "1. New question",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/chat",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"conversation_id\": null,\n  \"message\": \"I need to decide whether to change the Eylea plan for Japan. Show monthly net sales and digital engagement. No fixed deadline.\",\n  \"preset_id\": null\n}",
+          "options": { "raw": { "language": "json" } }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const events = JSON.parse(pm.variables.get('events'));",
+              "const stage = (id) => events.find((e) => e.type === 'stage' && e.stage === id && e.status === 'done');",
+              "// The backend can stop to ask a follow-up. These checks then show as skipped, not passed.",
+              "const whenDecided = stage('decision') ? pm.test : pm.test.skip;",
+              "",
+              "pm.test('Returns 200 as an event stream', () => {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.headers.get('Content-Type')).to.include('text/event-stream');",
+              "});",
+              "pm.test('Starts a conversation', () => {",
+              "  pm.expect(events[0].type).to.eql('conversation');",
+              "  pm.expect(events[0].id).to.be.a('string').and.not.empty;",
+              "});",
+              "pm.test('Finishes without an error', () => {",
+              "  pm.expect(events.filter((e) => e.type === 'error')).to.eql([]);",
+              "  pm.expect(events[events.length - 1].type).to.eql('done');",
+              "});",
+              "whenDecided('Tags the request with urgency', () => {",
+              "  pm.expect(['normal', 'high', 'urgent']).to.include(stage('intent').data.triage.urgency.value);",
+              "});",
+              "whenDecided('Status is triaged once decided', () => {",
+              "  pm.expect(stage('decision').data.triage.status).to.eql('triaged');",
+              "});",
+              "whenDecided('Makes a known decision', () => {",
+              "  pm.expect(['reuse', 'repair', 'consolidate', 'migrate', 'new_build', 'retire', 'not_feasible']).to.include(stage('decision').data.decision);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Preset question",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/chat",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"conversation_id\": null,\n  \"message\": \"\",\n  \"preset_id\": \"scn_reuse_eylea_jp\"\n}",
+          "options": { "raw": { "language": "json" } }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const events = JSON.parse(pm.variables.get('events'));",
+              "const decision = events.find((e) => e.type === 'stage' && e.stage === 'decision' && e.status === 'done');",
+              "",
+              "pm.test('Returns 200', () => pm.response.to.have.status(200));",
+              "pm.test('Uses the preset text as the question', () => {",
+              "  const asked = events.find((e) => e.type === 'user_message');",
+              "  pm.expect(asked.content).to.include('Eylea');",
+              "});",
+              "pm.test('This preset reuses an existing report', () => {",
+              "  pm.expect(decision.data.decision).to.eql('reuse');",
+              "});",
+              "pm.test('Tags the request with urgency', () => {",
+              "  const intent = events.find((e) => e.type === 'stage' && e.stage === 'intent' && e.status === 'done');",
+              "  pm.expect(['normal', 'high', 'urgent']).to.include(intent.data.triage.urgency.value);",
+              "});",
+              "pm.test('Status is triaged once decided', () => {",
+              "  pm.expect(decision.data.triage.status).to.eql('triaged');",
+              "});",
+              "pm.test('Finishes without an error', () => {",
+              "  pm.expect(events.filter((e) => e.type === 'error')).to.eql([]);",
+              "  pm.expect(events[events.length - 1].type).to.eql('done');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Question that may need a follow-up",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/chat",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"conversation_id\": null,\n  \"message\": \"Show me net sales\",\n  \"preset_id\": null\n}",
+          "options": { "raw": { "language": "json" } }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const events = JSON.parse(pm.variables.get('events'));",
+              "const done = events[events.length - 1];",
+              "",
+              "pm.test('Returns 200', () => pm.response.to.have.status(200));",
+              "pm.test('Ends in a known state', () => {",
+              "  pm.expect(done.type).to.eql('done');",
+              "  pm.expect(['idle', 'clarifying']).to.include(done.state);",
+              "});",
+              "pm.test('A follow-up, if asked, is a question message', () => {",
+              "  if (done.state !== 'clarifying') return;",
+              "  pm.expect(events.some((e) => e.type === 'message' && e.kind === 'question')).to.eql(true);",
+              "});",
+              "// Request 4 answers in this conversation.",
+              "pm.collectionVariables.set('first_conversation_id', events[0].id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Answer in the same conversation",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/chat",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"message\": \"Xarelto in Mexico. I need to decide whether to change the plan, monthly. No fixed deadline.\",\n  \"preset_id\": null\n}",
+          "options": { "raw": { "language": "json" } }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const events = JSON.parse(pm.variables.get('events'));",
+              "",
+              "pm.test('Returns 200', () => pm.response.to.have.status(200));",
+              "pm.test('Continues the same conversation', () => {",
+              "  pm.expect(events[0].id).to.eql(pm.collectionVariables.get('first_conversation_id'));",
+              "});",
+              "pm.test('Finishes without an error', () => {",
+              "  pm.expect(events.filter((e) => e.type === 'error')).to.eql([]);",
+              "  pm.expect(events[events.length - 1].type).to.eql('done');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Empty request is rejected",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/chat",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"conversation_id\": null,\n  \"message\": \"   \",\n  \"preset_id\": null\n}",
+          "options": { "raw": { "language": "json" } }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Returns 400 with a clear reason', () => {",
+              "  pm.response.to.have.status(400);",
+              "  pm.expect(pm.response.json().detail).to.eql('Send a message or choose a preset.');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. v2: show the input (no AI, no cost)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/v2/chat",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"conversation_id\": null,\n  \"message\": \"We need a monthly supply-risk dashboard by medicine and country.\",\n  \"preset_id\": null\n}",
+          "options": { "raw": { "language": "json" } }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "pm.test('Returns 200 as JSON', () => pm.response.to.have.status(200));",
+              "pm.test('Shows the input it received', () => {",
+              "  pm.expect(body.received.message).to.eql(JSON.parse(pm.request.body.raw).message);",
+              "});",
+              "pm.test('Shows the question it would use', () => {",
+              "  pm.expect(body.question).to.include('supply-risk');",
+              "  pm.expect(body.source).to.eql('message');",
+              "  pm.expect(body.length).to.eql(body.question.length);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. v2: classify a business request",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/v2/classify",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"request\": \"Please build a new report for market access coverage and reimbursement status by product.\"\n}",
+          "options": { "raw": { "language": "json" } }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "pm.test('Returns 200 as JSON', () => pm.response.to.have.status(200));",
+              "pm.test('Has every classification field', () => {",
+              "  pm.expect(body).to.include.keys('urgency', 'domain', 'market', 'product', 'governed_kpis', 'semantic_model', 'existing_report');",
+              "});",
+              "pm.test('Urgency is a known value, from a known source', () => {",
+              "  pm.expect(['normal', 'high', 'urgent']).to.include(body.urgency.value);",
+              "  pm.expect(['vector_vote', 'stated_in_request', 'default']).to.include(body.urgency.source);",
+              "});",
+              "pm.test('Finds the governed KPI and its domain', () => {",
+              "  pm.expect(body.governed_kpis.map((k) => k.id)).to.include('market_access_coverage');",
+              "  pm.expect(body.domain).to.eql('Market Access');",
+              "});",
+              "pm.test('Recommends one outcome, with six steps of evidence', () => {",
+              "  pm.expect(['reuse', 'consolidation', 'migration', 'retirement', 'new_build', 'not_feasible']).to.include(body.recommendation.value);",
+              "  pm.expect(body.recommendation.evidence.map((e) => e.step)).to.eql([1, 2, 3, 4, 5, 6]);",
+              "});",
+              "pm.test('Existing report is yes or no', () => {",
+              "  pm.expect(['yes', 'no']).to.include(body.existing_report);",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

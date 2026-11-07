@@ -7,10 +7,10 @@ Collections
   specs                DashboardSpec versions with status draft / approved / rejected
   agent_runs           audit log: agent, mode, model, steps, duration
   actions              follow-up actions with owner, due date, status history and verification
-  catalog_<key>        the analytics catalog built from the Bayer data pack: measures, dimensions,
+  catalog_<key>        the analytics catalog built from the SinceAI data pack: measures, dimensions,
                        models, assets, owners, workspaces, products, markets, lineage, rules
   datapack_<sheet>     every table sheet of the workbook, row for row (raw, for querying)
-  presets              the 10 Bayer business requests plus estate scenarios
+  presets              the 10 SinceAI business requests plus estate scenarios
 """
 from __future__ import annotations
 
@@ -23,6 +23,8 @@ from .settings import settings
 log = logging.getLogger(__name__)
 
 ARTIFACTS = ("intents", "evidence", "specs", "agent_runs", "actions")
+# Deleted along with a conversation. Actions stay: a person accepted them, and they outlive the chat that proposed them.
+CONVERSATION_ARTIFACTS = ("intents", "evidence", "specs", "agent_runs")
 CATALOG_MAPS = ("measures", "dimensions", "models", "owners", "workspaces", "products", "markets")
 CATALOG_LISTS = ("assets", "lineage", "rules")
 
@@ -47,6 +49,13 @@ class MemoryStore:
     async def list(self, limit: int = 20) -> list[dict[str, Any]]:
         docs = sorted(self.conversations.values(), key=lambda d: d.get("updated_at", ""), reverse=True)[:limit]
         return [{"_id": d["_id"], "title": d.get("title"), "updated_at": d.get("updated_at")} for d in docs]
+
+    async def delete(self, conv_id: str) -> bool:
+        if self.conversations.pop(conv_id, None) is None:
+            return False
+        for kind in CONVERSATION_ARTIFACTS:
+            self.artifacts[kind] = {k: d for k, d in self.artifacts[kind].items() if d.get("conversation_id") != conv_id}
+        return True
 
     # pipeline artifacts
     async def save_artifact(self, kind: str, doc: dict[str, Any]) -> None:
@@ -131,6 +140,14 @@ class MongoStore:
     async def list(self, limit: int = 20) -> list[dict[str, Any]]:
         cursor = self.db["conversations"].find({}, {"title": 1, "updated_at": 1}).sort("updated_at", -1).limit(limit)
         return [d async for d in cursor]
+
+    async def delete(self, conv_id: str) -> bool:
+        result = await self.db["conversations"].delete_one({"_id": conv_id})
+        if not result.deleted_count:
+            return False
+        for kind in CONVERSATION_ARTIFACTS:
+            await self.db[kind].delete_many({"conversation_id": conv_id})
+        return True
 
     # pipeline artifacts
     async def save_artifact(self, kind: str, doc: dict[str, Any]) -> None:

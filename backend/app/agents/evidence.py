@@ -15,7 +15,7 @@ from .. import catalog as cat
 from .base import Agent, Step
 from .tools import CATALOG_TOOLS, get_kpi, get_lineage, get_model, get_report
 
-SYSTEM = """You are the evidence agent for governed analytics at Bayer Pharmaceuticals.
+SYSTEM = """You are the evidence agent for governed analytics at SinceAI Pharmaceuticals.
 Given the intent and the lifecycle decision, use the tools to confirm: the approved KPI definitions (and which variants
 must not be used), the shared semantic model to build on, the existing report involved (usage, owner, signals,
 migration backlog) and the downstream impact from lineage. Use only ids returned by the tools.

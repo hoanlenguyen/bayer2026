@@ -1,10 +1,9 @@
 export type StageId =
-  | "intent" | "discovery" | "governance" | "decision" | "actions" | "deliver"
-  | "evidence" | "spec" | "approval" | "render" | "register";
+  | "intent" | "kpis" | "discovery" | "lineage" | "governance" | "migration" | "decision" | "actions" | "deliver";
 
 export type StageStatus = "pending" | "running" | "waiting" | "done" | "rejected";
-// extend and create come from the backend before the Bayer data pack; the rest from the data pack version.
-export type DecisionType = "reuse" | "repair" | "consolidate" | "migrate" | "new_build" | "extend" | "create" | "not_feasible";
+// extend and create come from the backend before the SinceAI data pack; the rest from the data pack version.
+export type DecisionType = "reuse" | "repair" | "consolidate" | "migrate" | "new_build" | "retire" | "review" | "extend" | "create" | "not_feasible";
 
 export interface Preset {
   id: string;
@@ -40,7 +39,7 @@ export interface MessageEvent {
   type: "message";
   role: "assistant";
   content: string;
-  kind?: "question" | "result" | "approval";
+  kind?: "question" | "result" | "retry";
   suggestions?: string[];
   decision?: DecisionType;
   ts: string;
@@ -69,6 +68,8 @@ export interface CatalogMeta {
 export interface Candidate {
   asset_id: string;
   name: string;
+  owner?: string | null;
+  owner_status?: string | null;
   platform?: string;
   scope_note?: string;
   coverage: number;
@@ -82,4 +83,16 @@ export interface Candidate {
   gates_failed?: string[];
   gates_pass: boolean;
   checks: { id: string; label: string; passed: boolean; weight: number }[];
+}
+
+export interface ConversationSummary {
+  _id: string;
+  title: string | null;
+  updated_at: string;
+}
+
+export interface ConversationDetail extends ConversationSummary {
+  state: string;
+  messages: { role: "user" | "assistant"; content: string; kind?: "question" | "result" | "retry"; suggestions?: string[] }[];
+  runs: { events: (StageEvent | { type: "user_message" | "message" | "done" })[] }[];
 }

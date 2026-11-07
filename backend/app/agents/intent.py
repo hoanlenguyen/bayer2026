@@ -15,6 +15,8 @@ from typing import Any
 
 from .. import catalog as cat
 from ..datapack import REGION_ALIASES
+from ..decider import JEV_THRESHOLDS
+from ..geo import split_other_markets
 from ..triage import URGENCY_CHOICES, infer_urgency, urgency_from_answer, verify_urgency
 from .base import Agent, Step
 from .tools import catalog_brief
@@ -22,7 +24,7 @@ from .tools import catalog_brief
 MAX_QUESTIONS = 2
 OUT_OF_SCOPE = ["patient", "prescriber", "hcp", "physician", "adherence", "adverse event", "pharmacovigilance", "treatment"]
 
-SYSTEM = """You turn a Bayer Pharmaceuticals business user's analytics request into a precise intent.
+SYSTEM = """You turn a SinceAI Pharmaceuticals business user's analytics request into a precise intent.
 Users are not technical. Ask about the decision they need to make, never about specifications.
 Ask at most one short question per turn, with 2-3 short answer suggestions.
 Use ONLY ids from the catalog below. Put requested numbers that are not in the catalog, or that need patient or
@@ -95,10 +97,82 @@ def sanitize_intent(intent: dict[str, Any]) -> dict[str, Any]:
     return intent
 
 
+def _jev_item(name: str, keywords: list[str] | None = None) -> str:
+    also = f" (also called {', '.join(keywords[:3])})" if keywords else ""
+    return f"The request asks for, or clearly needs, {name}{also}."
+
+
+async def jev_match(decider: Any, text: str) -> dict[str, Any]:
+    """KPIs, breakdowns and migration from Jev, in one call. Only approved KPIs are offered, so it cannot invent any."""
+    from typesafe_sdk import Noul
+
+    C = cat.CATALOG
+    questions: dict[str, Noul] = {f"kpi:{mid}": Noul(instructions=_jev_item(m["name"], [k.strip() for k in m.get("keywords", [])]))
+                                  for mid, m in C["measures"].items() if m["certified"]}
+    questions.update({f"dim:{did}": Noul(instructions=f"The request wants the numbers broken down by {d['name']}.")
+                      for did, d in C["dimensions"].items()})
+    questions["migration"] = Noul(instructions="The request wants an existing Tableau report replaced or moved to Power BI.")
+    response = await decider.decide({"request": text}, questions)
+    yes, no = JEV_THRESHOLDS["yes"], JEV_THRESHOLDS["no"]
+    probabilities = {name: response.nouls[name].noul for name in questions}
+    return {"measures": [n.split(":", 1)[1] for n, p in probabilities.items() if n.startswith("kpi:") and p >= yes],
+            "dimensions": [n.split(":", 1)[1] for n, p in probabilities.items() if n.startswith("dim:") and p >= yes],
+            "migration": probabilities["migration"] >= yes,
+            "unsure": [n for n, p in probabilities.items() if no < p < yes]}
+
+
+async def jev_urgency(decider: Any, text: str) -> dict[str, Any] | None:
+    """Urgency when no deadline words were found. Raised only when Jev is sure; otherwise None, so the default stands."""
+    from typesafe_sdk import Choice
+
+    response = await decider.decide({"request": text}, {"urgency": Choice(
+        instructions="How soon does the requester say they need this? Judge only their words, never the importance of the topic.",
+        criteria={"normal": "No deadline or time pressure is expressed.",
+                  "high": "A deadline within about a week, or clear time pressure.",
+                  "urgent": "Needed today or tomorrow, or described as an emergency."})})
+    answer = response.choices["urgency"]
+    if answer.choice == "normal" or answer.probabilities[answer.choice] < JEV_THRESHOLDS["raise_urgency"]:
+        return None
+    return {"value": answer.choice, "source": "model", "evidence": None}
+
+
 class IntentAgent(Agent):
     name = "intent"
     title = "Intent agent (/grill-me)"
     role = "fast"
+    jev_phase = "kpis"
+
+    def needs_no_model(self, ctx: dict[str, Any]) -> bool:
+        # A preset's own text already has an exact, governed intent: nothing to extract.
+        preset, transcript = ctx.get("preset"), ctx.get("transcript") or []
+        return bool(preset) and len(transcript) == 1 and transcript[0]["content"] == preset["prompt"] and not ctx["intent"].get("_pending")
+
+    async def prepare(self, ctx: dict[str, Any], steps: list[Step]) -> None:
+        intent = ctx["intent"]
+        if not self.jev_on("urgency") or (intent.get("urgency") or {}).get("source") == "stated" or intent.get("_pending") == "urgency":
+            return
+        said = " ".join(m["content"] for m in ctx["transcript"] if m["role"] == "user")
+        if infer_urgency(said)["source"] != "inferred":
+            ctx["urgency_hint"] = await jev_urgency(self.decider, said)
+            steps.append(Step("model", "Check urgency", (ctx["urgency_hint"] or {}).get("value", "no deadline expressed")))
+
+    async def run_jev(self, ctx: dict[str, Any], steps: list[Step]) -> dict[str, Any] | None:
+        said = " ".join(m["content"] for m in ctx["transcript"] if m["role"] == "user")
+        if not said.isascii():  # the question templates after this are English only
+            steps.append(Step("note", "Not English, using the next option"))
+            return None
+        found = await jev_match(self.decider, said)
+        steps.append(Step("model", "Classify KPIs and breakdowns", f"KPIs={found['measures'] or '-'}, breakdowns={found['dimensions'] or '-'}"))
+        if found["unsure"]:
+            steps.append(Step("note", "Jev is not sure enough, using the next option", ", ".join(found["unsure"])[:200]))
+            return None
+        intent = ctx["intent"]
+        intent["measures"] = list(dict.fromkeys((intent.get("measures") or []) + found["measures"]))
+        intent["dimensions"] = list(dict.fromkeys((intent.get("dimensions") or []) + found["dimensions"]))
+        if found["migration"]:
+            intent["migration"] = {"from": "Tableau"}
+        ctx["jev_found_measures"] = bool(found["measures"])
+        return await self.run_rules(ctx, steps)  # filters and the follow-up questions, which Jev cannot write
 
     async def run_llm(self, ctx: dict[str, Any], steps: list[Step]) -> dict[str, Any]:
         intent, asked = ctx["intent"], ctx["asked"]
@@ -110,10 +184,11 @@ class IntentAgent(Agent):
         proposed = out.get("intent") or {}
         said = " ".join(m["content"] for m in ctx["transcript"] if m["role"] == "user")
         stated = intent.get("urgency") if (intent.get("urgency") or {}).get("source") == "stated" else None
-        urgency = stated or verify_urgency(proposed.pop("urgency", None), said)
+        urgency = stated or ctx.get("urgency_hint") or verify_urgency(proposed.pop("urgency", None), said)
         if urgency.get("note"):
             steps.append(Step("check", "Urgency not supported by the request", urgency["note"], ok=False))
         merged = sanitize_intent({**intent, **proposed, "urgency": urgency})
+        merged["other_markets"], merged["unmatched_terms"] = split_other_markets(said, merged["unmatched_terms"])
         dropped = set(proposed.get("measures") or []) - set(merged["measures"])
         if dropped:
             steps.append(Step("check", "Removed KPI ids not in the catalog", ", ".join(sorted(dropped)), ok=False))
@@ -128,7 +203,7 @@ class IntentAgent(Agent):
 
         if pending == "decision":
             intent["decision"] = last
-        elif pending == "measures" and not match_measures(last):
+        elif pending == "measures" and not match_measures(last) and not ctx.get("jev_found_measures"):
             intent.setdefault("unmatched_terms", []).append(last)
         elif pending == "scope":
             if "global" in low or "all" in low or "every" in low:
@@ -140,7 +215,8 @@ class IntentAgent(Agent):
 
         said = " ".join(m["content"] for m in transcript if m["role"] == "user")
         if (intent.get("urgency") or {}).get("source") != "stated":
-            intent["urgency"] = infer_urgency(said)
+            intent["urgency"] = ctx.get("urgency_hint") or infer_urgency(said)
+        intent["other_markets"], intent["unmatched_terms"] = split_other_markets(said, intent.get("unmatched_terms") or [])
 
         # A preset already carries an exact intent; do not re-parse its own prompt text.
         if preset and len(transcript) == 1 and not pending:
@@ -175,7 +251,7 @@ class IntentAgent(Agent):
                     steps.append(Step("tool", "vector_search(kpis)", ", ".join(semantic)))
                 return ask("measures", "Which numbers do you need? For example net sales, market access coverage, OTIF or forecast accuracy.",
                            semantic or ["Net sales and growth", "Market access coverage", "OTIF and inventory coverage"])
-            if not intent.get("filters") and not intent.get("scope_global"):
+            if not intent.get("filters") and not intent.get("scope_global") and not intent["other_markets"]:
                 return ask("scope", "Which products and markets should it cover?",
                            ["All products, all markets", "One product, global", "One market only"])
             if not intent.get("decision"):
