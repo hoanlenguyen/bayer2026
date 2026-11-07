@@ -1,0 +1,19 @@
+{
+  // Workers Free plan: frontend on Cloudflare, backend reached through a tunnel. No Containers (paid only).
+  // Deploy:  npm run deploy:free -- --var BACKEND_URL:https://<your-tunnel>.trycloudflare.com
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "analytics-manager",
+  "main": "src/proxy.js",
+  "compatibility_date": "2026-11-06",
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "../../frontend/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    // Replaced on deploy with --var. Must be the public HTTPS address of the backend (no trailing path).
+    "BACKEND_URL": ""
+  }
+}
