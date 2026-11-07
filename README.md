@@ -12,7 +12,7 @@ All data is synthetic (the SinceAI builder data pack in `materials/`).
 
 ## How it works
 
-![AnalytIQ processing flow: a request is checked, understood, matched against existing analytics in six steps, and ends in a recommendation with its evidence](materials/flow.png)
+![From a question to a decision you can trace: the prompt is checked for relevance and clarified into an intent (at most two questions), five catalogue checks (KPIs, existing reports, lineage, trust, Tableau backlog) produce the evidence, and Python decides the recommendation and explains it](materials/flow.png)
 
 ## Live site
 
