@@ -129,6 +129,11 @@ backend/   Python 3.12+, FastAPI
 - Urgency: stated (grill-me "When do you need this?") / inferred (time words, quoted evidence, model claims verified) / default normal. Status is not shown while the request is being understood (Understand the request shows urgency only). When the intent is complete the request is created as `REQ-APP-…` with status new and added to the vector corpus (`request_vectors` in Atlas, or in memory); the decision step sets it to triaged and shows the tag. Later requests count it as a duplicate. `build_vectors` keeps these live requests and re-embeds them.
 - Vector search: duplicate and similar requests at intake, KPI suggestion chips. OpenAI embeddings or local hashed fallback; MongoDB Atlas `$vectorSearch` (`python -m app.build_vectors`) or in-memory. Endpoints `/api/requests/similar`, `/api/requests/clusters`, `/api/requests/label-check`.
 
+## Deployment (`deploy/cloudflare/`, `docs/DEPLOY_CLOUDFLARE.md`)
+- Cloudflare Workers Paid plan. One Worker serves the frontend build (static assets, SPA fallback) and forwards `/api/*` to a Container running `backend/Dockerfile` (one named instance, `standard-1`, sleeps after 30 min).
+- Secrets `OPENAI_API_KEY` and `MONGODB_URI` are set with `wrangler secret put`; other settings are `vars` in `wrangler.jsonc`. Atlas must allow `0.0.0.0/0` (no fixed egress IP).
+- Deploy: GitHub Actions "Deploy to Cloudflare" (manual) or `npm run deploy` in `deploy/cloudflare` (needs Docker).
+
 ## Secrets
 - Never commit keys. `backend/.env` is git-ignored; `backend/.env.example` lists variable names only.
 - Never paste keys into chat.
