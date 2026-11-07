@@ -1,0 +1,34 @@
+# Start backend and frontend together:
+#   docker compose up --build
+# Then open http://localhost:5173 (other ports: BACKEND_PORT=8001 FRONTEND_PORT=5174 docker compose up --build)
+# Keys and MongoDB settings come from backend/.env at run time (never baked into an image).
+# Without backend/.env, copy backend/.env.example to backend/.env first.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file: backend/.env
+    environment:
+      # The browser reaches the API through the frontend's nginx, on port 5173.
+      CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-5173},http://127.0.0.1:${FRONTEND_PORT:-5173}
+      # Inside the image the data pack sits here; an empty DATAPACK_PATH in .env must not override it.
+      DATAPACK_PATH: /app/materials/Bayer_Pharmaceuticals_SinceAI_2026_FINAL_Builder_Data_Pack.xlsx
+      OUTPUT_DIR: output
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - pbip-output:/app/backend/output
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pbip-output:
