@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time server setup on a fresh Vultr Ubuntu 24.04 instance. Run as root:  bash setup.sh
+# One-time setup on a fresh Ubuntu 24.04 server (Azure VM, or any VPS). Run as root:  bash setup.sh
 set -euo pipefail
 
 # Docker Engine and the Compose plugin (official convenience script).
@@ -22,4 +22,4 @@ if command -v ufw >/dev/null; then
   ufw --force enable
 fi
 
-echo "Docker $(docker --version) ready. Next: clone the repository and follow docs/DEPLOY_VULTR.md step 4."
+echo "Docker $(docker --version) ready. Next: clone the repository and follow docs/DEPLOY_AZURE.md step 4."
