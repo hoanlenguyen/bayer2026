@@ -23,7 +23,7 @@ Open **Ask** and try one of these questions with the same local workbook.
 2. Choose **Review and build dashboard** and read the brief. Select **Build dashboard** to open the result. Switch metrics, filter the displayed periods and open **Dashboard brief and sources**. October shows €37.58m in sales and 33,941 units shipped, both from workbook row 21.
 3. Copy the dashboard link or find it under **Saved dashboards** on the Ask start screen. Repeat the same brief to reopen the existing dashboard. The Docker review configuration uses MongoDB so both the result and its source values survive a restart.
 
-If an existing report fits, open that report or its verified workbook view. A review or repair stays with the responsible owner. When a new request mixes calculable KPIs with catalogue-only measures, the builder names the omissions and asks whether the employee wants the narrower dashboard. The dashboard runs in Analytics Manager using the synthetic workbook.
+If an existing report fits, open that report or its verified workbook view. A review or repair stays with the responsible owner. When a new request mixes calculable KPIs with catalogue-only measures, the builder names the omissions and asks whether the employee wants the narrower dashboard. The dashboard runs in AnalytIQ using the synthetic workbook.
 
 ### Compare the catalogue decisions
 

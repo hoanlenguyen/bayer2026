@@ -3,7 +3,7 @@ import { openConversation, removeConversation, useAnswerInProgress, useConversat
 import { navigate } from "../lib/navigation";
 import { Icon } from "./Icon";
 
-export type Page = "ask" | "explorer" | "cala-graph" | "simulator" | "briefings" | "dashboard" | "workbook";
+export type Page = "ask" | "explorer" | "cala-graph" | "simulator" | "briefings" | "dashboard" | "workbook" | "bi-estate";
 
 function HistoryList({ page }: { page: Page }) {
   const conversations = useConversations();
@@ -97,9 +97,9 @@ export function Sidebar({ page }: { page: Page }) {
   return (
     <header className={`sidebar${collapsed ? " collapsed" : ""}`}>
       <div className="sidebar-head">
-        <a className="brand" href="/#ask" onClick={navigate} aria-label="Analytics Manager" title={tip("Analytics Manager")}>
+        <a className="brand" href="/#ask" onClick={navigate} aria-label="AnalytIQ intelligence" title={tip("AnalytIQ intelligence")}>
           <span className="brand-mark" aria-hidden="true" />
-          <span className="brand-name">Analytics Manager</span>
+          <span className="brand-name">AnalytIQ intelligence</span>
         </a>
         <button type="button" className="sidebar-toggle" aria-label={toggleLabel} aria-expanded={!collapsed} title={toggleLabel} onClick={() => setCollapsed((c) => !c)}>
           <Icon name="panel" />
@@ -111,6 +111,7 @@ export function Sidebar({ page }: { page: Page }) {
         <a href="/#explorer" onClick={navigate} aria-label="Estate Explorer" title={tip("Estate Explorer")} aria-current={page === "explorer" ? "page" : undefined}><Icon name="estate" /><span><span className="nav-extra">Estate </span>Explorer</span></a>
         <a href="/cala-graph" onClick={navigate} aria-label="Knowledge Graph" title={tip("Knowledge Graph")} aria-current={page === "cala-graph" ? "page" : undefined}><Icon name="graph" /><span><span className="nav-extra">Knowledge </span>Graph</span></a>
         <a href="/briefings" onClick={navigate} aria-label="Team briefings" title={tip("Team briefings")} aria-current={page === "briefings" ? "page" : undefined}><Icon name="briefings" /><span>Briefings</span></a>
+        <a href="/bi-estate" onClick={navigate} aria-label="BI Portfolio" title={tip("BI Portfolio")} aria-current={page === "bi-estate" ? "page" : undefined}><Icon name="search" /><span><span className="nav-extra">BI </span>Portfolio</span></a>
       </nav>
       {!collapsed && <HistoryList page={page} />}
       <p className="sample-note" title="All data in this app is fictional sample data">

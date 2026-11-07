@@ -2,6 +2,7 @@ import { useEffect, useId, useState, type MouseEvent, type ReactNode } from "rea
 import { handoffPath, readHandoff, type DecisionHandoff } from "../api/handoff";
 import type { DashboardObservation, SavedDashboard, SourceRecord } from "../api/dashboardBuilder";
 import { PulseDashboard } from "../components/PulseDashboard";
+import { bi } from "../api/biEstate";
 import { openConversation } from "../lib/conversations";
 import { navigate } from "../lib/navigation";
 import "./saved-dashboard.css";
@@ -37,7 +38,7 @@ function Status({ error, retry }: { error: string; retry: () => void }) {
 
 function PageHeader({ name, kind, description, conversationId }: { name: string; kind: string; description: string; conversationId: string }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "manual">("idle");
-  useEffect(() => { document.title = name + " · Analytics Manager"; }, [name]);
+  useEffect(() => { document.title = name + " · AnalytIQ intelligence"; }, [name]);
   async function copy() {
     try { await navigator.clipboard.writeText(window.location.href); setCopyState("copied"); }
     catch { setCopyState("manual"); }
@@ -110,8 +111,35 @@ function SourceNotes({ children }: { children: ReactNode }) {
   return <details className="sd-sources"><summary>Dashboard brief and sources</summary><div>{children}</div></details>;
 }
 
+/** One ID per history entry, so a remount, re-render or reload of the same view is not counted twice. */
+function viewIdForThisEntry(): string {
+  const state = (history.state ?? {}) as { analytiqView?: string };
+  if (state.analytiqView) return state.analytiqView;
+  const id = (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
+  try { history.replaceState({ ...state, analytiqView: id }, ""); } catch { /* counted per mount instead */ }
+  return id;
+}
+
+/** Record an AnalytIQ open once the dashboard is rendered and the tab is visible. Never blocks the dashboard. */
+function useRecordOpen(assetId: string, rendered: boolean) {
+  useEffect(() => {
+    if (!rendered) return;
+    const viewId = viewIdForThisEntry();
+    let sent = false;
+    const send = () => {
+      if (sent || document.visibilityState !== "visible") return;
+      sent = true;
+      bi.recordOpen(assetId, viewId).catch(() => undefined);
+    };
+    send();
+    document.addEventListener("visibilitychange", send);
+    return () => document.removeEventListener("visibilitychange", send);
+  }, [assetId, rendered]);
+}
+
 export function SavedDashboardPage({ id }: { id: string }) {
   const { record, error, retry } = useRecord<SavedDashboard>(`/api/dashboards/${encodeURIComponent(id)}`);
+  useRecordOpen(id, record !== null);
   if (!record) return <Status error={error} retry={retry}/>;
   const { period, scope } = record;
   const scopedNames = (values: string[], label: string) => values.length > 3 ? `${values.length} ${label}` : values.join(", ");

@@ -1,11 +1,12 @@
 """Clarify, approve and reopen a source-backed dashboard from a saved Ask run."""
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request as HttpRequest
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import catalog
 from .actions import now
+from .bi_estate import creator_for_build
 from .briefing_routes import StoreDep
 from .dashboard_builder import assemble, check_reuse, fingerprint, resolve, validate_answer
 from .request_handoff import _saved_run
@@ -115,7 +116,7 @@ async def dashboard_answer(conversation_id: str, run_id: str, answer: Answer, st
 
 
 @router.post(PATH + "/build")
-async def build_dashboard(conversation_id: str, run_id: str, request: Build, store: StoreDep) -> dict:
+async def build_dashboard(conversation_id: str, run_id: str, request: Build, store: StoreDep, http: HttpRequest) -> dict:
     state, doc, artifact = await _state(conversation_id, run_id, store)
     if state.get("review_token") != request.review_token:
         raise HTTPException(409, "The reviewed requirements or source rows changed. Reload before building.")
@@ -123,7 +124,9 @@ async def build_dashboard(conversation_id: str, run_id: str, request: Build, sto
         return state
     if state["status"] not in ("ready", "built") or request.version != doc["version"] or not artifact:
         raise HTTPException(409, "The dashboard is not ready to build from this version.")
-    saved = await store.publish_dashboard_once({**artifact, "_id": artifact["id"], "created_at": now()})
+    # Who built it is recorded once, at first publication: a retry or a reused build keeps the original attribution.
+    saved = await store.publish_dashboard_once({**artifact, "_id": artifact["id"], "created_at": now(),
+                                                "created_by": creator_for_build(http)})
     same_run = (saved["conversation_id"], saved["run_id"]) == (conversation_id, run_id)
     built = {**state, "status": "built", "version": doc["version"] + 1, "dashboard_id": saved["id"], "reused": not same_run}
     if not await store.advance_dashboard({**doc, "version": built["version"], "built_id": saved["id"], "built_state": built}, doc["version"]):

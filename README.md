@@ -1,9 +1,9 @@
-# Agentic Analytics Manager
+# AnalytIQ intelligence
 
 SinceAI Hackathon 2026 entry for "Build Less, Build Better: AI for Governed Analytics".
 
 An AI workspace for a pharma manufacturing plant. An employee describes the decision they need to make. Before anything new is built,
-Analytics Manager checks the existing BI estate in six steps (metric definitions, existing reports and their usage, data lineage,
+AnalytIQ checks the existing BI estate in six steps (metric definitions, existing reports and their usage, data lineage,
 trust and ownership, Tableau migration) and recommends what to do: reuse, consolidate, migrate, retire, human review or a new build.
 Python makes the decision with a transparent formula; the AI only reads the request and asks at most two clarifying questions.
 Every number shown as evidence comes from the workbook, never from a model.
@@ -19,7 +19,8 @@ All data is synthetic (the SinceAI builder data pack in `materials/`).
 | **Ask** (`/`) | Ask in your own words or pick an example. See the recommendation with its scores and evidence. For an eligible new build, review a dashboard brief and build it in the app; a review, repair or migration goes to the report owner as an assignment |
 | **Briefings** (`/briefings`) | Commercial and Supply team briefings with the Monthly Pulse chart and meeting mode; **BI report register** tab |
 | **Saved dashboards** (`/dashboards/<id>`) | Dashboards built from Ask, with metric switching, month filters and the source rows behind each figure |
-| **Conversation Simulation** (`/simulator`) | Two people talk; Analytics Manager speaks up only when a decision needs evidence |
+| **BI Portfolio** (`/bi-estate`) | For the BI department head: every reporting asset with owner, creator, use and findings; compare consolidation candidates and run an owner review |
+| **Conversation Simulation** (`/simulator`) | Two people talk; AnalytIQ speaks up only when a decision needs evidence |
 | **Estate Explorer**, **Knowledge Graph** | The report estate as a relationship graph, and as a 3D map by domain |
 
 Try it: in **Ask**, choose *Build a monthly dashboard for Nubeqa net sales and units shipped in France*, answer *Decide where to

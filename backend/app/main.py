@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from . import actions as act
 from . import catalog as cat
+from .bi_estate import router as bi_estate_router
 from .briefing_routes import router as briefing_router
 from .dashboard_routes import router as dashboard_router
 from .report_register import router as report_register_router
@@ -84,7 +85,8 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Agentic Analytics Manager", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="AnalytIQ intelligence", version="0.1.0", lifespan=lifespan)
+app.include_router(bi_estate_router)
 app.include_router(briefing_router)
 app.include_router(dashboard_router)
 app.include_router(report_register_router)

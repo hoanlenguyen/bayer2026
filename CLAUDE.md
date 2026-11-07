@@ -4,7 +4,7 @@ Project context for Claude Code and for the team. Keep this file current: it is 
 
 ## Project
 
-**Agentic Analytics Manager** (working name). SinceAI Hackathon 2026, challenge "Build Less, Build Better: AI for Governed Analytics".
+**AnalytIQ intelligence** (formerly "Agentic AnalytIQ"). SinceAI Hackathon 2026, challenge "Build Less, Build Better: AI for Governed Analytics".
 
 An AI workspace that helps a pharma manufacturing plant ask the right business question, reuse or create trustworthy analytics, and manage the follow-up actions. It decides what deserves to exist before anything is built.
 
@@ -19,7 +19,7 @@ An AI workspace that helps a pharma manufacturing plant ask the right business q
 
 ## Processing flow (team design)
 
-The system recommends; people act on the recommendation. It changes and retires no report and publishes nothing to Power BI. The one thing it builds is an in-app dashboard: when the recommendation is a new build and every requested KPI can be calculated from the workbook, the employee reviews a dashboard brief and builds it in Analytics Manager (`app/dashboard_builder.py`). Review, repair and migration stay with the responsible owner, as assignments in the BI report register.
+The system recommends; people act on the recommendation. It changes and retires no report and publishes nothing to Power BI. The one thing it builds is an in-app dashboard: when the recommendation is a new build and every requested KPI can be calculated from the workbook, the employee reviews a dashboard brief and builds it in AnalytIQ (`app/dashboard_builder.py`). Review, repair and migration stay with the responsible owner, as assignments in the BI report register.
 
 ```
 User request (free text or preset)
@@ -38,7 +38,7 @@ Rules:
 - Agents propose, Python verifies: unknown catalog IDs are removed; numbers shown as evidence come from the catalog, never from the model.
 - Every recommendation shows its scores, rules applied and the evidence from all six steps (RULE-008).
 - Classification can use Jev (TypeSafe AI, `app/decider.py`), off unless `TYPESAFE_API_KEY` is set and `JEV_PHASES` names phases (`relevance`, `kpis`, `urgency`). Order: Jev if confident, else GPT, else rules. Jev cannot write text, so follow-up questions, decision text and explanations stay with GPT or templates. Thresholds live in `JEV_THRESHOLDS`. Turn a phase on only if it passes `python scripts/eval_classification.py --modes rules,gpt,jev`.
-- Conversation simulation (`/simulator`, under Ask in the sidebar): SinceAI and Brainrot chat (speakers `A` and `B` in the API; Analytics Manager is `C`), the gate agent labels each sentence off topic, business talk or needs a decision (Jev, then GPT, then rules; `speak` 0.70, `stay_quiet` 0.30 in `JEV_THRESHOLDS`). Its `conversation` phase is on whenever `TYPESAFE_API_KEY` is set. Only "needs a decision" runs `classify_request` on the open thread. A request too vague to check (no KPI, or a loose match with no product or market) gets no reply: Analytics Manager keeps listening, and business talk that follows is checked with it until there is enough. It never asks questions; Analytics Manager's sentence comes from Python templates, never a model, and its evidence is the same verdict and six steps as Ask (`analyse()` in `pipeline.py`, shared by both), and only a plain Reuse is called "already exists". Its accuracy on this question has not been measured yet.
+- Conversation simulation (`/simulator`, under Ask in the sidebar): SinceAI and Brainrot chat (speakers `A` and `B` in the API; AnalytIQ is `C`), the gate agent labels each sentence off topic, business talk or needs a decision (Jev, then GPT, then rules; `speak` 0.70, `stay_quiet` 0.30 in `JEV_THRESHOLDS`). Its `conversation` phase is on whenever `TYPESAFE_API_KEY` is set. Only "needs a decision" runs `classify_request` on the open thread. A request too vague to check (no KPI, or a loose match with no product or market) gets no reply: AnalytIQ keeps listening, and business talk that follows is checked with it until there is enough. It never asks questions; AnalytIQ's sentence comes from Python templates, never a model, and its evidence is the same verdict and six steps as Ask (`analyse()` in `pipeline.py`, shared by both), and only a plain Reuse is called "already exists". Its accuracy on this question has not been measured yet.
 - A preset's own text skips the Intent model call: its intent is already known.
 - Token use is recorded per agent run (`usage` in `agent_runs`) and per question (`runs[].tokens`).
 - `repair` stays an internal decision, shown as "Reuse after repair". Follow-up actions are proposed, and a person accepts them.
@@ -85,6 +85,8 @@ frontend/  React + TypeScript + Vite
   /cala-graph  Knowledge graph: full-screen 3D canvas (path route, "Knowledge Graph" in the sidebar), loaded from
              GET /api/graph and grouped by domain (workspace) using the catalog's own links
   /simulator   Conversation simulation (see Rules above)
+  /bi-estate   BI Portfolio: the BI department head's tracker of every reporting asset (see BI Portfolio below);
+             /bi-estate/<id> details, /bi-estate/compare/<a>/<b> comparison and owner review
   /briefings   Team briefings (Commercial, Supply) with the Monthly Pulse chart, meeting mode, and the BI report register tab
   /dashboards/<id>         a saved in-app dashboard (stable URL)
   /workbook-view/<a>/<b>   verified workbook view behind an employee report
@@ -94,6 +96,7 @@ backend/   Python 3.12+, FastAPI
   app/briefings.py, briefing_routes.py, briefing_definitions.py   team briefings from the workbook
   app/dashboard_intake.py, dashboard_builder.py, dashboard_routes.py   dashboard questions, brief, build, saved dashboards
   app/employee_report_match.py   matches a request to an existing employee report
+  app/bi_estate.py   BI Portfolio: inventory, findings, pairs, owner reviews, AnalytIQ opens, demo identities
   app/report_register.py   BI report register (owners, revisions, reviewed changes)
   app/request_handoff.py   assignments from an Ask result to a report owner, with frozen evidence
   app/steps.py, classify.py, geo.py, decider.py, simulator.py   six analysis steps, /api/v2/classify, country check, Jev, simulator
@@ -127,6 +130,10 @@ backend/   Python 3.12+, FastAPI
 - `GET  /api/report-register`, `…/titles`, `…/{report_id}`; `POST …/{report_id}/changes` – BI report register and reviewed changes
 - `GET  /api/conversations/{cid}/runs/{rid}/handoff`; `POST/PATCH …/handoff/actions` – owner assignments from a result
 - `GET/POST /api/actions`, `GET/PATCH /api/actions/{id}` – follow-up actions
+- `GET  /api/bi-estate?q=&origin=&platform=&issue=&lifecycle=&owner_state=&product=&market=&sort=&direction=&page=&size=` – BI Portfolio rows, counts, facets and sources; `GET /api/bi-estate/{id}` details; `GET /api/bi-estate/pairs/{a}/{b}` comparison
+- `POST /api/bi-estate/{id}/opens` – body `{view_id, source}`; one AnalytIQ open per rendered, visible view (idempotent)
+- `POST /api/bi-estate/{id}/owner` (steward) – owner assignment overlay, `expected_seq` for concurrency
+- `POST /api/bi-reviews` (steward), `GET /api/bi-reviews/{id}`, `POST /api/bi-reviews/{id}/events` (owner response or steward decision); `GET /api/bi-identity` – demo personas
 - `GET  /api/requests`, `/api/datapack`, `/api/stages` – request queue, workbook summary, flow stage names
 
 ### Models
@@ -143,6 +150,14 @@ backend/   Python 3.12+, FastAPI
 - Live: MongoDB Atlas, project **Bayer2026**, Cluster0 (M0, AWS Paris), database `analytics_manager`. The vector indexes `vector_index` on `request_vectors` (150 Business_Requests rows plus live `REQ-APP-…` requests) and `kpi_vectors` (18 KPIs) are 1536-dimension cosine indexes built from OpenAI `text-embedding-3-small`. Network access allows `0.0.0.0/0` because Container Apps has no fixed outgoing IP; keep the database password strong.
 - Tests use `mongomock` through an async adapter (`tests/fakes.py`).
 - The MongoDB Atlas MCP connector works (read-only queries, index and access-list inspection).
+
+## BI Portfolio (`app/bi_estate.py`, `frontend/src/pages/BIPortfolioPage.tsx`)
+- Inventory: the workbook's 360 assets, the 3 app employee reports (BR-*, owner = KPI steward) and every dashboard built in Ask (creator from `created_by`, captured at build; owner Unassigned until the steward assigns one). Nothing is written back to the workbook.
+- Dates keep their precision (day from the workbook, timestamp from the app). Refresh last success is Unknown: the workbook has no such field. Imported usage (Asset_Usage) and AnalytIQ opens are always shown apart.
+- Findings: needs an owner, refresh issue, definition conflict (`definition_conflict` KPIs only; duplicate candidates and local variants are weaker context), scope mismatch (SCOPE-1, report scope vs its model via Markets), consolidation candidate (PAIR-1 v1: same product and market, at least 2 shared canonical approved KPI IDs; 2 pairs in this workbook), marked for retirement, source date anomaly.
+- Owner reviews: one case per pair (A/B and B/A are the same case), each owner responds only for the report they actively own (one person owning both answers once), the steward decides keep both / remediate / consolidation plan / dismiss with a reason. Changed evidence must be acknowledged. Closed cases stay as history; a new review on the pair is the next generation. Decisions are recorded only, never executed.
+- Identity: demo personas resolved on the server from the `X-AnalytIQ-Actor` header (`DEMO-BI-STEWARD`, `DEMO-EMPLOYEE`, active owner IDs). Not a sign-in; production needs the company's identity provider.
+- Collections: `bi_open_events`, `bi_owner_events`, `bi_cases`, `bi_case_events` (append-only, unique `_id`).
 
 ## Request triage and vector search (`app/triage.py`, `app/vectors.py`)
 - Business_Requests urgency/status labels are not predictable from text (all 10 texts have mixed labels; best possible 54% vs 52% majority), so no classifier.
@@ -185,7 +200,7 @@ Every option serves frontend and API from one address (no CORS, no `VITE_API_BAS
 cd backend && python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
-pytest                 # 249 tests, offline (mock model, mongomock): decision rules, agents, triage and vectors, briefings, dashboards, register, API flows
+pytest                 # 263 tests, offline (mock model, mongomock): decision rules, agents, triage and vectors, briefings, dashboards, register, API flows
 python -m app.load_datapack     # load catalog into MongoDB (needs MONGODB_URI)
 
 # frontend (proxies /api to :8000)
@@ -217,5 +232,6 @@ docker compose up --build        # http://localhost:5173
 - [x] SinceAI synthetic workbook loaded into the catalog
 - [x] Follow-up actions, team briefings, BI report register, owner hand-off, in-app dashboard builder (PR #3, PR #4)
 - [x] Live deployment: Cloudflare Worker (Free) + Azure Container Apps, release `8545d81`
+- [x] BI Portfolio for the BI department head (`/bi-estate`), app renamed to AnalytIQ intelligence
 - [ ] Automatic releases: add the five GitHub secrets and fix the managed identity's role assignment (see Deployment)
 - [ ] Validate generated PBIP in Power BI Desktop (PBIP generation is no longer in the Ask flow)

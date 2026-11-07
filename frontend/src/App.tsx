@@ -8,6 +8,7 @@ import { SimulatorPage } from "./pages/SimulatorPage";
 const BriefingsPage = lazy(() => import("./pages/BriefingsPage").then(({ BriefingsPage }) => ({ default: BriefingsPage })));
 
 const SavedDashboardPage = lazy(() => import("./pages/SavedDashboardPage").then(({ SavedDashboardPage }) => ({ default: SavedDashboardPage })));
+const BIPortfolioPage = lazy(() => import("./pages/BIPortfolioPage").then(({ BIPortfolioPage }) => ({ default: BIPortfolioPage })));
 const WorkbookViewPage = lazy(() => import("./pages/SavedDashboardPage").then(({ WorkbookViewPage }) => ({ default: WorkbookViewPage })));
 
 type Route = { page: Page; ids: string[] };
@@ -17,6 +18,8 @@ const routeFromLocation = (): Route => {
   if (dashboard) return { page: "dashboard", ids: [dashboard[1]] };
   const workbook = /^\/workbook-view\/([\w-]+)\/([\w-]+)$/.exec(path);
   if (workbook) return { page: "workbook", ids: [workbook[1], workbook[2]] };
+  const portfolio = /^\/bi-estate(?:\/compare\/([\w-]+)\/([\w-]+)|\/([\w-]+))?$/.exec(path);
+  if (portfolio) return { page: "bi-estate", ids: portfolio[1] ? ["compare", portfolio[1], portfolio[2]] : portfolio[3] ? [portfolio[3]] : [] };
   if (path === "/cala-graph" || path === "/simulator" || path === "/briefings") return { page: path.slice(1) as Page, ids: [] };
   return { page: window.location.hash.startsWith("#explorer") ? "explorer" : "ask", ids: [] };
 };
@@ -44,9 +47,9 @@ export default function App() {
     };
   }, []);
   useEffect(() => {
-    if (page === "ask") document.title = "Analytics Manager";
-    if (page === "simulator") document.title = "Conversation simulation · Analytics Manager";
-    if (page === "briefings") document.title = "Team briefings · Analytics Manager";
+    if (page === "ask") document.title = "AnalytIQ intelligence";
+    if (page === "simulator") document.title = "Conversation simulation · AnalytIQ intelligence";
+    if (page === "briefings") document.title = "Team briefings · AnalytIQ intelligence";
   }, [page]);
   return (
     <div className={`app app-${page}`}>
@@ -61,6 +64,7 @@ export default function App() {
           <SavedDashboardPage key={ids[0]} id={ids[0]}/></Suspense>}
         {page === "workbook" && <Suspense fallback={<main aria-busy="true">Opening verified workbook view…</main>}>
           <WorkbookViewPage key={ids.join("/")} conversationId={ids[0]} runId={ids[1]}/></Suspense>}
+        {page === "bi-estate" && <Suspense fallback={<main className="page" aria-busy="true">Loading the BI Portfolio…</main>}><BIPortfolioPage ids={ids} /></Suspense>}
         {page === "briefings" && <Suspense fallback={<main className="page" aria-busy="true">Loading team briefings…</main>}><BriefingsPage /></Suspense>}
       </div>
     </div>

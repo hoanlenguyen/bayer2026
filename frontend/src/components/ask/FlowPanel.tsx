@@ -219,7 +219,7 @@ export function FlowPanel({ stages, decision, health, catalog, groups, focusGrou
 
         {groups ? (
           groups.length === 0 ? (
-            <p className="flow-groups-empty">Each answer from Analytics Manager will show its steps here.</p>
+            <p className="flow-groups-empty">Each answer from AnalytIQ will show its steps here.</p>
           ) : (
             <ol className="flow-groups">
               {groups.map((g, i) => {
