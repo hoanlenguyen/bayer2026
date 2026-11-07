@@ -5,7 +5,9 @@
   "scripts": {
     "build:frontend": "npm --prefix ../../frontend ci && npm --prefix ../../frontend run build",
     "deploy": "npm run build:frontend && wrangler deploy",
-    "logs": "wrangler tail"
+    "logs": "wrangler tail",
+    "deploy:free": "npm run build:frontend && wrangler deploy -c wrangler.free.jsonc",
+    "dev:free": "wrangler dev -c wrangler.free.jsonc"
   },
   "dependencies": {
     "@cloudflare/containers": "0.3.7"
