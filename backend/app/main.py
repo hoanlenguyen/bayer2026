@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +18,7 @@ from .decider import get_decider
 from .llm import get_llm
 from .pipeline import STAGES, Pipeline
 from .settings import settings
+from .simulator import turn
 from .store import create_store
 
 logging.basicConfig(level=logging.INFO)
@@ -57,6 +58,20 @@ class ClassifyRequest(BaseModel):
     request: str = Field(max_length=2000)
 
 
+class SimulatorMessage(BaseModel):
+    speaker: Literal["A", "B", "C"]
+    text: str = Field(max_length=2000)
+    label: str | None = None        # what the gate decided about this sentence
+    kind: str | None = None         # C only: "question" or "answer"
+    answer_key: str | None = None   # C only: lets the system avoid repeating itself
+
+
+class SimulatorTurn(BaseModel):
+    speaker: Literal["A", "B"]
+    text: str = Field(max_length=2000)
+    history: list[SimulatorMessage] = Field(default_factory=list, max_length=200)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     store = await create_store()
@@ -90,7 +105,7 @@ def stream(events: AsyncIterator[dict[str, Any]]) -> StreamingResponse:
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
     p = pipeline()
-    return {"ok": True, "provider": p.llm.name, "store": p.store.name,
+    return {"ok": True, "provider": p.llm.name, "store": p.store.name, "jev": p.gate_agent.jev_on(),
             "models": {"reasoning": settings.model_reasoning, "fast": settings.model_fast} if p.llm.name == "openai" else None}
 
 
@@ -253,6 +268,15 @@ async def classify(req: ClassifyRequest) -> dict[str, Any]:
     if not text:
         raise HTTPException(400, "Send a business request.")
     return await classify_request(text, pipeline().vectors, pipeline().decider)
+
+
+@app.post("/api/simulator/turn")
+async def simulator_turn(req: SimulatorTurn) -> StreamingResponse:
+    """One sentence of the chat simulator. Streams what was decided, and C's message if it speaks. Saves nothing."""
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(400, "Send a sentence.")
+    return stream(turn(pipeline(), req.speaker, text, [m.model_dump() for m in req.history]))
 
 
 @app.get("/api/conversations")

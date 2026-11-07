@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CatalogMeta, DecisionType, Health, StageEvent, StageId } from "../../api/types";
 import { Icon } from "../Icon";
 import { RecommendationChip } from "./RecommendationChip";
@@ -77,17 +77,87 @@ function summaryFor(ev: StageEvent | undefined, technical: boolean): string | nu
   return ev.summary;
 }
 
+
+/** The steps of one request, each opening to its evidence. */
+function StepList({ stages, decision, catalog, technical }: { stages: Partial<Record<StageId, StageEvent>>; decision: DecisionType | null; catalog: CatalogMeta | null; technical: boolean }) {
+  const triage = currentTriage(stages);
+  const order = stagesFor(decision, (stages.actions?.data?.proposals?.length ?? 0) > 0);
+  const [open, setOpen] = useState<Set<StageId>>(new Set());
+  const toggle = (s: StageId) => setOpen((prev) => {
+    const next = new Set(prev);
+    if (next.has(s)) next.delete(s); else next.add(s);
+    return next;
+  });
+  return (
+    <ol className="flow-steps">
+      {order.map((id) => {
+        const ev = stages[id];
+        const status = ev?.status ?? "pending";
+        const isOpen = open.has(id) && !!ev?.data;
+        const summary = summaryFor(ev, technical);
+        const chips = recommendationChips(ev);
+        return (
+          <li key={id} className={`flow-step st-${status}`}>
+            <span className="flow-icon" aria-hidden="true">
+              {status === "done" && <Icon name="check" size={12} />}
+              {status === "rejected" && <Icon name="close" size={12} />}
+            </span>
+            <div className="flow-body">
+              <button
+                type="button"
+                className="flow-title"
+                onClick={() => ev?.data && toggle(id)}
+                aria-expanded={ev?.data ? isOpen : undefined}
+                disabled={!ev?.data}
+              >
+                <span className="flow-name">{TITLES[id]}</span>
+                {technical && <span className={`kind ${STAGE_KIND[id].cls}`}>{STAGE_KIND[id].label}</span>}
+                {ev?.data && <span className={`flow-chevron${isOpen ? " open" : ""}`}><Icon name="chevron" size={14} /></span>}
+              </button>
+              {summary && !chips && <p className="flow-summary">{summary}</p>}
+              {chips && <div className="rec-chips">{chips}</div>}
+              {id === "intent" && triage &&<div className="flow-tags"><TriageTags triage={triage} compact only="urgency" /></div>}
+              {id === "decision" && status === "done" && triage?.status && <div className="flow-tags"><TriageTags triage={triage} compact only="status" /></div>}
+              {status === "pending" && <span className="sr-only">Not started</span>}
+              {isOpen && <div className="flow-detail"><StageDetail stage={id} data={ev!.data} catalog={catalog} technical={technical} /></div>}
+            </div>
+          </li>
+        );
+      })}
+      {!decision && (
+        <li className="flow-step st-pending flow-branch">
+          <span className="flow-icon" aria-hidden="true" />
+          <div className="flow-body">
+            <span className="flow-name">Then: a recommendation with its evidence</span>
+          </div>
+        </li>
+      )}
+    </ol>
+  );
+}
+
+export interface FlowGroup {
+  key: string;
+  title: string;
+  stages: Partial<Record<StageId, StageEvent>>;
+  decision: DecisionType | null;
+}
+
 interface Props {
   stages: Partial<Record<StageId, StageEvent>>;
   decision: DecisionType | null;
   health: Health | null;
   catalog: CatalogMeta | null;
+  /** Several requests, one accordion each, numbered (1), (2)... Used by the conversation simulation. */
+  groups?: FlowGroup[];
+  /** The group to open and scroll to, such as the newest answer. */
+  focusGroup?: string | null;
+  /** Changes on every request to focus, so asking again reopens a group someone closed. */
+  focusTick?: number;
 }
 
-export function FlowPanel({ stages, decision, health, catalog }: Props) {
-  const triage = currentTriage(stages);
-  const order = stagesFor(decision, (stages.actions?.data?.proposals?.length ?? 0) > 0);
-  const [open, setOpen] = useState<Set<StageId>>(new Set());
+export function FlowPanel({ stages, decision, health, catalog, groups, focusGroup, focusTick }: Props) {
+  const [openGroup, setOpenGroup] = useState<string | null>(null); // one at a time
   const [technical, setTechnical] = useState(readTechnical);
   const [collapsed, setCollapsed] = useState(readCollapsed);
 
@@ -98,11 +168,14 @@ export function FlowPanel({ stages, decision, health, catalog }: Props) {
     });
   };
 
-  const toggle = (s: StageId) => setOpen((prev) => {
-    const next = new Set(prev);
-    if (next.has(s)) next.delete(s); else next.add(s);
-    return next;
-  });
+  const toggleGroup = (key: string) => setOpenGroup((prev) => (prev === key ? null : key));
+
+  useEffect(() => {
+    if (!focusGroup) return;
+    setCollapsed(false); // a hidden panel can't show what was asked for
+    setOpenGroup(focusGroup);
+    requestAnimationFrame(() => document.getElementById(`flow-group-${focusGroup}`)?.scrollIntoView({ block: "start", behavior: "smooth" }));
+  }, [focusGroup, focusTick]);
 
   const toggleTechnical = () => {
     setTechnical((on) => {
@@ -135,50 +208,30 @@ export function FlowPanel({ stages, decision, health, catalog }: Props) {
           </div>
         )}
 
-        <ol className="flow-steps">
-          {order.map((id) => {
-            const ev = stages[id];
-            const status = ev?.status ?? "pending";
-            const isOpen = open.has(id) && !!ev?.data;
-            const summary = summaryFor(ev, technical);
-            const chips = recommendationChips(ev);
-            return (
-              <li key={id} className={`flow-step st-${status}`}>
-                <span className="flow-icon" aria-hidden="true">
-                  {status === "done" && <Icon name="check" size={12} />}
-                  {status === "rejected" && <Icon name="close" size={12} />}
-                </span>
-                <div className="flow-body">
-                  <button
-                    type="button"
-                    className="flow-title"
-                    onClick={() => ev?.data && toggle(id)}
-                    aria-expanded={ev?.data ? isOpen : undefined}
-                    disabled={!ev?.data}
-                  >
-                    <span className="flow-name">{TITLES[id]}</span>
-                    {technical && <span className={`kind ${STAGE_KIND[id].cls}`}>{STAGE_KIND[id].label}</span>}
-                    {ev?.data && <span className={`flow-chevron${isOpen ? " open" : ""}`}><Icon name="chevron" size={14} /></span>}
-                  </button>
-                  {summary && !chips && <p className="flow-summary">{summary}</p>}
-                  {chips && <div className="rec-chips">{chips}</div>}
-                  {id === "intent" && triage &&<div className="flow-tags"><TriageTags triage={triage} compact only="urgency" /></div>}
-                  {id === "decision" && status === "done" && triage?.status && <div className="flow-tags"><TriageTags triage={triage} compact only="status" /></div>}
-                  {status === "pending" && <span className="sr-only">Not started</span>}
-                  {isOpen && <div className="flow-detail"><StageDetail stage={id} data={ev!.data} catalog={catalog} technical={technical} /></div>}
-                </div>
-              </li>
-            );
-          })}
-          {!decision && (
-            <li className="flow-step st-pending flow-branch">
-              <span className="flow-icon" aria-hidden="true" />
-              <div className="flow-body">
-                <span className="flow-name">Then: a recommendation with its evidence</span>
-              </div>
-            </li>
-          )}
-        </ol>
+        {groups ? (
+          groups.length === 0 ? (
+            <p className="flow-groups-empty">Each answer from Analytics Manager will show its steps here.</p>
+          ) : (
+            <ol className="flow-groups">
+              {groups.map((g, i) => {
+                const isOpen = openGroup === g.key;
+                return (
+                  <li key={g.key} id={`flow-group-${g.key}`} className="flow-group">
+                    <button type="button" className="flow-group-head" aria-expanded={isOpen} onClick={() => toggleGroup(g.key)}>
+                      <span className="flow-group-num">({i + 1})</span>
+                      <span className="flow-group-title">{g.title}</span>
+                      {g.decision && <RecommendationChip value={g.decision} />}
+                      <span className={`flow-chevron${isOpen ? " open" : ""}`}><Icon name="chevron" size={14} /></span>
+                    </button>
+                    {isOpen && <StepList stages={g.stages} decision={g.decision} catalog={catalog} technical={technical} />}
+                  </li>
+                );
+              })}
+            </ol>
+          )
+        ) : (
+          <StepList stages={stages} decision={decision} catalog={catalog} technical={technical} />
+        )}
 
         {technical && (
           <div className="flow-legend" aria-label="Legend">

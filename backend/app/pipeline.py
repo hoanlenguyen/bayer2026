@@ -18,6 +18,7 @@ from typing import Any, AsyncIterator
 from . import actions as act
 from . import catalog as cat
 from .agents import AgentRun, IntentAgent, RelevanceAgent
+from .agents.gate import ConversationGateAgent
 from .agents.intent import sanitize_intent
 from .agents.relevance import EXAMPLES, retry_message
 from .decision import THRESHOLDS, Decision, data_availability, decide, rank_candidates
@@ -69,6 +70,50 @@ def label_list(ids: list[str], kind: str) -> str:
     return ", ".join(src[i]["name"] for i in ids if i in src)
 
 
+ANALYSIS_STAGES = (("kpis", 2, "Resolving metric definitions"), ("discovery", 3, "Searching the catalog"),
+                   ("lineage", 4, "Tracing data dependencies"), ("governance", 5, "Checking trust and ownership"),
+                   ("migration", 6, "Checking for Tableau reports"))
+
+
+def intent_summary(intent: dict[str, Any]) -> str:
+    scope = ", ".join(v for vals in (intent.get("filters") or {}).values() for v in vals) or ("global" if intent.get("scope_global") else "")
+    return (f"{label_list(intent['measures'], 'm') or 'No governed KPIs'}"
+            f"{' by ' + label_list(intent['dimensions'], 'd') if intent['dimensions'] else ''}"
+            f"{' · ' + scope if scope else ''}{' · Tableau migration' if intent.get('migration') else ''}")
+
+
+def analyse(intent: dict[str, Any]) -> dict[str, Any]:
+    """Steps 2 to 6 and the recommendation for a complete intent. Pure: reads the catalog, saves nothing.
+    Shared by the Ask flow and the conversation simulation, so both show the same evidence."""
+    candidates = rank_candidates(intent, cat.CATALOG)
+    availability = data_availability(intent, cat.CATALOG)
+    result = decide(candidates, availability, intent, cat.CATALOG)
+    tags = tags_for_intent(intent)
+    steps = {s["step"]: s for s in tags["steps"]}
+    shown = candidates[: THRESHOLDS["max_candidates_shown"]]
+    extra = {
+        "discovery": {"candidates": [c.to_dict() for c in shown], "total_candidates": len(candidates),
+                      "in_scope": sum(1 for c in candidates if c.scope_score >= THRESHOLDS["min_scope"]),
+                      "availability": availability, "searched": len(cat.CATALOG["assets"])},
+        "governance": {"candidates": [{"asset_id": c.asset_id, "name": c.name, "governance": c.governance,
+                                       "checks": [vars(k) for k in c.checks], "gates_failed": c.gates_failed} for c in shown]},
+    }
+    stages = {stage: {"running": running, "summary": steps[n]["summary"], "data": {**extra.get(stage, {}), "step": steps[n]}}
+              for stage, n, running in ANALYSIS_STAGES}
+
+    decision = result.to_dict()
+    decision["availability"] = availability
+    decision["recommendation"] = tags["recommendation"]
+    # A new build has no report yet: the shared model it would sit on, and whoever owns that, is who to talk to.
+    target_model = cat.model_by_id(result.target_model_id) if result.decision == Decision.NEW_BUILD else None
+    if target_model:
+        decision["target_model"] = {k: target_model.get(k) for k in ("id", "name", "owner", "owner_status")}
+    # No preview for a country without data: the rows would be other countries' numbers.
+    if result.decision not in (Decision.NOT_FEASIBLE, Decision.RETIRE) and not intent.get("other_markets"):
+        decision["preview"] = facts_preview(intent)
+    return {"result": result, "tags": tags, "stages": stages, "decision": decision}
+
+
 class Pipeline:
     def __init__(self, store: Store, llm: LLM, decider: Decider | None = None) -> None:
         self.store = store
@@ -76,6 +121,7 @@ class Pipeline:
         self.decider = decider or Decider()
         self.relevance_agent = RelevanceAgent(llm, self.decider)
         self.intent_agent = IntentAgent(llm, self.decider)
+        self.gate_agent = ConversationGateAgent(llm, self.decider)
         # Atlas Vector Search when the store is MongoDB and the index exists; in-memory otherwise.
         self.vectors = VectorStore(get_embedder(llm), getattr(store, "db", None))
 
@@ -276,11 +322,7 @@ class Pipeline:
             await self._register_request(conv, run, intent)
             tri = await self._triage(conv, "new")
             tri_public = {**tri, "status": None}  # status is shown from the decision step on
-            scope = ", ".join(v for vals in (intent.get("filters") or {}).values() for v in vals) or ("global" if intent.get("scope_global") else "")
-            summary = (f"{label_list(intent['measures'], 'm') or 'No governed KPIs'}"
-                       f"{' by ' + label_list(intent['dimensions'], 'd') if intent['dimensions'] else ''}"
-                       f"{' · ' + scope if scope else ''}{' · Tableau migration' if intent.get('migration') else ''}")
-            yield self._stage(conv, "intent", "done", summary, {**public(intent), "triage": tri_public,
+            yield self._stage(conv, "intent", "done", intent_summary(intent), {**public(intent), "triage": tri_public,
                                                                  "classification": classification(intent), "agent": agent_run.trace()})
             await self._pause()
 
@@ -293,52 +335,19 @@ class Pipeline:
     # ------------------------------------------------------------ the analysis steps → recommendation
     async def _plan(self, conv: dict[str, Any]) -> AsyncIterator[Event]:
         intent = conv["intent"]
-        candidates = rank_candidates(intent, cat.CATALOG)
-        availability = data_availability(intent, cat.CATALOG)
-        result = decide(candidates, availability, intent, cat.CATALOG)
-        tags = tags_for_intent(intent)
-        steps = {s["step"]: s for s in tags["steps"]}
-        shown = candidates[: THRESHOLDS["max_candidates_shown"]]
-        in_scope = sum(1 for c in candidates if c.scope_score >= THRESHOLDS["min_scope"])
+        plan = analyse(intent)
+        result, tags, decision = plan["result"], plan["tags"], plan["decision"]
+        missing = decision["availability"]["missing_terms"]
 
-        async def step(stage: str, number: int, running: str, data: dict[str, Any] | None = None) -> AsyncIterator[Event]:
-            yield self._stage(conv, stage, "running", running)
+        # ---- 2 to 6: KPI_Catalog, Analytics_Assets, Semantic_Models, Governance_Signals, Migration_Backlog
+        for stage, _n, _running in ANALYSIS_STAGES:
+            s = plan["stages"][stage]
+            yield self._stage(conv, stage, "running", s["running"])
             await self._pause()
-            yield self._stage(conv, stage, "done", steps[number]["summary"], {**(data or {}), "step": steps[number]})
+            yield self._stage(conv, stage, "done", s["summary"], s["data"])
             await self._pause()
-
-        # ---- 2. KPI_Catalog
-        async for ev in step("kpis", 2, "Resolving metric definitions"):
-            yield ev
-        # ---- 3. Analytics_Assets + Asset_Usage
-        async for ev in step("discovery", 3, "Searching the catalog", {
-                "candidates": [c.to_dict() for c in shown], "total_candidates": len(candidates), "in_scope": in_scope,
-                "availability": availability, "searched": len(cat.CATALOG["assets"])}):
-            yield ev
-        # ---- 4. Semantic_Models + Lineage_Edges
-        async for ev in step("lineage", 4, "Tracing data dependencies"):
-            yield ev
-        # ---- 5. Governance_Signals + Data_Quality
-        async for ev in step("governance", 5, "Checking trust and ownership", {
-                "candidates": [{"asset_id": c.asset_id, "name": c.name, "governance": c.governance,
-                                "checks": [vars(k) for k in c.checks], "gates_failed": c.gates_failed} for c in shown]}):
-            yield ev
-        # ---- 6. Migration_Backlog
-        async for ev in step("migration", 6, "Checking for Tableau reports"):
-            yield ev
 
         # ---- Recommendation (deterministic)
-        decision = result.to_dict()
-        missing = availability["missing_terms"]
-        decision["availability"] = availability
-        decision["recommendation"] = tags["recommendation"]
-        # A new build has no report yet: the shared model it would sit on, and whoever owns that, is who to talk to.
-        target_model = cat.model_by_id(result.target_model_id) if result.decision == Decision.NEW_BUILD else None
-        if target_model:
-            decision["target_model"] = {k: target_model.get(k) for k in ("id", "name", "owner", "owner_status")}
-        # No preview for a country without data: the rows would be other countries' numbers.
-        if result.decision not in (Decision.NOT_FEASIBLE, Decision.RETIRE) and not intent.get("other_markets"):
-            decision["preview"] = facts_preview(intent)
         # Intent is clear and a recommendation is made: the request is triaged.
         decision["triage"] = await self._triage(conv, "triaged")
         conv["plan"] = {"decision": decision}

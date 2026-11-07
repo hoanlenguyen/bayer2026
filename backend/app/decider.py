@@ -14,6 +14,8 @@ from .settings import settings
 log = logging.getLogger(__name__)
 
 PHASES = {"relevance", "kpis", "urgency"}
+ALWAYS_ON = {"conversation"}  # the chat simulator exists to use Jev, so a key is enough. Ask stays under JEV_PHASES
+JEV_PRICE = 0.042 / 1_000_000  # per input token; output is free (docs.typesafe.ai/models)
 
 # How sure Jev must be before its answer is used. Change them here only.
 JEV_THRESHOLDS = {
@@ -22,7 +24,15 @@ JEV_THRESHOLDS = {
     "yes": 0.70,         # a KPI, breakdown or migration is being asked for
     "no": 0.30,          # it is not. Anything between is unsure, and goes to GPT
     "raise_urgency": 0.80,
+    "speak": 0.70,       # the chat simulator steps in
+    "stay_quiet": 0.30,  # it does not. Anything between is unsure, and goes to GPT
 }
+
+
+def jev_cost(usage: dict[str, Any] | None) -> float:
+    """What Jev charged for these calls, in dollars."""
+    by_model = (usage or {}).get("by_model") or {}
+    return sum(r["input_tokens"] for m, r in by_model.items() if m.startswith("jev")) * JEV_PRICE
 
 
 class Decider:
@@ -47,11 +57,10 @@ def get_decider() -> Decider:
     phases = settings.jev_phases & PHASES
     for unknown in sorted(settings.jev_phases - PHASES):
         log.warning("JEV_PHASES: unknown phase %s", unknown)
-    if not phases:
-        return Decider()
     if not settings.typesafe_api_key:
-        log.warning("JEV_PHASES is set but TYPESAFE_API_KEY is not: Jev stays off.")
+        if phases:
+            log.warning("JEV_PHASES is set but TYPESAFE_API_KEY is not: Jev stays off.")
         return Decider()
     from typesafe_sdk import AsyncTypeSafeClient
 
-    return Decider(AsyncTypeSafeClient(api_key=settings.typesafe_api_key), phases)
+    return Decider(AsyncTypeSafeClient(api_key=settings.typesafe_api_key), phases | ALWAYS_ON)

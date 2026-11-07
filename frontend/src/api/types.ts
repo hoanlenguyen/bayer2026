@@ -58,6 +58,7 @@ export interface Health {
   provider: "mock" | "openai";
   store: "memory" | "mongodb";
   models: { reasoning: string; fast: string } | null;
+  jev?: boolean;
 }
 
 export interface CatalogMeta {
@@ -95,4 +96,64 @@ export interface ConversationDetail extends ConversationSummary {
   state: string;
   messages: { role: "user" | "assistant"; content: string; kind?: "question" | "result" | "retry"; suggestions?: string[] }[];
   runs: { events: (StageEvent | { type: "user_message" | "message" | "done" })[] }[];
+}
+
+// ---- Chat simulator (POST /api/simulator/turn)
+export type GateLabel = "off_topic" | "business_talk" | "needs_decision" | "needs_context" | "already_answered";
+export type DecidedBy = "jev" | "llm" | "rules";
+
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  calls: number;
+}
+
+export interface SimulatorRecommendation {
+  value: string;
+  label: string;
+  reason: string;
+  rule: string;
+  rules_applied: string[];
+  evidence: { step: number; task: string; summary: string }[];
+}
+
+export interface SimulatorReport {
+  id: string;
+  name: string;
+  platform: string;
+  workspace: string | null;
+  owner: string | null;
+}
+
+export type SimulatorEvent =
+  | { type: "gate"; label: GateLabel; confidence: number | null; reason: string; decided_by: DecidedBy; model: string; ms: number; usage: TokenUsage | null; cost: number; fallback_reason: string | null; jev_on: boolean }
+  | { type: "searching" }
+  | { type: "reply"; kind: "answer"; text: string; usage: TokenUsage | null; answer_key?: string; decision?: string; recommendation?: SimulatorRecommendation; report?: SimulatorReport | null; stages?: StageEvent[] }
+  | { type: "needs_context"; usage: TokenUsage | null }
+  | { type: "already_answered"; answer_key: string; usage: TokenUsage | null }
+  | { type: "done" }
+  | { type: "error"; message: string };
+
+/** One line of the chat. A and B carry what was decided about them; C carries its answer. */
+export interface SimulatorMessage {
+  id: number;
+  speaker: "A" | "B" | "C";
+  text: string;
+  label?: GateLabel;
+  confidence?: number | null;
+  ms?: number;
+  decided_by?: DecidedBy;
+  usage?: TokenUsage | null;
+  search_usage?: TokenUsage | null;
+  cost?: number;
+  searching?: boolean;
+  failed?: boolean;
+  kind?: "answer";
+  answer_key?: string;
+  decision?: string;
+  recommendation?: SimulatorRecommendation;
+  report?: SimulatorReport | null;
+  stages?: StageEvent[];
+  /** Analytics Manager only: the sentence it answered, used as the title of its steps. */
+  request?: string;
 }

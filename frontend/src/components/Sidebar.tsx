@@ -2,7 +2,7 @@ import { useEffect, useState, type MouseEvent } from "react";
 import { openConversation, removeConversation, useAnswerInProgress, useConversations, useCurrentConversation } from "../lib/conversations";
 import { Icon } from "./Icon";
 
-export type Page = "ask" | "explorer" | "cala-graph";
+export type Page = "ask" | "explorer" | "cala-graph" | "simulator";
 
 /** Moves between / and /cala-graph without reloading, so the sidebar stays on screen and nothing redraws. */
 function navigate(e: MouseEvent<HTMLAnchorElement>) {
@@ -117,9 +117,9 @@ export function Sidebar({ page }: { page: Page }) {
       </div>
       <nav className="app-nav" aria-label="Main">
         <a href="/#ask" onClick={navigate} aria-label="Ask" title={tip("Ask")} aria-current={page === "ask" ? "page" : undefined}><Icon name="ask" /><span>Ask</span></a>
+        <a href="/simulator" onClick={navigate} aria-label="Conversation simulation" title={tip("Conversation simulation")} aria-current={page === "simulator" ? "page" : undefined}><Icon name="chat" /><span><span className="nav-extra">Conversation </span>Simulation</span></a>
         <a href="/#explorer" onClick={navigate} aria-label="Estate Explorer" title={tip("Estate Explorer")} aria-current={page === "explorer" ? "page" : undefined}><Icon name="estate" /><span><span className="nav-extra">Estate </span>Explorer</span></a>
-        <a href="/cala-graph" onClick={navigate} aria-label="Knowledge Graph" title={tip("Knowledge Graph")} aria-current={page === "cala-graph" ? "page" : undefined}><Icon name="graph" /><span><span className="nav-extra">Knowledge </span>Graph</span></a>
-      </nav>
+        <a href="/cala-graph" onClick={navigate} aria-label="Knowledge Graph" title={tip("Knowledge Graph")} aria-current={page === "cala-graph" ? "page" : undefined}><Icon name="graph" /><span><span className="nav-extra">Knowledge </span>Graph</span></a>      </nav>
       {!collapsed && <HistoryList page={page} />}
       <p className="sample-note" title="All data in this app is fictional sample data">
         <span className="sample-tag">Sample<span className="sample-extra"> data</span></span>

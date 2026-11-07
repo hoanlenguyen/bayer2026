@@ -21,7 +21,7 @@ export const api = {
 };
 
 /** POST a JSON body and read the Server-Sent Events stream it returns. */
-export async function streamPost(path: string, body: unknown, onEvent: (e: PipelineEvent) => void): Promise<void> {
+export async function streamPost<E = PipelineEvent>(path: string, body: unknown, onEvent: (e: E) => void): Promise<void> {
   const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -43,7 +43,7 @@ export async function streamPost(path: string, body: unknown, onEvent: (e: Pipel
       const block = buffer.slice(0, cut);
       buffer = buffer.slice(cut + 2);
       const data = block.split("\n").filter((l) => l.startsWith("data: ")).map((l) => l.slice(6)).join("\n");
-      if (data) onEvent(JSON.parse(data) as PipelineEvent);
+      if (data) onEvent(JSON.parse(data) as E);
     }
   }
 }

@@ -97,7 +97,8 @@ def tags_for_intent(intent: dict[str, Any], matched_by: dict[str, dict[str, Any]
     # A closest report is only worth naming when it is the one the answer refers to.
     report = None
     if c and status != "none":
-        report = {"id": c.asset_id, "name": c.name, "platform": c.platform, "owner": (cat.asset_by_id(c.asset_id) or {}).get("owner"),
+        asset = cat.asset_by_id(c.asset_id) or {}
+        report = {"id": c.asset_id, "name": c.name, "platform": c.platform, "workspace": asset.get("workspace"), "owner": asset.get("owner"),
                   "coverage": c.coverage, "governance": c.governance}
     market = ([C["markets"][m]["name"] for m in filters.get("market", []) if m in C["markets"]] + list(filters.get("region", []))
               + list(intent.get("other_markets") or []))
@@ -123,6 +124,17 @@ def tags_for_intent(intent: dict[str, Any], matched_by: dict[str, dict[str, Any]
 
 
 async def classify_request(text: str, store: VectorStore, decider: Any | None = None) -> dict[str, Any]:
+    found = await read_request(text, store, decider)
+    return {
+        "request": text,
+        "urgency": found["urgency"],
+        **tags_for_intent(found["intent"], found["matched_by"]),
+        "retrieval": found["retrieval"],
+    }
+
+
+async def read_request(text: str, store: VectorStore, decider: Any | None = None) -> dict[str, Any]:
+    """The intent behind a request, from its words and the vector store. No chat model; nothing saved."""
     C = cat.CATALOG
     low = text.lower()
     urgency, retrieval_error = await urgency_for(text, store, decider)
@@ -149,10 +161,9 @@ async def classify_request(text: str, store: VectorStore, decider: Any | None = 
               "other_markets": other_markets(text), "scope_global": "global" in low, "migration": {"from": "Tableau"} if "tableau" in low else None,
               "unmatched_terms": [t for t in OUT_OF_SCOPE if t in low]}
 
+    intent["urgency"] = {k: urgency.get(k) for k in ("value", "source", "evidence")}
     return {
-        "request": text,
-        "urgency": urgency,
-        **tags_for_intent(intent, matched_by),
+        "intent": intent, "matched_by": matched_by, "urgency": urgency,
         "retrieval": {"embedder": store.embedder.name, "model": store.embedder.model, "search": store.backend.get("requests", "memory"),
                       **({"error": retrieval_error} if retrieval_error else {})},
     }
