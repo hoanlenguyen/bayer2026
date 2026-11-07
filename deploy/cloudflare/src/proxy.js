@@ -1,6 +1,6 @@
 // Free-plan Worker: serves the React build and forwards /api/* to a backend running elsewhere,
-// usually your own machine exposed through a Cloudflare Tunnel (cloudflared).
-// BACKEND_URL is set in wrangler.free.jsonc or with `--var BACKEND_URL:https://....trycloudflare.com`.
+// on Azure Container Apps (docs/DEPLOY_FREE.md).
+// BACKEND_URL is set in wrangler.free.jsonc.
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);

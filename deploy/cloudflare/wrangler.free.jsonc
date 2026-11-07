@@ -1,6 +1,6 @@
 {
-  // Workers Free plan: frontend on Cloudflare, backend reached through a tunnel. No Containers (paid only).
-  // Deploy:  npm run deploy:free -- --var BACKEND_URL:https://<your-tunnel>.trycloudflare.com
+  // Workers Free plan: frontend on Cloudflare, backend on Azure Container Apps. No Containers (paid only).
+  // Deploy:  npm run deploy:free   (in deploy/cloudflare)
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "analytics-manager",
   "main": "src/proxy.js",
@@ -13,7 +13,7 @@
     "run_worker_first": ["/api/*"]
   },
   "vars": {
-    // Replaced on deploy with --var. Must be the public HTTPS address of the backend (no trailing path).
-    "BACKEND_URL": ""
+    // Azure Container Apps backend (docs/DEPLOY_FREE.md). Public HTTPS address, no trailing slash or path.
+    "BACKEND_URL": "https://analytics-manager-api.greensea-e888302f.francecentral.azurecontainerapps.io"
   }
 }
