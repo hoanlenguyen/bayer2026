@@ -19,7 +19,7 @@ An AI workspace that helps a pharma manufacturing plant ask the right business q
 
 ## Processing flow (team design)
 
-The system only recommends. It builds, changes and retires nothing, and there is no approval step: people act on the recommendation.
+The system recommends; people act on the recommendation. It changes and retires no report and publishes nothing to Power BI. The one thing it builds is an in-app dashboard: when the recommendation is a new build and every requested KPI can be calculated from the workbook, the employee reviews a dashboard brief and builds it in Analytics Manager (`app/dashboard_builder.py`). Review, repair and migration stay with the responsible owner, as assignments in the BI report register.
 
 ```
 User request (free text or preset)
@@ -78,13 +78,25 @@ Each agent has `run_llm` (OpenAI) and `run_rules` (offline, deterministic). Same
 
 ```
 frontend/  React + TypeScript + Vite
-  #ask       Ask page: chat, example question chips (each sends its preset), verdict card (scores + approval), "How this was decided" panel
+  #ask       Ask page: chat, example question chips (each sends its preset), verdict card (scores, evidence),
+             "How this was decided" panel, dashboard review and build, owner hand-off; saved dashboards on the start screen
   #explorer  Estate Explorer: entity details + relationship graph ("molecular view"),
              loaded from GET /api/graph (live plant catalog, same governance scoring as the Ask flow)
   /cala-graph  Knowledge graph: full-screen 3D canvas (path route, "Knowledge Graph" in the sidebar), loaded from
              GET /api/graph and grouped by domain (workspace) using the catalog's own links
+  /simulator   Conversation simulation (see Rules above)
+  /briefings   Team briefings (Commercial, Supply) with the Monthly Pulse chart, meeting mode, and the BI report register tab
+  /dashboards/<id>         a saved in-app dashboard (stable URL)
+  /workbook-view/<a>/<b>   verified workbook view behind an employee report
+  Routes other than #ask/#explorer are path routes: hosting must return index.html for unknown paths (SPA fallback).
 backend/   Python 3.12+, FastAPI
-  app/main.py        HTTP API, Server-Sent Events stream of pipeline events
+  app/main.py        HTTP API, Server-Sent Events stream of pipeline events; includes the routers below
+  app/briefings.py, briefing_routes.py, briefing_definitions.py   team briefings from the workbook
+  app/dashboard_intake.py, dashboard_builder.py, dashboard_routes.py   dashboard questions, brief, build, saved dashboards
+  app/employee_report_match.py   matches a request to an existing employee report
+  app/report_register.py   BI report register (owners, revisions, reviewed changes)
+  app/request_handoff.py   assignments from an Ask result to a report owner, with frozen evidence
+  app/steps.py, classify.py, geo.py, decider.py, simulator.py   six analysis steps, /api/v2/classify, country check, Jev, simulator
   app/pipeline.py    orchestrates stages, emits events
   app/agents/        intent, evidence, spec agents + read-only catalog tools
   app/llm.py         OpenAI access: text, JSON and tool-calling loop; "mock" = offline
@@ -109,6 +121,13 @@ backend/   Python 3.12+, FastAPI
 - `GET  /api/graph` – Estate Explorer entities and edges from the live catalog
 - `GET  /api/specs?conversation_id=` – DashboardSpec versions with status (draft / approved / rejected / superseded)
 - `GET  /api/agent-runs?conversation_id=` – audit log of agent runs
+- `GET  /api/briefings/{team}` (`commercial`, `supply`) – the team briefing; `PUT …/selection` pins views; `POST …/actions`, `PATCH …/actions/{id}` – briefing actions
+- `GET/POST /api/conversations/{cid}/runs/{rid}/dashboard`, `…/dashboard/answers`, `…/dashboard/build` – dashboard questions, brief and build for an Ask result
+- `GET  /api/dashboards`, `GET /api/dashboards/{id}` – saved dashboards (`items`, `storage_mode`)
+- `GET  /api/report-register`, `…/titles`, `…/{report_id}`; `POST …/{report_id}/changes` – BI report register and reviewed changes
+- `GET  /api/conversations/{cid}/runs/{rid}/handoff`; `POST/PATCH …/handoff/actions` – owner assignments from a result
+- `GET/POST /api/actions`, `GET/PATCH /api/actions/{id}` – follow-up actions
+- `GET  /api/requests`, `/api/datapack`, `/api/stages` – request queue, workbook summary, flow stage names
 
 ### Models
 - OpenAI GPT-6 family. `MODEL_REASONING` (default `gpt-6-astra`) for discovery reasoning and spec; `MODEL_FAST` (default `gpt-6-luna`) for grill-me and summaries. Verify exact IDs in the OpenAI dashboard.
@@ -121,8 +140,9 @@ backend/   Python 3.12+, FastAPI
 - The catalog lives in MongoDB. On startup an empty database is seeded from `app/data/*.json`; `python -m app.load_datapack --reset` reloads it.
 - Collections: `conversations`, `intents`, `evidence`, `specs`, `agent_runs`, `catalog_measures`, `catalog_dimensions`, `catalog_datasets`, `catalog_assets`, `catalog_relationships`, `presets`.
 - Registered or extended reports are written back to `catalog_assets`, so they survive restarts and are reused.
-- Tests use `mongomock` through an async adapter (`tests/fakes.py`); the real Atlas connection has not been exercised yet.
-- The MongoDB MCP connector is not usable: Atlas reports MCP access disabled for the organization (an Organization Owner must enable AI client access).
+- Live: MongoDB Atlas, project **Bayer2026**, Cluster0 (M0, AWS Paris), database `analytics_manager`. The vector indexes `vector_index` on `request_vectors` (150 Business_Requests rows plus live `REQ-APP-…` requests) and `kpi_vectors` (18 KPIs) are 1536-dimension cosine indexes built from OpenAI `text-embedding-3-small`. Network access allows `0.0.0.0/0` because Container Apps has no fixed outgoing IP; keep the database password strong.
+- Tests use `mongomock` through an async adapter (`tests/fakes.py`).
+- The MongoDB Atlas MCP connector works (read-only queries, index and access-list inspection).
 
 ## Request triage and vector search (`app/triage.py`, `app/vectors.py`)
 - Business_Requests urgency/status labels are not predictable from text (all 10 texts have mixed labels; best possible 54% vs 52% majority), so no classifier.
@@ -132,9 +152,15 @@ backend/   Python 3.12+, FastAPI
 ## Deployment
 Every option serves frontend and API from one address (no CORS, no `VITE_API_BASE`).
 
+**Live (free setup below):** app https://analytics-manager.lenguyenhanhoan.workers.dev (Cloudflare Worker, Free plan) → backend https://analytics-manager-api.greensea-e888302f.francecentral.azurecontainerapps.io (Azure Container App `analytics-manager-api`, resource group `analytics-manager-rg`, France Central, Azure for Students). Both run release `8545d81` (PR #4).
+
+**Branches:** work on `main`; it is the production branch and every push to it releases. `version-2`/`version-4` are older lines kept in step with `main`.
+
 **Free (current choice): Cloudflare Workers Free + Azure Container Apps (`docs/DEPLOY_FREE.md`)**
 - Frontend: `deploy/cloudflare/wrangler.free.jsonc` + `src/proxy.js`, static assets, `/api/*` forwarded to `BACKEND_URL`. No tunnel.
 - Every push to `main` starts `deploy-live.yml` (requires `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` from `containerapp.sh github` (managed identity + OIDC, works where the school blocks app registrations), `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`; missing secrets fail clearly). It calls `backend-image.yml` to test, build, switch Azure to the commit's image and verify the ready revision and commercial briefings API, then calls `frontend-deploy.yml` to run `deploy:free` and verify the live briefings page/API. `version-2`/`version-4` pushes only test and build. `deploy/push-live.sh` (`git live` alias) safely publishes committed changes to `main` without force-pushing.
+- Not yet active: the five secrets are missing, so Deploy live fails at its credential check and releases are manual (below). `containerapp.sh github` created the managed identity `bayer2026-github-deploy`, but its role assignment failed ("Role assignment failed"): the signed-in account may lack permission to assign roles (needs Owner or User Access Administrator on the resource group), or the identity was not yet visible; retry, then check the account's role on the subscription.
+- Manual release: in Cloud Shell or Git Bash (not PowerShell, where `IMAGE=… bash …` does not work), `IMAGE=ghcr.io/hoanlenguyen/bayer2026-backend:<commit sha> bash deploy/azure/containerapp.sh update`, check with `containerapp.sh image`, then `npm run deploy:free` in `deploy/cloudflare` (Node 22, no Docker).
 - Backend: `.github/workflows/backend-image.yml` pushes `ghcr.io/<owner>/bayer2026-backend`; `deploy/azure/containerapp.sh create|update|jev|github|url|logs` (Cloud Shell) runs it on Container Apps, 0.5 vCPU / 1 GiB, 0 to 1 replica, secrets as Container Apps secrets, no Log Analytics. Atlas must allow `0.0.0.0/0`.
 
 **Azure for Students VM (`deploy/server/`, `docs/DEPLOY_AZURE.md`)**, tested end to end with Docker:
@@ -158,11 +184,14 @@ Every option serves frontend and API from one address (no CORS, no `VITE_API_BAS
 cd backend && python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
-pytest                 # 28 tests: decision rules, agents (incl. scripted OpenAI tool calls), MongoDB store, graph, API flows
+pytest                 # 249 tests, offline (mock model, mongomock): decision rules, agents, triage and vectors, briefings, dashboards, register, API flows
 python -m app.load_datapack     # load catalog into MongoDB (needs MONGODB_URI)
 
 # frontend (proxies /api to :8000)
 cd frontend && npm install && npm run dev
+
+# both in Docker (from the repository root; keys in backend/.env)
+docker compose up --build        # http://localhost:5173
 ```
 
 ## Conventions
@@ -177,13 +206,15 @@ cd frontend && npm install && npm run dev
 - [x] Build plan page: https://claude.ai/artifact/NWgjoee8m5ZYAYoBkDmYCC
 - [x] Proposal draft (`docs/PROPOSAL.md`, earlier "Curator" concept, partly superseded by this file)
 - [x] Estate Explorer prototype (frontend)
-- [x] Backend: pipeline, decision formula (unit tested), mock + OpenAI provider, MongoDB/in-memory store, PBIP skeleton
-- [x] Ask page with department presets, grill-me questions, approval step and live processing flow
+- [x] Backend: pipeline, decision formula (unit tested), mock + OpenAI provider, MongoDB/in-memory store
+- [x] Ask page with department presets, grill-me questions and live processing flow
 - [x] Estate Explorer on the plant catalog (`/api/graph`)
 - [x] Agents for intent, evidence and spec with tool calling, verification, fallback and audit log
 - [x] MongoDB persistence for catalog, conversations, intents, evidence, specs, agent runs
-- [ ] Test the OpenAI provider with a real key (model path tested only with a scripted fake client)
-- [ ] Connect to the team's MongoDB Atlas (code tested with mongomock only)
-- [ ] Load SinceAI synthetic dataset into the catalog
-- [ ] Action tracker (follow-up actions with owners)
-- [ ] Validate generated PBIP in Power BI Desktop
+- [x] OpenAI provider with a real key (live: `gpt-6-astra`, `gpt-6-luna`, `text-embedding-3-small`)
+- [x] MongoDB Atlas connected, with Atlas Vector Search for requests and KPIs
+- [x] SinceAI synthetic workbook loaded into the catalog
+- [x] Follow-up actions, team briefings, BI report register, owner hand-off, in-app dashboard builder (PR #3, PR #4)
+- [x] Live deployment: Cloudflare Worker (Free) + Azure Container Apps, release `8545d81`
+- [ ] Automatic releases: add the five GitHub secrets and fix the managed identity's role assignment (see Deployment)
+- [ ] Validate generated PBIP in Power BI Desktop (PBIP generation is no longer in the Ask flow)
