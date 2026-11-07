@@ -1,5 +1,5 @@
-# SITE_ADDRESS (in deploy/vultr/.env) decides the address:
-#   your domain or <server-ip>.sslip.io -> HTTPS with an automatic Let's Encrypt certificate
+# SITE_ADDRESS (in deploy/server/.env) decides the address:
+#   VM DNS name, your domain or <server-ip>.sslip.io -> HTTPS with an automatic Let's Encrypt certificate
 #   :80                                 -> plain HTTP (first test only)
 {$SITE_ADDRESS::80} {
 	encode zstd gzip

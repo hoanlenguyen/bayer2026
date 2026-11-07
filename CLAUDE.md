@@ -118,7 +118,8 @@ backend/   Python 3.12+, FastAPI
 ## Deployment
 Two options, same images. Both serve frontend and API from one address (no CORS, no `VITE_API_BASE`).
 
-**Vultr VPS (`deploy/vultr/`, `docs/DEPLOY_VULTR.md`)**, tested end to end with Docker:
+**Azure for Students VM (`deploy/server/`, `docs/DEPLOY_AZURE.md`)**, current choice, tested end to end with Docker:
+- Ubuntu 24.04 on `Standard_B2ats_v2` (free 750 h/month for 12 months), 64 GiB disk, France Central, DNS label `<name>.<region>.cloudapp.azure.com`.
 - Docker Compose: `backend` (backend/Dockerfile, port 8000 not published) and `web` (React build served by Caddy, `/api/*` proxied, automatic HTTPS via `SITE_ADDRESS`, e.g. `<ip>.sslip.io`).
 - Keys stay in `backend/.env` on the server. Fixed IP, so Atlas allows only that IP. PBIP output on a named volume.
 

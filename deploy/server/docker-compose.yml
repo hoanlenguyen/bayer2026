@@ -1,4 +1,4 @@
-# Frontend + backend on one server.  Run from deploy/vultr:  docker compose up -d --build
+# Frontend + backend on one server.  Run from deploy/server:  docker compose up -d --build
 services:
   backend:
     build:
@@ -16,7 +16,7 @@ services:
   web:
     build:
       context: ../../frontend
-      dockerfile: ../deploy/vultr/web.Dockerfile
+      dockerfile: ../deploy/server/web.Dockerfile
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
     ports:
