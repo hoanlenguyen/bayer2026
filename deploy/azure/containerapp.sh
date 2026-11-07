@@ -101,12 +101,36 @@ case "${1:-}" in
     CLIENT_ID=$(az identity show -n "$ID_NAME" -g "$RG" --query clientId -o tsv)
     PRINCIPAL_ID=$(az identity show -n "$ID_NAME" -g "$RG" --query principalId -o tsv)
     echo "Allowing it to change resource group $RG (Contributor)..."
-    # A new identity can take a minute to become visible to role assignments; retry.
+    SCOPE="/subscriptions/$SUB/resourceGroups/$RG"
+    # A new identity can take a minute to become visible to role assignments: only that case is retried.
+    # Any other error is printed as Azure reports it, with what it usually means.
     for attempt in 1 2 3 4 5 6; do
-      if az role assignment create --assignee-object-id "$PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
-           --role Contributor --scope "/subscriptions/$SUB/resourceGroups/$RG" -o none 2>/dev/null; then break; fi
-      [ "$attempt" = 6 ] && { echo "Role assignment failed. Run this command again in a minute."; exit 1; }
-      sleep 15
+      if err=$(az role assignment create --assignee-object-id "$PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
+                 --role Contributor --scope "$SCOPE" -o none 2>&1); then break; fi
+      case "$err" in
+        *RoleAssignmentExists*|*"already exists"*)
+          echo "The identity already has this role."; break ;;
+        *PrincipalNotFound*|*"does not exist in the directory"*)
+          if [ "$attempt" -lt 6 ]; then echo "  Identity not visible yet (attempt $attempt of 6), retrying in 15 s..."; sleep "${RETRY_WAIT:-15}"; continue; fi ;;
+      esac
+      echo
+      echo "Role assignment failed. Azure said:"
+      printf '%s\n' "$err" | sed 's/^/  /'
+      echo
+      case "$err" in
+        *AuthorizationFailed*|*"does not have authorization"*|*"roleAssignments/write"*)
+          echo "Meaning: your account may not give roles to others on $RG. That needs Owner or User Access"
+          echo "Administrator on the subscription or the resource group (Contributor is not enough)."
+          echo "Your roles there, as Azure lists them:"
+          az role assignment list --scope "$SCOPE" --include-inherited \
+            --query "[?principalType=='User'].{role: roleDefinitionName, scope: scope}" -o table 2>&1 | sed 's/^/  /'
+          echo "Ask the subscription owner to run this script, or to give you Owner on $RG." ;;
+        *PrincipalNotFound*|*"does not exist in the directory"*)
+          echo "Meaning: the new identity is still not visible to Azure. Wait a few minutes and run this command again." ;;
+        *)
+          echo "Run this command again in a minute. If the same error appears, send it to the team." ;;
+      esac
+      exit 1
     done
     echo "Trusting GitHub Actions on $GH_REPO, branch main..."
     az identity federated-credential create --name github-main --identity-name "$ID_NAME" -g "$RG" \
