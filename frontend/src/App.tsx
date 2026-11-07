@@ -18,8 +18,12 @@ const routeFromLocation = (): Route => {
   if (dashboard) return { page: "dashboard", ids: [dashboard[1]] };
   const workbook = /^\/workbook-view\/([\w-]+)\/([\w-]+)$/.exec(path);
   if (workbook) return { page: "workbook", ids: [workbook[1], workbook[2]] };
+  const governance = /^\/bi-estate\/governance\/(evidence|risks|documents|assessments)\/([^/]+)$/.exec(path);
+  if (governance) return { page: "bi-estate", ids: ["governance", governance[1], decodeURIComponent(governance[2])] };
   const portfolio = /^\/bi-estate(?:\/compare\/([\w-]+)\/([\w-]+)|\/([\w-]+))?$/.exec(path);
-  if (portfolio) return { page: "bi-estate", ids: portfolio[1] ? ["compare", portfolio[1], portfolio[2]] : portfolio[3] ? [portfolio[3]] : [] };
+  // "compare" and "governance" are reserved words, never asset IDs.
+  if (portfolio) return { page: "bi-estate", ids: portfolio[1] ? ["compare", portfolio[1], portfolio[2]]
+    : portfolio[3] && !["compare", "governance"].includes(portfolio[3]) ? [portfolio[3]] : [] };
   if (path === "/cala-graph" || path === "/simulator" || path === "/briefings") return { page: path.slice(1) as Page, ids: [] };
   return { page: window.location.hash.startsWith("#explorer") ? "explorer" : "ask", ids: [] };
 };

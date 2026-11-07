@@ -1,12 +1,14 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { bi, type Case, type Detail, type EstatePage, type IssueCode, type Kpi, type Pair, type Persona, type Row, type Side } from "../api/biEstate";
 import { setActor, useActor } from "../lib/actor";
+import { AssetGovernanceView, GovernanceIndex, GovernanceItem, assetGovUrl } from "./BIGovernance";
+import { Card, Notice, OwnerCell, day, go, link, month, ownerState, roleOf, useLoad, usePersonas, when } from "./biShared";
 import "./bi-portfolio.css";
 
 /* BI Portfolio: the BI department head's tracker of every reporting asset AnalytIQ can see.
    Routes: /bi-estate?…filters, /bi-estate/<asset id>?…, /bi-estate/compare/<a>/<b>?…  (filters stay in the query string). */
 
-const ISSUE_ORDER: IssueCode[] = ["needs_owner", "consolidation", "definition", "scope", "refresh", "retirement", "chronology"];
+const ISSUE_ORDER: IssueCode[] = ["needs_owner", "consolidation", "definition", "scope", "signal", "refresh", "retirement", "chronology"];
 const FILTERS = ["q", "origin", "platform", "issue", "lifecycle", "owner_state", "product", "market"] as const;
 const SORTS: { key: string; label: string }[] = [
   { key: "issues", label: "Number of issues" }, { key: "title", label: "Title" }, { key: "owner", label: "Owner" },
@@ -17,41 +19,8 @@ const OPTIONAL = [{ key: "creator", label: "Creator" }, { key: "created", label:
 type OptionalKey = (typeof OPTIONAL)[number]["key"];
 const COLS_KEY = "analytiq.portfolio.columns";
 
-const month = (m: string | null) => m ? new Date(m.slice(0, 7) + "-01T00:00:00Z").toLocaleDateString("en-GB", { month: "short", year: "numeric", timeZone: "UTC" }) : "Unknown";
-const when = (iso: string | null) => iso ? new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "Never";
-const day = (v: string | null, precision: string | null) => !v ? "Unknown"
-  : precision === "day" ? new Date(v.slice(0, 10) + "T00:00:00Z").toLocaleDateString("en-GB", { dateStyle: "medium", timeZone: "UTC" }) : when(v);
-const ownerState = { active: "Active", inactive: "Owner inactive", absent: "Unassigned" } as const;
-
-function go(url: string, replace = false) {
-  if (url === location.pathname + location.search) return;
-  history[replace ? "replaceState" : "pushState"](null, "", url);
-  window.dispatchEvent(new PopStateEvent("popstate"));
-}
-function link(event: MouseEvent<HTMLAnchorElement>) {
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
-  event.preventDefault();
-  const to = new URL(event.currentTarget.href);
-  go(to.pathname + to.search);
-  window.scrollTo(0, 0);
-}
-
 function readCols(): OptionalKey[] {
   try { const v = JSON.parse(localStorage.getItem(COLS_KEY) || "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
-}
-
-function useLoad<T>(load: (signal: AbortSignal) => Promise<T>, deps: unknown[]) {
-  const [state, setState] = useState<{ data: T | null; error: string; loading: boolean }>({ data: null, error: "", loading: true });
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => {
-    const ctl = new AbortController();
-    setState((s) => ({ ...s, error: "", loading: true }));
-    load(ctl.signal).then((data) => setState({ data, error: "", loading: false }))
-      .catch((e: Error) => { if (!ctl.signal.aborted) setState((s) => ({ ...s, error: e.message, loading: false })); });
-    return () => ctl.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, attempt]);
-  return { ...state, retry: () => setAttempt((n) => n + 1), set: (data: T) => setState({ data, error: "", loading: false }) };
 }
 
 /* ---------------------------------------------------------------- identity */
@@ -71,28 +40,13 @@ function IdentityPicker() {
     <p id={`${id}-note`} className="muted small">{note || "Demo identities, checked on the server. Not a sign-in."}</p>
   </div>;
 }
-const roleOf = (personas: Persona[], actor: string) => personas.find((p) => p.id === actor)?.role;
-function usePersonas() {
-  const [personas, setPersonas] = useState<Persona[]>([]);
-  useEffect(() => { bi.personas().then((p) => setPersonas(p.personas)).catch(() => undefined); }, []);
-  return personas;
-}
-
 /* ---------------------------------------------------------------- shared bits */
 
-function IssueTags({ issues, labels }: { issues: IssueCode[]; labels: Record<string, string> }) {
+function IssueTags({ issues, labels, asset, query }: { issues: IssueCode[]; labels: Record<string, string>; asset: string; query: string }) {
   if (!issues.length) return <span className="muted small">None found</span>;
-  return <ul className="bp-tags" aria-label="Issues">{ISSUE_ORDER.filter((i) => issues.includes(i)).map((i) =>
-    <li key={i} className={`bp-tag bp-tag-${i}`}>{labels[i] ?? i}</li>)}</ul>;
-}
-function OwnerCell({ owner, state }: { owner: Row["owner"]; state: Row["owner_state"] }) {
-  if (!owner) return <span className="text-warn">Unassigned</span>;
-  return <span>{owner.name} <span className="muted mono small">{owner.id}</span>
-    {state !== "active" && <span className="text-bad small"> · {ownerState[state]}</span>}
-    {owner.via === "assignment" && <span className="muted small"> · assigned</span>}</span>;
-}
-function Notice({ kind, children }: { kind: "error" | "info" | "ok"; children: ReactNode }) {
-  return <div className={`bp-notice bp-notice-${kind}`} role={kind === "error" ? "alert" : "status"}>{children}</div>;
+  return <ul className="bp-tags" aria-label="Findings">{ISSUE_ORDER.filter((i) => issues.includes(i)).map((i) =>
+    <li key={i}><a className={`bp-tag bp-tag-${i}`} href={`${assetGovUrl(asset, i)}${query ? "&" + query : ""}`} onClick={link}
+      title={`Open the evidence for: ${labels[i] ?? i}`}>{labels[i] ?? i}</a></li>)}</ul>;
 }
 const KpiList = ({ items, empty }: { items: Kpi[]; empty: string }) => items.length
   ? <ul className="bp-kpis">{items.map((k) => <li key={k.id}><span className="mono">{k.id}</span> {k.name ?? "Unknown KPI"}
@@ -193,7 +147,7 @@ function PortfolioList({ params }: { params: URLSearchParams }) {
           {cols.includes("model") && <td data-label="Model" className="mono small">{r.model_id ?? "None"}</td>}
           <td data-label="Use"><div>{r.last_view_month ? <>Imported: last viewed {month(r.last_view_month)}</> : <span className="muted">No imported views</span>}</div>
             <div className="muted small">AnalytIQ opens: {r.app_opens.count}{r.app_opens.last_at && <>, last {when(r.app_opens.last_at)}</>}</div></td>
-          <td data-label="Findings"><IssueTags issues={r.issues} labels={data.issue_labels} /><p className="bp-finding small">{r.finding}</p></td>
+          <td data-label="Findings"><IssueTags issues={r.issues} labels={data.issue_labels} asset={r.id} query={query} /><p className="bp-finding small">{r.finding}</p></td>
         </tr>)}</tbody>
       </table>
     </div>}
@@ -221,7 +175,7 @@ function Select({ label, value, onChange, options }: { label: string; value: str
 
 /* ---------------------------------------------------------------- detail */
 
-function AssetDetail({ id, back }: { id: string; back: string }) {
+function AssetDetail({ id, back, tab, finding, query }: { id: string; back: string; tab: string | null; finding: string | null; query: string }) {
   const { data, error, loading, retry, set } = useLoad<Detail>((s) => bi.detail(id, s), [id]);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { if (data) { heading.current?.focus(); document.title = `${data.title} · BI Portfolio · AnalytIQ intelligence`; } }, [data?.id]);
@@ -240,6 +194,11 @@ function AssetDetail({ id, back }: { id: string; back: string }) {
         {d.links.register && <a href={d.links.register}>Open in the report register</a>}
         {d.links.explorer && <a href={d.links.explorer}>Open the Estate Explorer</a>}
       </div></header>
+    <div className="bg-tabs" role="tablist" aria-label="Dashboard views">
+      <a role="tab" aria-selected={tab !== "governance"} href={`/bi-estate/${encodeURIComponent(d.id)}${query ? "?" + query : ""}`} onClick={link}>Overview</a>
+      <a role="tab" aria-selected={tab === "governance"} href={`${assetGovUrl(d.id)}${query ? "&" + query : ""}`} onClick={link}>Evidence &amp; governance</a>
+    </div>
+    {tab === "governance" ? <AssetGovernanceView id={d.id} finding={finding} /> : <>
 
     <div className="bp-grid">
       <Card title="Ownership">
@@ -304,13 +263,10 @@ function AssetDetail({ id, back }: { id: string; back: string }) {
     {d.cases.length > 0 && <Card title="Owner reviews">
       <ul className="bp-plain">{d.cases.map((c) => <li key={c.id}><a href={`/bi-estate/compare/${c.assets[0]}/${c.assets[1]}`} onClick={link}>{c.id}</a> · {c.status_label}</li>)}</ul></Card>}
     <p className="muted small">Sources: {d.sources.filter(Boolean).join(" · ")}</p>
+    </>}
   </section>;
 }
 
-function Card({ title, children }: { title: string; children: ReactNode }) {
-  const id = useId();
-  return <section className="bp-card" aria-labelledby={id}><h3 id={id}>{title}</h3>{children}</section>;
-}
 function EdgeList({ title, items }: { title: string; items: Detail["upstream"] }) {
   if (!items.length) return null;
   return <><h4>{title}</h4><ul className="bp-plain">{items.map((e, i) => <li key={e.id + i}>{e.title ?? e.id} <span className="mono small">{e.id}</span>
@@ -550,9 +506,20 @@ export function BIPortfolioPage({ ids }: { ids: string[] }) {
     return () => window.removeEventListener("popstate", on);
   }, []);
   const params = new URLSearchParams(search);
-  const listParams = new URLSearchParams([...params].filter(([k]) => (FILTERS as readonly string[]).includes(k) || ["sort", "direction", "page"].includes(k)));
+  const listParams = new URLSearchParams([...params].filter(([k]) => (FILTERS as readonly string[]).includes(k) || ["sort", "direction", "page", "view", "gtab", "gq", "gpage"].includes(k)));
   const back = "/bi-estate" + (listParams.toString() ? "?" + listParams : "");
-  const view = ids[0] === "compare" ? "compare" : ids[0] ? "detail" : "list";
+  const view = ids[0] === "compare" ? "compare" : ids[0] === "governance" ? "governance" : ids[0] ? "detail" : "list";
+  const governance = params.get("view") === "governance";
+  const updateGov = (changes: Record<string, string | null>) => {
+    const next = new URLSearchParams(listParams);
+    for (const [k, v] of Object.entries(changes)) { if (v) next.set(k, v); else next.delete(k); }
+    go("/bi-estate?" + next.toString());
+  };
+  const switchView = (to: "tracker" | "governance") => {
+    const next = new URLSearchParams(listParams);
+    if (to === "governance") next.set("view", "governance"); else ["view", "gtab", "gq", "gpage"].forEach((k) => next.delete(k));
+    go("/bi-estate" + (next.toString() ? "?" + next : ""));
+  };
   useEffect(() => { if (view === "list") document.title = "BI Portfolio · AnalytIQ intelligence"; }, [view]);
   return <main className="page bp-page">
     <header className="bp-head">
@@ -560,8 +527,13 @@ export function BIPortfolioPage({ ids }: { ids: string[] }) {
         <p className="muted">Every reporting asset AnalytIQ can see, who answers for it, how it is used, and what needs a decision. Sample data.</p></div>
       <IdentityPicker />
     </header>
-    {view === "list" && <PortfolioList params={listParams} />}
-    {view === "detail" && <AssetDetail key={ids[0]} id={ids[0]} back={back} />}
+    {view === "list" && <div className="bg-tabs" role="tablist" aria-label="Portfolio views">
+      <button type="button" role="tab" aria-selected={!governance} onClick={() => switchView("tracker")}>Tracker</button>
+      <button type="button" role="tab" aria-selected={governance} onClick={() => switchView("governance")}>Evidence &amp; governance</button></div>}
+    {view === "list" && !governance && <PortfolioList params={listParams} />}
+    {view === "list" && governance && <GovernanceIndex params={listParams} update={updateGov} />}
+    {view === "detail" && <AssetDetail key={ids[0]} id={ids[0]} back={back} tab={params.get("tab")} finding={params.get("finding")} query={listParams.toString()} />}
+    {view === "governance" && <GovernanceItem key={ids.join("/") + search} kind={ids[1]} id={ids[2]} asset={params.get("asset")} />}
     {view === "compare" && ids.length === 3 && <Compare key={ids.slice(1).join("~")} a={ids[1]} b={ids[2]} back={back} />}
   </main>;
 }

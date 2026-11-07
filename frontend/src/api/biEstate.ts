@@ -1,6 +1,6 @@
 import { actorHeaders } from "../lib/actor";
 
-export type IssueCode = "needs_owner" | "refresh" | "definition" | "scope" | "consolidation" | "retirement" | "chronology";
+export type IssueCode = "needs_owner" | "refresh" | "definition" | "scope" | "consolidation" | "retirement" | "chronology" | "signal";
 export type Origin = "workbook" | "app_report" | "generated";
 export interface Person { id: string; name: string; role?: string; status?: string; evidence?: string;
   via?: "imported" | "assignment"; assigned_at?: string; assigned_by?: string; reason?: string }
@@ -60,7 +60,7 @@ export interface Detail extends Omit<Row, "refresh"> {
   cases: Case[]; links: { dashboard: string | null; register: string | null; explorer: string | null }; teams: string[];
   decision_goal?: string; conversation_id?: string;
 }
-export interface Persona { id: string; name: string; role: "bi_steward" | "employee" | "owner"; label: string }
+export interface Persona { id: string; name: string; role: "bi_steward" | "employee" | "owner" | "governance_reviewer" | "auditor"; label: string }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { ...init, headers: { "Content-Type": "application/json", ...actorHeaders(), ...(init?.headers || {}) } });

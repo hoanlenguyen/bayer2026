@@ -51,6 +51,7 @@ ISSUES = {
     "consolidation": "Consolidation candidate",
     "retirement": "Marked for retirement",
     "chronology": "Source date anomaly",
+    "signal": "Open source signal",
 }
 ORIGINS = {"workbook": "Workbook asset", "app_report": "App employee report", "generated": "Employee-built dashboard"}
 
@@ -58,6 +59,9 @@ ORIGINS = {"workbook": "Workbook asset", "app_report": "App employee report", "g
 
 STEWARD = {"id": "DEMO-BI-STEWARD", "name": "BI department head (demo)", "role": "bi_steward"}
 EMPLOYEE = {"id": "DEMO-EMPLOYEE", "name": "Demo employee", "role": "employee"}
+REVIEWER = {"id": "DEMO-GOV-REVIEWER", "name": "Governance reviewer (demo)", "role": "governance_reviewer"}
+AUDITOR = {"id": "DEMO-AUDITOR", "name": "Read-only auditor (demo)", "role": "auditor"}
+DEMO_PERSONAS = {p["id"]: p for p in (STEWARD, EMPLOYEE, REVIEWER, AUDITOR)}
 ACTOR_HEADER = "x-analytiq-actor"
 
 
@@ -77,10 +81,8 @@ def resolve_actor(request: Request | None) -> dict | None:
     actor_id = (request.headers.get(ACTOR_HEADER) or "").strip()
     if not actor_id:
         return None
-    if actor_id == STEWARD["id"]:
-        return dict(STEWARD)
-    if actor_id == EMPLOYEE["id"]:
-        return dict(EMPLOYEE)
+    if actor_id in DEMO_PERSONAS:
+        return dict(DEMO_PERSONAS[actor_id])
     person = people().get(actor_id)
     if person and person["status"] == "active":
         return {"id": person["id"], "name": person["name"], "role": "owner"}
@@ -109,6 +111,8 @@ async def identities() -> dict:
             "note": "Demo identities configured on the server. This is not a sign-in: production needs the company's identity provider.",
             "personas": [{**STEWARD, "label": "BI department head (demo steward)"},
                          {**EMPLOYEE, "label": "Demo employee"},
+                         {**REVIEWER, "label": "Governance reviewer (demo)"},
+                         {**AUDITOR, "label": "Read-only auditor (demo)"},
                          *({"id": p["id"], "name": p["name"], "role": "owner", "label": f"{p['name']} · {p['id']} (report owner)"}
                            for p in owners)]}
 
@@ -209,6 +213,8 @@ def _projection(snapshot_key: int) -> dict[str, Any]:
             issues.append("retirement")
         if r["created_date"] and r["last_modified"] and r["last_modified"] < r["created_date"]:
             issues.append("chronology")
+        if any(sg["status"] == "open" for sg in signals[aid]):
+            issues.append("signal")  # imported Governance_Signals, kept apart from AnalytIQ's own checks
         assets[aid] = {
             "id": aid, "original_title": r["asset_name"], "origin": "workbook", "type": r["asset_type"],
             "platform": r["platform"], "workspace": {"id": r["workspace_id"], "name": (workspaces.get(r["workspace_id"]) or {}).get("workspace_name")},
@@ -465,6 +471,11 @@ def _finding(r: dict, proj: dict) -> str:
         return "Marked for retirement in the workbook (not approved or executed)."
     if "chronology" in r["issues"]:
         return "Last modified before it was created in the source. Dates kept as recorded."
+    if "signal" in r["issues"]:
+        open_ = [sg for sg in proj["signals"].get(r["id"], []) if sg["status"] == "open"]
+        first = sorted(open_, key=lambda sg: ({"high": 0, "medium": 1}.get(sg["severity"], 2), sg["signal_id"]))[0]
+        more = f" and {len(open_) - 1} more" if len(open_) > 1 else ""
+        return f"Open source signal {first['signal_id']}: {first['signal_code'].replace('_', ' ').lower()} ({first['severity']}){more}."
     if r["origin"] == "generated":
         return "Built in Ask. Snapshot of workbook rows."
     return "No open finding."
@@ -545,6 +556,7 @@ async def list_estate(request: Request, q: str = "", origin: str | None = None, 
         "consolidation": {"assets": sum("consolidation" in r["issues"] for r in records), "pairs": len(meta["pairs"])},
         "retirement": {"assets": sum("retirement" in r["issues"] for r in records)},
         "chronology": {"assets": sum("chronology" in r["issues"] for r in records)},
+        "signal": {"assets": sum("signal" in r["issues"] for r in records)},
     }
     origins = Counter(r["origin"] for r in records)
     months = meta["months"]

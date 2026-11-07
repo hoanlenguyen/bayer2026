@@ -87,7 +87,8 @@ frontend/  React + TypeScript + Vite
              GET /api/graph and grouped by domain (workspace) using the catalog's own links
   /simulator   Conversation simulation (see Rules above)
   /bi-estate   BI Portfolio: the BI department head's tracker of every reporting asset (see BI Portfolio below);
-             /bi-estate/<id> details, /bi-estate/compare/<a>/<b> comparison and owner review
+             /bi-estate/<id> details (?tab=governance&finding=<code>), /bi-estate/compare/<a>/<b> comparison and owner review,
+             /bi-estate?view=governance (Evidence & governance index), /bi-estate/governance/{evidence|risks|documents|assessments}/<id>
   /briefings   Team briefings (Commercial, Supply) with the Monthly Pulse chart, meeting mode, and the BI report register tab
   /dashboards/<id>         a saved in-app dashboard (stable URL)
   /workbook-view/<a>/<b>   verified workbook view behind an employee report
@@ -98,6 +99,8 @@ backend/   Python 3.12+, FastAPI
   app/dashboard_intake.py, dashboard_builder.py, dashboard_routes.py   dashboard questions, brief, build, saved dashboards
   app/employee_report_match.py   matches a request to an existing employee report
   app/bi_estate.py   BI Portfolio: inventory, findings, pairs, owner reviews, AnalytIQ opens, demo identities
+  app/governance.py  Evidence & governance: evidence items, risks, rule and document applicability, registered documents,
+                     mappings, exceptions, owner evidence, reviews with assessment snapshots (app/data/governance/ demo sources)
   app/report_register.py   BI report register (owners, revisions, reviewed changes)
   app/request_handoff.py   assignments from an Ask result to a report owner, with frozen evidence
   app/steps.py, classify.py, geo.py, decider.py, simulator.py   six analysis steps, /api/v2/classify, country check, Jev, simulator
@@ -135,6 +138,8 @@ backend/   Python 3.12+, FastAPI
 - `POST /api/bi-estate/{id}/opens` – body `{view_id, source}`; one AnalytIQ open per rendered, visible view (idempotent)
 - `POST /api/bi-estate/{id}/owner` (steward) – owner assignment overlay, `expected_seq` for concurrency
 - `POST /api/bi-reviews` (steward), `GET /api/bi-reviews/{id}`, `POST /api/bi-reviews/{id}/events` (owner response or steward decision); `GET /api/bi-identity` – demo personas
+- `GET  /api/bi-governance?tab=policies|risks|evidence&q=&<portfolio filters>&page=&size=&at=` – scoped index (one entry per document, distinct dashboards); `GET …/assets/{id}?at=`, `…/evidence/{id}?asset=`, `…/risks/{id}`, `…/documents/{id}?asset=`, `…/documents/{id}/revisions/{n}/original`, `…/assessments/{id}`
+- `POST /api/bi-governance/documents` (steward; register or next revision, checked against `GET …/sources`), `…/documents/{id}/mappings` (steward), `…/mappings/{id}/decision` (reviewer, not the proposer), `…/exceptions` (steward), `…/exceptions/{id}/decision` (reviewer), `…/assets/{id}/evidence` (active owner), `…/evidence/{id}/reviews` (reviewer or steward), `…/risks/{id}/events` and `…/documents/{d}/clauses/{c}/assets/{a}/events` (assign, request evidence, assessment)
 - `GET  /api/requests`, `/api/datapack`, `/api/stages` – request queue, workbook summary, flow stage names
 
 ### Models
@@ -157,8 +162,18 @@ backend/   Python 3.12+, FastAPI
 - Dates keep their precision (day from the workbook, timestamp from the app). Refresh last success is Unknown: the workbook has no such field. Imported usage (Asset_Usage) and AnalytIQ opens are always shown apart.
 - Findings: needs an owner, refresh issue, definition conflict (`definition_conflict` KPIs only; duplicate candidates and local variants are weaker context), scope mismatch (SCOPE-1, report scope vs its model via Markets), consolidation candidate (PAIR-1 v1: same product and market, at least 2 shared canonical approved KPI IDs; 2 pairs in this workbook), marked for retirement, source date anomaly.
 - Owner reviews: one case per pair (A/B and B/A are the same case), each owner responds only for the report they actively own (one person owning both answers once), the steward decides keep both / remediate / consolidation plan / dismiss with a reason. Changed evidence must be acknowledged. Closed cases stay as history; a new review on the pair is the next generation. Decisions are recorded only, never executed.
-- Identity: demo personas resolved on the server from the `X-AnalytIQ-Actor` header (`DEMO-BI-STEWARD`, `DEMO-EMPLOYEE`, active owner IDs). Not a sign-in; production needs the company's identity provider.
+- Identity: demo personas resolved on the server from the `X-AnalytIQ-Actor` header (`DEMO-BI-STEWARD`, `DEMO-EMPLOYEE`, `DEMO-GOV-REVIEWER`, `DEMO-AUDITOR` (read only), active owner IDs). Not a sign-in; production needs the company's identity provider.
+- Tracker finding "Open source signal" (open Governance_Signals rows, imported). Finding chips link to the dashboard's Evidence & governance tab with that finding focused.
 - Collections: `bi_open_events`, `bi_owner_events`, `bi_cases`, `bi_case_events` (append-only, unique `_id`).
+
+## Evidence & governance (`app/governance.py`, `frontend/src/pages/BIGovernance.tsx`)
+- Scope: one BI estate per installation, so every inventory asset is in the portfolio (`scoped_assets`). Every read and write checks the asset and the document's access; hidden documents leave no title, count or URL (404 for both missing and hidden).
+- Evidence: workbook rows with sheet, row, record ID and workbook SHA (asset, workspace, owner, model, bindings, KPI definitions, lineage, signals, quality, last usage month); AnalytIQ checks DEF-1 and SCOPE-1 as derived items linking the rows they join; saved dashboards (approved brief, creator, cited source rows, marked if the row changed); app reports (KPI definition, report register events); owner submissions (owner statement until a reviewer verifies; superseding keeps the old item). Reading evidence never counts as an open.
+- Authority labels: Company document, Demo document, Challenge workbook (Governance_Rules RULE-001..008, no version or dates), AnalytIQ check, Source observation, AnalytIQ record, Owner statement.
+- Applicability per rule is Python over recorded facts (applies / undetermined / not applicable), with results finding, assessed clear, evidence missing, exception, expired exception, cannot be checked. RULE-006 needs Tableau plus legacy or a migration signal; RULE-005 needs a high-reach signal (no reach threshold exists). Registered documents apply only through an explicit mapping a reviewer accepted, and only from the revision effective on the requested date (`at`).
+- Risks: derived (definition, scope, owner, consolidation, refresh, chronology) or one per imported signal. Source severity, rule priority and AnalytIQ's action priority are separate. Closing a review needs a reason and cited evidence and keeps the imported status. Assessments snapshot cited evidence values, clause revision text, facts, checks, owner and workbook SHA; reopening shows what changed since.
+- Demo document `DEMO-POL-001` (synthetic, two revisions, `app/data/governance/`); `DEMO-HR-001` is the unrelated fixture. No company policy was supplied.
+- Collections: `gov_documents`, `gov_doc_revisions`, `gov_mappings`, `gov_exceptions`, `gov_evidence`, `gov_events` (unique `_id`, expected-sequence checks, retries return the first record). In memory mode they are lost on restart.
 
 ## Request triage and vector search (`app/triage.py`, `app/vectors.py`)
 - Business_Requests urgency/status labels are not predictable from text (all 10 texts have mixed labels; best possible 54% vs 52% majority), so no classifier.
@@ -201,7 +216,7 @@ Every option serves frontend and API from one address (no CORS, no `VITE_API_BAS
 cd backend && python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
-pytest                 # 265 tests, offline (mock model, mongomock): decision rules, agents, triage and vectors, briefings, dashboards, register, API flows
+pytest                 # 274 tests, offline (mock model, mongomock): decision rules, agents, triage and vectors, briefings, dashboards, register, API flows
 python -m app.load_datapack     # load catalog into MongoDB (needs MONGODB_URI)
 
 # frontend (proxies /api to :8000)
@@ -234,5 +249,6 @@ docker compose up --build        # http://localhost:5173
 - [x] Follow-up actions, team briefings, BI report register, owner hand-off, in-app dashboard builder (PR #3, PR #4)
 - [x] Live deployment: Cloudflare Worker (Free) + Azure Container Apps, release `8545d81`
 - [x] BI Portfolio for the BI department head (`/bi-estate`), app renamed to AnalytIQ intelligence
+- [x] Evidence & governance in the BI Portfolio
 - [ ] Automatic releases: add the five GitHub secrets and fix the managed identity's role assignment (see Deployment)
 - [ ] Validate generated PBIP in Power BI Desktop (PBIP generation is no longer in the Ask flow)
