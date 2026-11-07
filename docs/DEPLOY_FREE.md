@@ -107,9 +107,38 @@ npm run deploy:free
 It builds the frontend and uploads it with the small proxy Worker. The output ends with
 `https://analytics-manager.<your-subdomain>.workers.dev`. Open it and run a starter question.
 
-## Updating
+## Automatic deploys on push to main
 
-- **Backend:** push to `version-4` (the image builds by itself), wait for the workflow to finish, then in Cloud Shell:
+After a one-time setup, every push to `main` deploys by itself:
+
+| Change in | Workflow | What happens |
+|---|---|---|
+| `backend/`, `materials/` | **Backend image** | Tests, image to ghcr.io, the Container App switches to this commit's image, health check |
+| `frontend/`, `deploy/cloudflare/` | **Frontend deploy** | Type check and build, `wrangler deploy` of the free Worker, page and API check |
+
+Pushes to `version-2` and `version-4` only test and build the backend image; they never deploy.
+Until the secrets below exist, both workflows still run as checks and skip the deploy step with a notice.
+
+**One-time setup** (GitHub → **Settings → Secrets and variables → Actions → New repository secret**):
+
+1. `AZURE_CREDENTIALS`: in Azure Cloud Shell, run
+
+   ```bash
+   cd ~/bayer2026 && git pull && bash deploy/azure/containerapp.sh github
+   ```
+
+   It creates a service principal that may change only the `analytics-manager-rg` resource group and prints a JSON block.
+   Paste the whole JSON as the secret value, then run `clear` in Cloud Shell. It contains a password: never paste it anywhere else.
+   If your school's Azure directory does not allow creating it ("Insufficient privileges"), keep updating the backend by hand
+   (below); the frontend automation works regardless.
+2. `CLOUDFLARE_API_TOKEN`: Cloudflare dashboard → **My Profile → API Tokens → Create Token → "Edit Cloudflare Workers"** template.
+3. `CLOUDFLARE_ACCOUNT_ID`: Cloudflare dashboard → **Workers & Pages** → Account ID on the right.
+
+Check: **Actions** → the latest run → the summary shows "Backend deployed" or "Frontend deployed" with the address.
+
+## Updating by hand
+
+- **Backend:** push (the image builds by itself), wait for the workflow to finish, then in Cloud Shell:
 
 ```bash
 cd ~/bayer2026 && bash deploy/azure/containerapp.sh update

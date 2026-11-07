@@ -7,6 +7,7 @@
 #   bash containerapp.sh url      print the backend address (BACKEND_URL for the Cloudflare Worker)
 #   bash containerapp.sh logs     follow the backend's console output
 #   bash containerapp.sh jev      add or replace the TypeSafe key (Jev) on an existing app
+#   bash containerapp.sh github   create the login GitHub Actions uses to deploy on push to main (AZURE_CREDENTIALS)
 #
 # Secrets are read from the keyboard, never written to a file.
 set -euo pipefail
@@ -71,7 +72,18 @@ case "${1:-}" in
       --set-env-vars TYPESAFE_API_KEY=secretref:typesafe-api-key JEV_MODEL=jev-1.14.0
     echo "Jev key set. Check: $(url)/api/health should show \"jev\": true"
     ;;
+  github)
+    # A service principal that may change only this resource group. Its JSON goes into the GitHub
+    # repository secret AZURE_CREDENTIALS; it contains a password, so do not paste it anywhere else.
+    SUB=$(az account show --query id -o tsv)
+    echo "Creating service principal bayer2026-github-deploy (Contributor on $RG only)..."
+    az ad sp create-for-rbac --name bayer2026-github-deploy --role contributor \
+      --scopes "/subscriptions/$SUB/resourceGroups/$RG" --json-auth
+    echo
+    echo "Copy the whole JSON above into GitHub: Settings > Secrets and variables > Actions > New repository secret,"
+    echo "name AZURE_CREDENTIALS. Then clear this screen with: clear"
+    ;;
   url)  url ;;
   logs) az containerapp logs show -n "$APP" -g "$RG" --follow --format text ;;
-  *)    echo "usage: bash containerapp.sh create|update|jev|url|logs"; exit 1 ;;
+  *)    echo "usage: bash containerapp.sh create|update|jev|github|url|logs"; exit 1 ;;
 esac

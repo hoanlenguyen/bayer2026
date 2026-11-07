@@ -134,7 +134,8 @@ Every option serves frontend and API from one address (no CORS, no `VITE_API_BAS
 
 **Free (current choice): Cloudflare Workers Free + Azure Container Apps (`docs/DEPLOY_FREE.md`)**
 - Frontend: `deploy/cloudflare/wrangler.free.jsonc` + `src/proxy.js`, static assets, `/api/*` forwarded to `BACKEND_URL`. No tunnel.
-- Backend: `.github/workflows/backend-image.yml` pushes `ghcr.io/<owner>/bayer2026-backend`; `deploy/azure/containerapp.sh create|update|url|logs` (Cloud Shell) runs it on Container Apps, 0.5 vCPU / 1 GiB, 0 to 1 replica, secrets as Container Apps secrets, no Log Analytics. Atlas must allow `0.0.0.0/0`.
+- Automatic on push to `main` (after secrets `AZURE_CREDENTIALS`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`; without them the deploy steps are skipped): `backend-image.yml` tests, builds and switches the Container App to the commit's image; `frontend-deploy.yml` builds and deploys the free Worker. `version-2`/`version-4` pushes only test and build.
+- Backend: `.github/workflows/backend-image.yml` pushes `ghcr.io/<owner>/bayer2026-backend`; `deploy/azure/containerapp.sh create|update|jev|github|url|logs` (Cloud Shell) runs it on Container Apps, 0.5 vCPU / 1 GiB, 0 to 1 replica, secrets as Container Apps secrets, no Log Analytics. Atlas must allow `0.0.0.0/0`.
 
 **Azure for Students VM (`deploy/server/`, `docs/DEPLOY_AZURE.md`)**, tested end to end with Docker:
 - Ubuntu 24.04 on `Standard_B2ats_v2` (free 750 h/month for 12 months), 64 GiB disk, France Central, DNS label `<name>.<region>.cloudapp.azure.com`.
