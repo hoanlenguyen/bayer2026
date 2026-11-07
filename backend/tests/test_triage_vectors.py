@@ -218,3 +218,10 @@ def test_embeddings_local_setting(monkeypatch):
     monkeypatch.setattr(vectors, "settings", SimpleNamespace(embeddings="local", embed_model="m", embed_dims=8))
     llm = SimpleNamespace(enabled=True, client=SimpleNamespace(embeddings=object()))
     assert isinstance(vectors.get_embedder(llm), LocalEmbedder)
+
+
+def test_base_url_without_protocol_is_ignored():
+    from app.settings import _base_url
+    assert _base_url("api.openai.com/v1") is None
+    assert _base_url('""') is None and _base_url("  ") is None
+    assert _base_url("https://my-resource.openai.azure.com/openai/v1") == "https://my-resource.openai.azure.com/openai/v1"
