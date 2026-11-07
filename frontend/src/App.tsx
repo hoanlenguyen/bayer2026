@@ -3,6 +3,7 @@ import { Sidebar, type Page } from "./components/Sidebar";
 import { AskPage } from "./pages/AskPage";
 import { CalaGraphPage } from "./pages/CalaGraphPage";
 import { ExplorerPage } from "./pages/ExplorerPage";
+import { LandingPage } from "./pages/LandingPage";
 import { SimulatorPage } from "./pages/SimulatorPage";
 
 const BriefingsPage = lazy(() => import("./pages/BriefingsPage").then(({ BriefingsPage }) => ({ default: BriefingsPage })));
@@ -56,7 +57,9 @@ export default function App() {
     if (page === "briefings") document.title = "Team briefings · AnalytIQ intelligence";
   }, [page]);
   return (
-    <div className={`app app-${page}`}>
+    <>
+    {page === "landing" && <LandingPage />}
+    <div className={`app app-${page}`} hidden={page === "landing"}>
       <Sidebar page={page} />
       <div className="app-main">
         {/* Ask and Simulator stay mounted so an answer keeps arriving, and the screen stays as it was, while on another page. */}
@@ -72,5 +75,6 @@ export default function App() {
         {page === "briefings" && <Suspense fallback={<main className="page" aria-busy="true">Loading team briefings…</main>}><BriefingsPage /></Suspense>}
       </div>
     </div>
+    </>
   );
 }

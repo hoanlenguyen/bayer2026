@@ -4,7 +4,7 @@ Project context for Claude Code and for the team. Keep this file current: it is 
 
 ## Project
 
-**AnalytIQ intelligence** (formerly "Agentic Analytics Manager"). SinceAI Hackathon 2026, challenge "Build Less, Build Better: AI for Governed Analytics".
+**AnalytIQ Intelligence**. SinceAI Hackathon 2026, challenge "Build Less, Build Better: AI for Governed Analytics".
 
 An AI workspace that helps a pharma manufacturing plant ask the right business question, reuse or create trustworthy analytics, and manage the follow-up actions. It decides what deserves to exist before anything is built.
 

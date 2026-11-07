@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { openConversation, removeConversation, useAnswerInProgress, useConversations, useCurrentConversation } from "../lib/conversations";
 import { navigate } from "../lib/navigation";
 import { Icon } from "./Icon";
+import logo from "../assets/analytiq-logo.png";
 
 export type Page = "ask" | "explorer" | "cala-graph" | "simulator" | "briefings" | "dashboard" | "workbook" | "bi-estate";
 
@@ -114,9 +115,8 @@ export function Sidebar({ page }: { page: Page }) {
         <a href="/bi-estate" onClick={navigate} aria-label="BI Portfolio" title={tip("BI Portfolio")} aria-current={page === "bi-estate" ? "page" : undefined}><Icon name="search" /><span><span className="nav-extra">BI </span>Portfolio</span></a>
       </nav>
       {!collapsed && <HistoryList page={page} />}
-      <p className="sample-note" title="All data in this app is fictional sample data">
-        <span className="sample-tag">Sample<span className="sample-extra"> data</span></span>
-        <span className="sample-text">Synthetic pharma data.</span>
+      <p className="sample-note" title="All data in this app is synthetic, provided by SinceAI">
+        <span className="sample-text">Synthetic data by SinceAI</span>
       </p>
     </header>
   );
