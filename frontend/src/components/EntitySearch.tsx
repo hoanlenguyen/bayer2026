@@ -26,7 +26,7 @@ export function EntitySearch({ onPick }: { onPick: (id: string) => void }) {
       <input
         id="search"
         type="search"
-        placeholder="Search reports, measures, owners"
+        placeholder="Search reports, KPIs, owners"
         autoComplete="off"
         aria-controls="search-results"
         aria-expanded={open && !!q}
@@ -38,7 +38,7 @@ export function EntitySearch({ onPick }: { onPick: (id: string) => void }) {
           if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(matches.length - 1, a + 1)); }
           else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(0, a - 1)); }
           else if (e.key === "Enter" && matches[active]) { e.preventDefault(); pick(matches[active].id); }
-          else if (e.key === "Escape") setOpen(false);
+          else if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } // closes only this list
         }}
       />
       {open && q && (

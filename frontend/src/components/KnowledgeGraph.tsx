@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { STATUS, TYPES } from "../data/estate";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { REL, STATUS, TYPES } from "../data/estate";
+import { EntitySearch } from "./EntitySearch";
+import { Icon } from "./Icon";
 import type { Edge, Entity, RelationType } from "../data/types";
 
 /** Small unnamed dots that give the graph its density. They are not catalog items. Set to false to show only real items. */
@@ -196,6 +198,35 @@ interface Props {
 export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [hover, setHover] = useState<Dot | null>(null);
+  const [selected, setSelected] = useState<Dot | null>(null);
+  const [linkQuery, setLinkQuery] = useState("");
+  useEffect(() => setLinkQuery(""), [selected]); // each item starts with its full list
+  const pinRef = useRef<(id: string | null) => void>(() => undefined);
+
+  /** Each item's linked items, grouped by how they relate to it, for the side panel. */
+  const linksOf = useMemo(() => {
+    const byId = new Map(entities.map((e) => [e.id, e]));
+    const all = new Map<string, Map<string, Entity[]>>();
+    const add = (id: string, label: string, other: Entity) => {
+      const groups = all.get(id) ?? new Map<string, Entity[]>();
+      groups.set(label, [...(groups.get(label) ?? []), other]);
+      all.set(id, groups);
+    };
+    for (const l of catalogEdges) {
+      const s = byId.get(l.s), t = byId.get(l.t);
+      if (!s || !t) continue;
+      add(s.id, REL[l.rel].out, t);
+      add(t.id, REL[l.rel].in, s);
+    }
+    return all;
+  }, [entities, catalogEdges]);
+  const selectedLinks = [...(selected?.entity ? linksOf.get(selected.entity.id) ?? [] : [])];
+  const linkCount = selectedLinks.reduce((sum, [, items]) => sum + items.length, 0);
+  const query = linkQuery.trim().toLowerCase();
+  const shownLinks = selectedLinks
+    .map(([label, items]) => [label, items.filter((i) => `${i.name} ${TYPES[i.type].label}`.toLowerCase().includes(query))] as const)
+    .filter(([, items]) => items.length > 0);
+  const shownCount = shownLinks.reduce((sum, [, items]) => sum + items.length, 0);
 
   useEffect(() => {
     const canvas = ref.current!;
@@ -224,6 +255,10 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
     let rx = -0.3, ry = 0, zoom = 1, panX = 0, panY = 0;
     let dragging: null | "rotate" | "pan" = null, lx = 0, ly = 0, raf = 0;
     let mx = -1e4, my = -1e4, held = false;
+    let pinned = -1, downX = 0, downY = 0, clickable = false; // the clicked item stays highlighted
+    let shift = 0; // moves the graph aside while the side panel is open
+    const pin = (i: number) => { pinned = i; setSelected(i >= 0 ? dots[i]! : null); };
+    pinRef.current = (id) => pin(id === null ? -1 : dots.findIndex((d) => d.entity?.id === id));
     const neighbours = dots.map((): number[] => []);
     for (const [a, b] of edges) { neighbours[a]!.push(b); neighbours[b]!.push(a); }
     const dotLinked = css.getPropertyValue("--kg-dot-linked").trim();
@@ -245,17 +280,22 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
       ctx.clearRect(0, 0, w, h);
       const cy = Math.cos(ry), sy = Math.sin(ry), cx = Math.cos(rx), sx = Math.sin(rx);
       const f = 1100, base = zoom * Math.min(w, h) / 720; // a long lens keeps near groups from ballooning
+      shift += ((pinned >= 0 && w > 768 ? 160 : 0) - shift) * 0.15;
+      const viewX = w / 2 + panX - shift;
       let hovered = -1, nearest = 10;
       dots.forEach((d, i) => {
         const x1 = d.x * cy - d.z * sy, z1 = d.x * sy + d.z * cy;
         const y2 = d.y * cx - z1 * sx, z2 = d.y * sx + z1 * cx;
         const s = (f / Math.max(60, f + z2)) * base;
-        px[i] = w / 2 + panX + x1 * s; py[i] = h / 2 + panY + y2 * s; ps[i] = s;
+        px[i] = viewX + x1 * s; py[i] = h / 2 + panY + y2 * s; ps[i] = s;
         if (d.entity) {
           const dist = Math.hypot(px[i]! - mx, py[i]! - my);
           if (dist < nearest) { nearest = dist; hovered = i; }
         }
       });
+
+      if (!dragging) canvas.style.cursor = hovered >= 0 ? "pointer" : "grab";
+      if (hovered < 0) hovered = pinned; // hovering another item previews it; otherwise the pinned one shows
 
       ctx.lineWidth = 0.2;
       for (const far of [true, false]) {
@@ -305,7 +345,7 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
         const x1 = g.x * cy - g.z * sy, z1 = g.x * sy + g.z * cy;
         const y2 = g.y * cx - z1 * sx, z2 = g.y * sx + z1 * cx;
         const s = (f / Math.max(60, f + z2)) * base;
-        label(g.name, w / 2 + panX + x1 * s, h / 2 + panY + y2 * s - g.radius * s - 7);
+        label(g.name, viewX + x1 * s, h / 2 + panY + y2 * s - g.radius * s - 7);
       }
 
       // The hovered item: a coral dot with its name in a tooltip just below, and its linked items in amber.
@@ -354,6 +394,7 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
       track(e);
       dragging = e.button === 2 ? "pan" : "rotate";
       lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId);
+      downX = e.clientX; downY = e.clientY; clickable = e.button === 0;
       canvas.style.cursor = "grabbing";
     };
     const move = (e: PointerEvent) => {
@@ -363,6 +404,19 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
       if (dragging === "rotate") { ry += dx * 0.005; rx += dy * 0.005; } else { panX += dx; panY += dy; }
     };
     const up = () => { dragging = null; canvas.style.cursor = "grab"; };
+    /** A press that barely moved is a click: pin the item under it, or clear the pin. Otherwise it was a drag. */
+    const release = (e: PointerEvent) => {
+      up();
+      if (!clickable || Math.hypot(e.clientX - downX, e.clientY - downY) > 5) return;
+      track(e);
+      let under = -1, nearest = 10;
+      dots.forEach((d, i) => {
+        const dist = Math.hypot(px[i]! - mx, py[i]! - my);
+        if (d.entity && dist < nearest) { nearest = dist; under = i; }
+      });
+      pin(under === pinned ? -1 : under);
+    };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") pin(-1); };
     const leave = () => { mx = my = -1e4; };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -375,7 +429,8 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
     window.addEventListener("resize", resize, { signal });
     canvas.addEventListener("pointerdown", down, { signal });
     canvas.addEventListener("pointermove", move, { signal });
-    canvas.addEventListener("pointerup", up, { signal });
+    window.addEventListener("keydown", key, { signal });
+    canvas.addEventListener("pointerup", release, { signal });
     canvas.addEventListener("pointercancel", up, { signal });
     canvas.addEventListener("pointerleave", leave, { signal });
     canvas.addEventListener("wheel", wheel, { passive: false, signal });
@@ -387,9 +442,10 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
   }, [entities, catalogEdges]);
 
   return (
-    <div className="kg">
+    <div className={`kg${selected ? " kg-open" : ""}`}>
       <canvas ref={ref} className="kg-canvas" role="img" aria-label={`Graph of ${entities.length} catalog items and ${catalogEdges.length} links.`} />
-      <div className="kg-card">
+      <div className="kg-search"><EntitySearch onPick={(id) => pinRef.current(id)} /></div>
+      <div className="kg-card" hidden={!!selected && hover === selected}>
         {hover?.entity ? (
           <>
             <p className="kg-card-title">{hover.entity.name}</p>
@@ -400,10 +456,60 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
           <>
             <p>Live catalog: {entities.length} items, {catalogEdges.length} links.</p>
             <p>Grouped by domain. Shared KPIs sit in the middle.</p>
+            <p>Click a dot to see what links to it.</p>
             {ILLUSTRATIVE_DOTS && <p>Small unnamed dots are illustrative only.</p>}
           </>
         )}
       </div>
+      {selected?.entity && (
+        <aside className="kg-panel" aria-label={`Items linked to ${selected.entity.name}`}>
+          <header className="kg-panel-head">
+            <div>
+              <h2>{selected.entity.name}</h2>
+              <p>{TYPES[selected.entity.type].label} · {STATUS[selected.entity.status].label}</p>
+              {selected.entity.type !== "domain" && <p>{selected.domain ?? "Shared across domains"}</p>}
+            </div>
+            <button type="button" className="kg-panel-close" aria-label="Close" onClick={() => pinRef.current(null)}><Icon name="close" /></button>
+          </header>
+          <div className="kg-panel-tools">
+            <p className="kg-panel-count">{query ? `${shownCount} of ` : ""}{linkCount} linked {linkCount === 1 ? "item" : "items"}</p>
+            {linkCount > 0 && (
+              <div className="search">
+                <label htmlFor="kg-link-search" className="sr-only">Search linked items</label>
+                <Icon name="search" />
+                <input
+                  id="kg-link-search"
+                  type="search"
+                  placeholder="Search linked items"
+                  autoComplete="off"
+                  value={linkQuery}
+                  onChange={(e) => setLinkQuery(e.target.value)}
+                  // Esc clears the search first; only an empty box lets it close the panel.
+                  onKeyDown={(e) => { if (e.key === "Escape" && linkQuery) { e.stopPropagation(); setLinkQuery(""); } }}
+                />
+              </div>
+            )}
+          </div>
+          <div className="kg-panel-body">
+            {query && shownCount === 0 && <p className="kg-panel-empty">Nothing matches “{linkQuery.trim()}”.</p>}
+            {shownLinks.map(([label, items]) => (
+              <section key={label}>
+                <h3>{label} <span>{items.length}</span></h3>
+                <ul>
+                  {[...items].sort((a, b) => a.name.localeCompare(b.name)).map((item) => (
+                    <li key={item.id}>
+                      <button type="button" onClick={() => pinRef.current(item.id)}>
+                        <span className="kg-row-name">{item.name}</span>
+                        <span className="kg-row-type">{TYPES[item.type].label}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        </aside>
+      )}
     </div>
   );
 }

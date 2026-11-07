@@ -76,6 +76,7 @@ export function AskPage() {
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    document.title = "Analytics Manager";
     api.health().then(setHealth).catch(() => setOffline(true));
     api.presets().then(setPresets).catch(() => setOffline(true));
     api.catalog().then(setCatalog).catch(() => undefined);

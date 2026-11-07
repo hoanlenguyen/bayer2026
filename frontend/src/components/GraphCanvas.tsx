@@ -195,7 +195,7 @@ export function GraphCanvas({ focus, depth, hidden, selected, onSelect, onFocus,
     const nb = new Set<string>(id ? [id] : []);
     if (id) links.forEach((l) => { if (l.source.id === id) nb.add(l.target.id); if (l.target.id === id) nb.add(l.source.id); });
     const touches = (l: GLink) => l.source.id === id || l.target.id === id;
-    root.selectAll<SVGGElement, GNode>("g.node").classed("dim", (d) => !!id && !nb.has(d.id)).classed("selected", (d) => d.id === id);
+    root.selectAll<SVGGElement, GNode>("g.node").classed("dim", (d) => !!id && !nb.has(d.id)).classed("selected", (d) => d.id === id).classed("linked", (d) => !!id && d.id !== id && nb.has(d.id));
     root.selectAll<SVGLineElement, GLink>("line.link").classed("dim", (l) => !!id && !touches(l)).classed("hot", (l) => !!id && touches(l));
     root.selectAll<SVGTextElement, GLink>("text.link-label").classed("dim", (l) => !!id && !touches(l)).classed("hot", (l) => !!id && touches(l));
   }, [selected, focus, depth, hidden]);

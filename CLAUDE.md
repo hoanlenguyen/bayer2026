@@ -71,7 +71,7 @@ frontend/  React + TypeScript + Vite
   #ask       Ask page: chat, department presets, verdict card (scores + approval), "How this was decided" panel
   #explorer  Estate Explorer: entity details + relationship graph ("molecular view"),
              loaded from GET /api/graph (live plant catalog, same governance scoring as the Ask flow)
-  /cala-graph  Knowledge graph: full-screen 3D canvas (path route, not in the sidebar), loaded from
+  /cala-graph  Knowledge graph: full-screen 3D canvas (path route, "Knowledge Graph" in the sidebar), loaded from
              GET /api/graph and grouped by domain (workspace) using the catalog's own links
 backend/   Python 3.12+, FastAPI
   app/main.py        HTTP API, Server-Sent Events stream of pipeline events
