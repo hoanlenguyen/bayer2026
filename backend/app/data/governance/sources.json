@@ -1,0 +1,58 @@
+{
+  "note": "Permitted sources for the BI Portfolio's governance register. All of them are synthetic demo material written for AnalytIQ and approved for the public demo. No company policy document was supplied.",
+  "sources": [
+    {
+      "ref": "demo/DEMO-POL-001/r1",
+      "doc_id": "DEMO-POL-001",
+      "title": "Production dashboard ownership",
+      "authority": "demo_document",
+      "issuer": "AnalytIQ demo content (synthetic, not a company policy)",
+      "accountable_team": "BI Governance (demo)",
+      "owner": "BI department head (demo)",
+      "version": "1",
+      "effective_from": "2026-01-01",
+      "status": "Published demo revision",
+      "access": "public_demo",
+      "file": "DEMO-POL-001-r1.md",
+      "clauses": {
+        "1": {"title": "Scope", "text": "This note applies to dashboards that the BI department has explicitly mapped to it and that sit in a production workspace."},
+        "2": {"title": "Ownership handover", "text": "When accountability for a mapped dashboard changes, the current owner records the incoming accountable person in the governance record before the handover takes place."}
+      }
+    },
+    {
+      "ref": "demo/DEMO-POL-001/r2",
+      "doc_id": "DEMO-POL-001",
+      "title": "Production dashboard ownership",
+      "authority": "demo_document",
+      "issuer": "AnalytIQ demo content (synthetic, not a company policy)",
+      "accountable_team": "BI Governance (demo)",
+      "owner": "BI department head (demo)",
+      "version": "2",
+      "effective_from": "2026-11-01",
+      "status": "Published demo revision",
+      "access": "public_demo",
+      "file": "DEMO-POL-001-r2.md",
+      "clauses": {
+        "1": {"title": "Scope", "text": "This note applies to dashboards that the BI department has explicitly mapped to it and that sit in a production workspace."},
+        "2": {"title": "Ownership handover", "text": "When accountability for a mapped dashboard changes, the current owner records the incoming accountable person and the effective handover date in the governance record before the handover takes place."}
+      }
+    },
+    {
+      "ref": "demo/DEMO-HR-001/r1",
+      "doc_id": "DEMO-HR-001",
+      "title": "Travel expense approvals",
+      "authority": "demo_document",
+      "issuer": "AnalytIQ demo content (synthetic, not a company policy)",
+      "accountable_team": "HR operations (demo)",
+      "owner": "HR operations lead (demo)",
+      "version": "1",
+      "effective_from": "2026-03-01",
+      "status": "Published demo revision",
+      "access": "public_demo",
+      "file": "DEMO-HR-001-r1.md",
+      "clauses": {
+        "4": {"title": "Approval limits", "text": "Travel costs above the team budget need approval from the cost centre owner before booking."}
+      }
+    }
+  ]
+}

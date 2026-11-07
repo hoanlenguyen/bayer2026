@@ -1,5 +1,44 @@
 # Deploy for free: Cloudflare Workers Free (frontend) + Azure Container Apps (backend)
 
+## Push changes live
+
+Use `main` for production. This checkout is configured with a `git live` shortcut. In another checkout, install it once:
+
+```bash
+git config alias.live '!bash deploy/push-live.sh'
+```
+
+Before editing, get the latest code:
+
+```bash
+git switch main
+git pull --ff-only origin main
+```
+
+After editing, review and commit the files you want to publish, then run:
+
+```bash
+git add path/to/changed-file
+git commit -m "Describe the change"
+git live
+```
+
+`git live` fetches the latest history, safely fast-forwards when possible, and pushes your committed changes to `main`.
+It stops if there are uncommitted files or conflicting history. It never force-pushes or commits files for you.
+`git live --check` validates the history without moving your branch or pushing.
+
+Open [Actions → Deploy live](https://github.com/hoanlenguyen/bayer2026/actions/workflows/deploy-live.yml) to follow the release:
+backend tests and image → Azure update → new revision ready and commercial API returns 200 → Cloudflare `deploy:free` →
+live `/briefings` and its API return 200. The final job summary gives the verified `/briefings` URL.
+A successful Git push only starts the release; a green **Deploy live** run confirms deployment.
+If nothing new was pushed, use **Run workflow → main** there to retry a release.
+
+**One-time requirement:** the repository needs `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `CLOUDFLARE_API_TOKEN`,
+and `CLOUDFLARE_ACCOUNT_ID`.
+The account owner adds these in [Settings → Secrets and variables → Actions](https://github.com/hoanlenguyen/bayer2026/settings/secrets/actions).
+See [Automatic deploys](#automatic-deploys-on-push-to-main) below for how to obtain each value. Keep the values out of chat and Git.
+Once configured, collaborators with GitHub write access can publish without signing into Azure or Cloudflare on their own machines.
+
 ```
 Browser ──► https://analytics-manager.<your-subdomain>.workers.dev      Cloudflare Worker, Free plan
               ├─ /, /cala-graph, /assets/*  → React build (static assets)
@@ -70,7 +109,8 @@ the password.
 bash deploy/azure/containerapp.sh create
 ```
 
-It asks for the GitHub username, the token from step 2, `OPENAI_API_KEY` and `MONGODB_URI` (typing is hidden). It creates the resource
+It asks for the GitHub username, the token from step 2, `OPENAI_API_KEY`, `MONGODB_URI` and, optionally, `TYPESAFE_API_KEY` for Jev
+(typing is hidden; leave a prompt empty to skip it). It creates the resource
 group `analytics-manager-rg` in France Central, a Container Apps environment without paid logging, and the app, then prints the
 backend address, for example `https://analytics-manager-api.<id>.francecentral.azurecontainerapps.io`.
 
@@ -106,9 +146,38 @@ npm run deploy:free
 It builds the frontend and uploads it with the small proxy Worker. The output ends with
 `https://analytics-manager.<your-subdomain>.workers.dev`. Open it and run a starter question.
 
-## Updating
+## Automatic deploys on push to main
 
-- **Backend:** push to `version-4` (the image builds by itself), wait for the workflow to finish, then in Cloud Shell:
+After a one-time setup, every push to `main` starts **Deploy live**. It checks all three credentials first, then calls
+**Backend image** to test, build, deploy Azure, and verify `/api/briefings/commercial`. Only after that passes does it call
+**Frontend deploy** to run `npm run deploy:free` and verify the live `/briefings` page and proxied API.
+
+Pushes to `version-2` and `version-4` only test and build the backend image; they never deploy.
+While any of these secrets is missing, Deploy live still tests and builds the backend image, deploys nothing, and ends with a
+yellow **Remind to deploy by hand** job: its summary gives the exact backend and frontend commands for that commit. `git live`
+prints the same reminder after it pushes.
+
+**One-time setup** (GitHub → **Settings → Secrets and variables → Actions → New repository secret**):
+
+1. `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`: in Azure Cloud Shell (Bash), run
+
+   ```bash
+   cd ~/bayer2026 && git pull origin main && bash deploy/azure/containerapp.sh github
+   ```
+
+   It creates a managed identity `bayer2026-github-deploy` in `analytics-manager-rg`, lets it change only that resource group,
+   and trusts GitHub Actions runs on this repository's `main` branch to sign in as it (OpenID Connect). It prints the three IDs to
+   add as secrets. They are IDs, not passwords: each run gets a short-lived token. This works with school accounts that may not
+   register applications ("Insufficient privileges"), because a managed identity is a normal resource in your own resource group.
+2. `CLOUDFLARE_API_TOKEN`: Cloudflare dashboard → **My Profile → API Tokens → Create Token → "Edit Cloudflare Workers"** template.
+3. `CLOUDFLARE_ACCOUNT_ID`: Cloudflare dashboard → **Workers & Pages** → Account ID on the right.
+
+Check: **Actions → Deploy live → Run workflow → main**. A successful release ends with **Live briefings** and its verified address
+in the frontend job summary. Local Wrangler login is only needed for a manual deployment from your machine.
+
+## Updating by hand
+
+- **Backend:** push (the image builds by itself), wait for the workflow to finish, then in Cloud Shell:
 
 ```bash
 cd ~/bayer2026 && bash deploy/azure/containerapp.sh update
@@ -116,12 +185,15 @@ cd ~/bayer2026 && bash deploy/azure/containerapp.sh update
 
 - **Frontend:** `npm run deploy:free` in `deploy/cloudflare` again.
 
+The separate **Legacy Cloudflare Containers (paid)** workflow is for the paid alternative, not this deployment.
+
 ## Daily operations (Cloud Shell, in `~/bayer2026`)
 
 | Task | Command |
 |---|---|
 | Backend address | `bash deploy/azure/containerapp.sh url` |
 | Live backend logs | `bash deploy/azure/containerapp.sh logs` |
+| Turn Jev on (add or replace the TypeSafe key) | `bash deploy/azure/containerapp.sh jev` |
 | Frontend logs | `npx wrangler tail -c wrangler.free.jsonc` in `deploy/cloudflare` |
 | Delete everything on Azure | `az group delete -n analytics-manager-rg` |
 

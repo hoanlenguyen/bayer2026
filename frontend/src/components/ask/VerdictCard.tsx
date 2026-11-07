@@ -1,12 +1,16 @@
+import { useState, useCallback } from "react";
 import type { Candidate, CatalogMeta, StageEvent, StageId } from "../../api/types";
 import { Icon } from "../Icon";
 import { RUNNING_COPY } from "./FlowPanel";
 import { RecommendationChip } from "./RecommendationChip";
+import { RequestHandoff } from "./RequestHandoff";
+import { navigate } from "../../lib/navigation";
 
 interface Props {
   stages: Partial<Record<StageId, StageEvent>>;
   catalog: CatalogMeta | null;
   busy: boolean;
+  handoff?: { conversationId: string; runId: string };
 }
 
 const VERDICTS = {
@@ -46,24 +50,31 @@ function ScoreMeter({ label, hint, value, target, floor }: { label: string; hint
 }
 
 /** The answer to "do we already have this?": the recommendation and its scores. The evidence is in the steps beside it. It only recommends. */
-export function VerdictCard({ stages, catalog, busy }: Props) {
+export function VerdictCard({ stages, catalog, busy, handoff }: Props) {
+  const [builtRun, setBuiltRun] = useState<{ id: string; reused: boolean }>();
+  const onBuilt = useCallback((id: string, reused: boolean) => setBuiltRun({ id, reused }), []);
+  const saved = builtRun && handoff && builtRun.id === handoff.runId ? builtRun : null;
+  const [recheck, setRecheck] = useState<{ runId: string; reason: string | null } | null>(null);
+  const onRecheck = useCallback((runId: string, reason: string | null) => setRecheck({ runId, reason }), []);
+  const currentReview = !!(handoff && recheck?.runId === handoff.runId && recheck.reason);
   const stage = stages.decision;
   if (!stage || stage.status !== "done") return null;
 
   const d = stage.data;
-  const title = VERDICTS[d.decision as keyof typeof VERDICTS] ?? stage.summary;
+  const title = currentReview ? "Review the saved match before using it" : VERDICTS[d.decision as keyof typeof VERDICTS] ?? stage.summary;
   const c: Candidate | null = d.candidate ?? null;
   // On a new build the candidate is only the closest old report, not the report to build.
   const building = d.decision === "new_build";
   const t = d.thresholds ?? {};
 
+  const native = d.decision === "reuse" ? d.employee_report : null;
   const asset = stages.deliver?.data?.asset;
-  const reportName: string | null = asset?.name ?? (building ? null : c?.name) ?? null;
+  const reportName: string | null = native?.title ?? native?.label ?? asset?.name ?? (building ? null : c?.name) ?? null;
   const targetModel: { name: string; owner?: string | null; owner_status?: string | null } | null = d.target_model ?? null;
-  const owner: string | null = asset?.owner ?? (building ? targetModel?.owner : c?.owner) ?? null;
+  const owner: string | null = native?.owner ?? asset?.owner ?? (building ? targetModel?.owner : c?.owner) ?? null;
   const ownerStatus: string | null | undefined = asset?.owner_status ?? (building ? targetModel?.owner_status : c?.owner_status);
   const ownerText = owner && `Owner: ${owner}${ownerStatus && ownerStatus !== "active" ? ` (${ownerStatus})` : ""}`;
-  const reportId: string | null = asset?.id ?? (building ? null : c?.asset_id) ?? null;
+  const reportId: string | null = native?.report_id ?? asset?.id ?? (building ? null : c?.asset_id) ?? null;
 
   const missing = c && !building
     ? [
@@ -81,18 +92,23 @@ export function VerdictCard({ stages, catalog, busy }: Props) {
 
   const running = (Object.values(stages) as StageEvent[]).find((s) => s.status === "running");
 
+  const flags = d.flags?.length > 0 && <div className="verdict-flags"><Icon name="alert" /><div>
+    {d.flags.map((flag: { asset_id: string; name: string; message: string }) =>
+      <p key={flag.asset_id}><strong>{flag.name}:</strong> {flag.message}</p>)}
+  </div></div>;
+
   return (
     <article className="verdict" aria-label="Decision">
       <header className="verdict-head">
-        <RecommendationChip value={String(d.decision)} />
-        <h2>{title}</h2>
-        {reportName && (
+        {saved ? <span className="rec-chip rec-reuse">Saved dashboard</span> : <RecommendationChip value={currentReview ? "review" : String(d.decision)} />}
+        <h2>{saved ? (saved.reused ? "Use the saved dashboard" : "Your dashboard is ready") : title}</h2>
+        {!saved && reportName && (
           <p className="verdict-subject">
             <strong>{reportName}</strong>
             {ownerText && <span className="muted"> · {ownerText}</span>}
           </p>
         )}
-        {!reportName && building && targetModel && (
+        {!saved && !reportName && building && targetModel && (
           <p className="verdict-subject">
             <span className="muted">Shared model: </span><strong>{targetModel.name}</strong>
             {ownerText && <span className="muted"> · {ownerText}</span>}
@@ -100,12 +116,19 @@ export function VerdictCard({ stages, catalog, busy }: Props) {
         )}
       </header>
 
-      {d.reason && <p className="verdict-note">{d.reason}</p>}
+      {d.reason && !handoff && <p className="verdict-note">{d.reason}</p>}
 
-      {building && c && (
+      {native && !handoff && <div className="verdict-actions">
+        <a className="btn" href={native.url} onClick={navigate}>Open matching employee report <Icon name="arrowRight" /></a>
+      </div>}
+      {handoff && <RequestHandoff key={`${handoff.conversationId}/${handoff.runId}`} {...handoff} catalog={catalog} isNative={!!native} onRecheck={onRecheck} onBuilt={onBuilt} dashboardReady={!!saved} />}
+
+      {!saved && <>
+      {building && c && !handoff && (
         <p className="muted verdict-note">Closest existing report, which can't be reused: <strong>{c.name}</strong></p>
       )}
 
+      {currentReview && <p className="muted small verdict-fine">Scores from the original decision</p>}
       {c ? (
         <div className="vscores">
           <ScoreMeter label="Coverage" hint="Has the numbers you asked for" value={c.coverage} target={t.reuse_coverage ?? 0.9} floor={t.consolidate_min_coverage ?? t.extend_min_coverage ?? 0.6} />
@@ -116,41 +139,34 @@ export function VerdictCard({ stages, catalog, busy }: Props) {
         <p className="muted verdict-note">No existing report has these numbers, so reuse is not possible.</p>
       )}
 
-      {missing.length > 0 && (
+      {handoff && c?.scope_evidence?.conflict && <p className="muted small verdict-fine">These scores describe the catalog record. Reuse requires the owner to resolve the scope mismatch.</p>}
+      {missing.length > 0 && !handoff && (
         <p className="verdict-note"><span className="muted">To add: </span>{missing.join(", ")}</p>
       )}
       {unavailable.length > 0 && (
         <p className="verdict-note"><span className="muted">Not in the catalog: </span>{unavailable.join(", ")}</p>
       )}
 
-      {d.flags?.length > 0 && (
-        <div className="verdict-flags">
-          <Icon name="alert" />
-          <div>
-            {d.flags.map((f: { asset_id: string; name: string; message: string }) => (
-              <p key={f.asset_id}><strong>{f.name}:</strong> {f.message}</p>
-            ))}
-          </div>
-        </div>
-      )}
-
+      {flags && (handoff ? <details className="rh-legacy"><summary>Other catalog findings ({d.flags.length})</summary>{flags}</details> : flags)}
       {busy && (
         <p className="verdict-progress"><span className="spinner" aria-hidden="true" />{running ? RUNNING_COPY[running.stage] : "Working on the next step"}</p>
       )}
 
       {d.rules_applied?.length > 0 && <p className="muted small verdict-fine">Rules applied: {d.rules_applied.join(", ")}</p>}
 
-      {d.decision !== "reuse" && d.decision !== "not_feasible" && (
+      {!handoff && d.decision !== "reuse" && d.decision !== "not_feasible" && (
         <p className="muted small verdict-fine">This is a recommendation. Nothing has been built, changed or retired.</p>
       )}
 
       {reportId && (
         <div className="verdict-actions">
-          <button type="button" className="btn" onClick={() => openEntity(reportId)}>
+          {!native && <button type="button" className={handoff ? "btn-outline" : "btn"} onClick={() => openEntity(reportId)}>
             View in Estate Explorer<Icon name="arrowRight" />
-          </button>
+          </button>}
+          <a className="btn btn-outline" href={`/briefings?report=${encodeURIComponent(reportId)}`} onClick={navigate}>Open BI register record</a>
         </div>
       )}
+      </>}
     </article>
   );
 }

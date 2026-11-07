@@ -4,6 +4,7 @@ import type { CatalogMeta, DecisionType, Health, PipelineEvent, Preset, StageEve
 import { FlowPanel, RUNNING_COPY } from "../components/ask/FlowPanel";
 import { TriageStrip } from "../components/ask/TriageStrip";
 import { VerdictCard } from "../components/ask/VerdictCard";
+import { SavedDashboards } from "../components/ask/SavedDashboards";
 import { Icon } from "../components/Icon";
 import { conversationsChanged, CURRENT_REMOVED_EVENT, getCurrentConversation, setAnswerInProgress, OPEN_CONVERSATION_EVENT, setCurrentConversation, stagesOf, takePendingConversation } from "../lib/conversations";
 
@@ -17,13 +18,19 @@ interface ChatMessage {
 
 type ConvState = "idle" | "clarifying" | "awaiting_approval"; // awaiting_approval only exists in older saved conversations
 
-/** Each matches a preset's prompt in the backend, so a click also sends that preset's certified measures. */
+/** Workbook presets carry their governed intent. The dashboard example exercises ordinary free-text intake. */
 const STARTER_QUESTIONS = [
   "Please create a Power BI replacement for our legacy Tableau Xarelto commercial workbook.",
-  "Please build a new report for market access coverage and reimbursement status by product.",
+  "Build a monthly dashboard for Nubeqa net sales and units shipped in France.",
+  "Show monthly inventory coverage and OTIF for Lynkuet in Spain.",
+  "How are Eylea net sales and digital engagement developing in Japan?",
   "We need a monthly supply-risk dashboard by medicine and country.",
-  "I need a new Kerendia management report for monthly performance in EMEA and North America.",
   "Can we have a new finance dashboard for net sales, gross-to-net and budget variance by product?",
+];
+
+const MORE_QUESTIONS = [
+  "Please build a new report for market access coverage and reimbursement status by product.",
+  "I need a new Kerendia management report for monthly performance in EMEA and North America.",
 ];
 
 /** Renders **bold** segments; everything else is plain text. */
@@ -76,6 +83,7 @@ export function AskPage() {
   const [catalog, setCatalog] = useState<CatalogMeta | null>(null);
 
   const [convId, setConvId] = useState<string | null>(null);
+  const [restoredRunId, setRestoredRunId] = useState<string | null>(null);
   const [convState, setConvState] = useState<ConvState>("idle");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [stages, setStages] = useState<Partial<Record<StageId, StageEvent>>>({});
@@ -99,6 +107,7 @@ export function AskPage() {
       const restored = stagesOf(conv);
       setMessages(conv.messages.map((m) => ({ id: nextId.current++, role: m.role, content: m.content, kind: m.kind, suggestions: m.suggestions })));
       setStages(restored);
+      setRestoredRunId(conv.runs.at(-1)?.id ?? null);
       setDecision(restored.decision?.data?.decision ?? null);
       setConvId(conv._id);
       setConvState(conv.state === "clarifying" ? "clarifying" : "idle");
@@ -141,8 +150,12 @@ export function AskPage() {
   }, []);
 
   useEffect(() => {
-    // Works in both layouts: the list scrolls on desktop, the page scrolls on narrow screens.
-    listRef.current?.lastElementChild?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    const last = listRef.current?.lastElementChild;
+    if (!last) return;
+    // Open a finished dashboard at its headline. Keep following messages while the request runs.
+    const result = !busy && last.classList.contains("verdict");
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    last.scrollIntoView({ block: result ? "start" : "nearest", behavior: result || reducedMotion ? "instant" : "smooth" });
   }, [messages, busy, stages]);
 
   const handleEvent = useCallback((e: PipelineEvent) => {
@@ -158,6 +171,7 @@ export function AskPage() {
         setChecking(false);
         // The first step starting means the message was accepted as a new question: only now does the last answer go.
         if (e.stage === "intent" && e.status === "running") {
+          setRestoredRunId(null);
           setStages({ intent: e });
           setDecision(null);
           break;
@@ -204,6 +218,7 @@ export function AskPage() {
 
   const newChat = () => {
     setCurrentConversation(null);
+    setRestoredRunId(null);
     setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null);
   };
 
@@ -212,6 +227,7 @@ export function AskPage() {
     const cleared = () => {
       restoreAttempt.current++;
       setRestoring(false);
+      setRestoredRunId(null);
       setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null);
     };
     window.addEventListener(CURRENT_REMOVED_EVENT, cleared);
@@ -241,7 +257,9 @@ export function AskPage() {
   const working = busy && (!hasVerdict || checking) && (
     <p className="working"><span className="spinner" aria-hidden="true" />{runningStage ? RUNNING_COPY[runningStage] : "Reading your question"}</p>
   );
-  const answerCards = <><TriageStrip stages={stages} /><VerdictCard stages={stages} catalog={catalog} busy={busy} /></>;
+  const runId = stages.decision?.data?.run_id ?? restoredRunId;
+  const handoff = convId && runId && !busy && !restoring ? { conversationId: convId, runId } : undefined;
+  const answerCards = <><TriageStrip stages={stages} /><VerdictCard stages={stages} catalog={catalog} busy={busy} handoff={handoff} /></>;
 
   const offlineBanner = offline && (
     <div className="banner" role="status">
@@ -254,6 +272,7 @@ export function AskPage() {
   }
 
   if (messages.length === 0) {
+    const starter = (q: string) => <button key={q} type="button" onClick={() => send(q, presets.find((p) => p.prompt === q)?.id)} disabled={busy || !presets.length}>{q}</button>;
     return (
       <div className="ask-empty">
         <div className="ask-empty-above">
@@ -262,11 +281,13 @@ export function AskPage() {
         </div>
         <Composer onSend={(t) => send(t)} disabled={busy} autoFocus placeholder="Describe the decision or the numbers you need, in your own words" />
         <div className="ask-empty-below">
+          <SavedDashboards />
           <div className="starter-chips" role="group" aria-label="Example questions">
-            {STARTER_QUESTIONS.map((q) => (
-              <button key={q} type="button" onClick={() => send(q, presets.find((p) => p.prompt === q)?.id)} disabled={busy}>{q}</button>
-            ))}
+            {STARTER_QUESTIONS.map(starter)}
           </div>
+          <details className="rh-examples"><summary>More example questions</summary>
+            <div className="starter-chips">{MORE_QUESTIONS.map(starter)}</div>
+          </details>
           <p className="fineprint">The AI sees catalog metadata only, never raw production data.</p>
         </div>
       </div>

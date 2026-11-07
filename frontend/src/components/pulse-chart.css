@@ -1,0 +1,55 @@
+.pulse-chart{
+  --pc-ink:#142932;--pc-ink-deep:#10222a;--pc-text:#edf7f7;--pc-quiet:#b1c6cb;
+  --pc-line:#36525a;--pc-teal:#69e3ce;--pc-muted-teal:#a0f0df;
+  margin:0;width:100%;min-width:0;display:grid;gap:10px;padding:18px 20px 13px;overflow:hidden;
+  border:1px solid #375158;border-radius:12px;background:linear-gradient(145deg,#1a333c 0%,var(--pc-ink) 48%,var(--pc-ink-deep) 100%);
+  color:var(--pc-text);font:400 14px/1.4 var(--font-sans,system-ui,sans-serif);text-align:left;color-scheme:dark;
+}
+.pulse-chart *{box-sizing:border-box}
+.pc-heading,.pc-identity,.pc-headline,.pc-reader,.pc-reading,.pc-nav,.pc-foot,.pc-key{display:flex;align-items:center}
+.pc-heading{gap:9px 16px;flex-wrap:wrap;justify-content:space-between}
+.pc-identity{min-width:0;gap:10px}
+.pc-mark{width:4px;height:29px;background:var(--pc-teal);border-radius:1px;flex:none}
+.pc-overline{display:block;color:var(--pc-muted-teal);font:600 10px/1.5 var(--font-sans);letter-spacing:.12em;text-transform:uppercase}
+.pulse-chart .pc-heading h3{font-family:var(--font-sans);font-size:18px;line-height:1.2;font-weight:550;letter-spacing:-.025em;margin:1px 0;color:var(--pc-text);overflow-wrap:anywhere}
+.pulse-chart .pc-scope{font-size:12px;color:var(--pc-quiet);margin:2px 0 0}
+.pc-controls{min-width:0;max-width:100%}
+.pc-headline{gap:8px 13px;flex-wrap:wrap;align-items:end}
+.pc-latest{letter-spacing:-.055em;font-size:clamp(30px,3vw,42px);line-height:1.1;font-weight:550;color:var(--pc-text);font-variant-numeric:tabular-nums}
+.pc-context{display:grid;gap:1px;font-size:11px;color:var(--pc-quiet);line-height:1.35}
+.pc-delta b{color:var(--pc-muted-teal);font-weight:600}
+.pc-plot{min-width:0;cursor:crosshair;touch-action:pan-y;border-radius:3px}
+.pc-plot svg{display:block;width:100%;overflow:visible}
+.pc-gridline{stroke:var(--pc-line);stroke-width:1;stroke-dasharray:3 4}
+.pc-axis{fill:var(--pc-quiet);font:500 11px var(--font-sans);font-variant-numeric:tabular-nums}
+.pc-value-line,.pc-forecast-line{fill:none;stroke-linejoin:round;stroke-linecap:round}
+.pc-value-line{stroke:var(--pc-teal);stroke-width:2.5}
+.pc-forecast-line{stroke:#d7e1b8;stroke-width:1.6;stroke-dasharray:5 4}
+.pc-cursor{stroke:var(--pc-quiet);stroke-width:1;stroke-dasharray:2 4}
+.pc-marker{fill:var(--pc-teal);stroke:var(--pc-teal);stroke-width:1.5}
+.pc-hollow{fill:var(--pc-ink)}
+.pc-halo{fill:var(--pc-teal);opacity:.22}
+.pc-reader{min-width:0;justify-content:space-between;gap:8px;padding:5px 8px 5px 11px;background:rgb(255 255 255 / .045);border:1px solid var(--pc-line);border-radius:7px}
+.pc-reading{flex-wrap:wrap;gap:3px 11px;font-size:12px;line-height:1.4}
+.pc-period{color:var(--pc-quiet)}.pc-reading strong{font:600 12px var(--font-mono,monospace)}
+.pc-reading>span:last-child:not(:first-child){font-size:11px;color:var(--pc-quiet)}
+.pc-nav{gap:3px;flex:none}
+.pc-nav button{display:grid;place-items:center;width:28px;height:26px;padding:0;cursor:pointer;border:1px solid var(--pc-line);background:transparent;color:var(--pc-text);border-radius:4px;font:500 20px/1 var(--font-sans)}
+.pc-nav button:hover:enabled{background:var(--pc-line)}
+.pc-nav button:disabled{opacity:.35;cursor:default}
+.pc-nav button:focus-visible,.pc-plot:focus-visible{outline:2px solid var(--pc-teal);outline-offset:2px}
+.pc-foot{min-width:0;justify-content:space-between;gap:4px 12px;flex-wrap:wrap;font-size:11px;color:var(--pc-quiet);overflow-wrap:anywhere}
+.pc-foot:empty{display:none}
+.pc-legend{display:inline-flex;gap:4px 12px;align-items:center;flex-wrap:wrap}
+.pc-key{gap:4px}.pc-key-dash{width:18px;border-top:2px dashed #d7e1b8}
+.pc-key-solid,.pc-key-open{width:7px;height:7px;border:1.5px solid var(--pc-teal);border-radius:50%}
+.pc-key-solid{background:var(--pc-teal)}
+.pulse-chart--compact{gap:7px;padding:13px 14px 10px}
+.pulse-chart--compact .pc-latest{font-size:31px}
+.pulse-chart--compact .pc-heading h3{font-size:16px}
+@media(max-width:580px){.pulse-chart{padding:14px 12px 10px;gap:8px}.pc-headline{align-items:center}.pc-latest{font-size:30px}.pc-mark{height:25px}}
+@media(pointer:coarse){.pc-nav button{height:44px;width:44px}}
+@media(prefers-reduced-motion:no-preference){
+  .pc-halo{animation:pc-pick .24s ease-out}
+  @keyframes pc-pick{from{opacity:.48;r:5px}to{opacity:.22;r:8px}}
+}

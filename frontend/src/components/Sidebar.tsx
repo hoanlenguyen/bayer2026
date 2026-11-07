@@ -1,20 +1,10 @@
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useState } from "react";
 import { openConversation, removeConversation, useAnswerInProgress, useConversations, useCurrentConversation } from "../lib/conversations";
+import { navigate } from "../lib/navigation";
 import { Icon } from "./Icon";
 import logo from "../assets/analytiq-logo.png";
 
-export type Page = "ask" | "explorer" | "cala-graph" | "simulator" | "landing";
-
-/** Moves between / and /cala-graph without reloading, so the sidebar stays on screen and nothing redraws. */
-export function navigate(e: MouseEvent<HTMLAnchorElement>) {
-  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; // let the browser open a new tab or window
-  const to = new URL(e.currentTarget.href);
-  if (to.pathname === window.location.pathname) return; // only the hash changes: already no reload
-  e.preventDefault();
-  history.pushState(null, "", to.pathname + to.hash);
-  window.scrollTo(0, 0);
-  window.dispatchEvent(new PopStateEvent("popstate"));
-}
+export type Page = "ask" | "explorer" | "cala-graph" | "simulator" | "briefings" | "dashboard" | "workbook" | "bi-estate";
 
 function HistoryList({ page }: { page: Page }) {
   const conversations = useConversations();
@@ -108,9 +98,9 @@ export function Sidebar({ page }: { page: Page }) {
   return (
     <header className={`sidebar${collapsed ? " collapsed" : ""}`}>
       <div className="sidebar-head">
-        <a className="brand" href="/#ask" onClick={navigate} aria-label="AnalytIQ Intelligence" title={tip("AnalytIQ Intelligence")}>
+        <a className="brand" href="/#ask" onClick={navigate} aria-label="AnalytIQ intelligence" title={tip("AnalytIQ intelligence")}>
           <span className="brand-mark" aria-hidden="true" />
-          <img className="brand-name brand-logo" src={logo} alt="" width={900} height={300} />
+          <span className="brand-name">AnalytIQ intelligence</span>
         </a>
         <button type="button" className="sidebar-toggle" aria-label={toggleLabel} aria-expanded={!collapsed} title={toggleLabel} onClick={() => setCollapsed((c) => !c)}>
           <Icon name="panel" />
@@ -120,7 +110,10 @@ export function Sidebar({ page }: { page: Page }) {
         <a href="/#ask" onClick={navigate} aria-label="Ask" title={tip("Ask")} aria-current={page === "ask" ? "page" : undefined}><Icon name="ask" /><span>Ask</span></a>
         <a href="/simulator" onClick={navigate} aria-label="Conversation simulation" title={tip("Conversation simulation")} aria-current={page === "simulator" ? "page" : undefined}><Icon name="chat" /><span><span className="nav-extra">Conversation </span>Simulation</span></a>
         <a href="/#explorer" onClick={navigate} aria-label="Estate Explorer" title={tip("Estate Explorer")} aria-current={page === "explorer" ? "page" : undefined}><Icon name="estate" /><span><span className="nav-extra">Estate </span>Explorer</span></a>
-        <a href="/cala-graph" onClick={navigate} aria-label="Knowledge Graph" title={tip("Knowledge Graph")} aria-current={page === "cala-graph" ? "page" : undefined}><Icon name="graph" /><span><span className="nav-extra">Knowledge </span>Graph</span></a>      </nav>
+        <a href="/cala-graph" onClick={navigate} aria-label="Knowledge Graph" title={tip("Knowledge Graph")} aria-current={page === "cala-graph" ? "page" : undefined}><Icon name="graph" /><span><span className="nav-extra">Knowledge </span>Graph</span></a>
+        <a href="/briefings" onClick={navigate} aria-label="Team briefings" title={tip("Team briefings")} aria-current={page === "briefings" ? "page" : undefined}><Icon name="briefings" /><span>Briefings</span></a>
+        <a href="/bi-estate" onClick={navigate} aria-label="BI Portfolio" title={tip("BI Portfolio")} aria-current={page === "bi-estate" ? "page" : undefined}><Icon name="search" /><span><span className="nav-extra">BI </span>Portfolio</span></a>
+      </nav>
       {!collapsed && <HistoryList page={page} />}
       <p className="sample-note" title="All data in this app is synthetic, provided by SinceAI">
         <span className="sample-text">Synthetic data by SinceAI</span>

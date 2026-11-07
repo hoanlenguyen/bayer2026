@@ -1,12 +1,32 @@
-# Builds the backend image and pushes it to GitHub Container Registry (free):
-#   ghcr.io/<owner>/bayer2026-backend:latest  and  :<commit sha>
-# Azure Container Apps pulls it from there (docs/DEPLOY_FREE.md).
+# Backend: test, build the image, and on main deploy it to Azure Container Apps.
+#
+#   version-2/version-4 pushes → tests → image to ghcr.io
+#   Deploy live calls this workflow on main → also deploy the image to Azure
+#
+# Image: ghcr.io/<owner>/bayer2026-backend:latest and :<commit sha>
+# Deploy needs the repository secrets AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID from
+# `bash deploy/azure/containerapp.sh github`: a managed identity GitHub signs in as with OIDC, no password.
+# Deploy live passes deploy: false while those secrets are missing: the image is still built, and Deploy live
+# shows the manual deploy commands for the commit instead.
 name: Backend image
 
 on:
+  workflow_call:
+    inputs:
+      deploy:
+        description: Deploy the built image to Azure (false = build only)
+        type: boolean
+        default: true
+    secrets:
+      AZURE_CLIENT_ID:
+        required: false
+      AZURE_TENANT_ID:
+        required: false
+      AZURE_SUBSCRIPTION_ID:
+        required: false
   workflow_dispatch:
   push:
-    branches: [main, version-2, version-4]
+    branches: [version-2, version-4]
     paths:
       - backend/**
       - materials/**
@@ -17,10 +37,36 @@ permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AZURE_RG: analytics-manager-rg
+  AZURE_APP: analytics-manager-api
+
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r backend/requirements.txt
+      - name: Tests (offline, mock model, in-memory store)
+        working-directory: backend
+        run: python -m pytest -q
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      image: ${{ steps.name.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,3 +92,57 @@ jobs:
             ${{ steps.name.outputs.image }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && inputs.deploy != false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write   # OIDC sign-in to Azure (managed identity)
+      contents: read
+    env:
+      HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' }}
+    steps:
+      - name: Require the Azure deployment credential
+        if: env.HAS_AZURE != 'true'
+        run: |
+          echo "::error::Add AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID (from bash deploy/azure/containerapp.sh github) in repository Settings > Secrets and variables > Actions. See docs/DEPLOY_FREE.md."
+          echo "### Deployment blocked: the Azure sign-in IDs are missing" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - uses: azure/login@v2
+        if: env.HAS_AZURE == 'true'
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy this commit's image to the Container App
+        if: env.HAS_AZURE == 'true'
+        run: |
+          az extension add --name containerapp --upgrade --only-show-errors
+          # A unique tag per commit starts a new revision, which pulls the new image.
+          az containerapp update -n "$AZURE_APP" -g "$AZURE_RG" \
+            --image "${{ needs.build.outputs.image }}:${{ github.sha }}" -o none
+          fqdn=$(az containerapp show -n "$AZURE_APP" -g "$AZURE_RG" --query properties.configuration.ingress.fqdn -o tsv)
+          revision=$(az containerapp show -n "$AZURE_APP" -g "$AZURE_RG" --query properties.latestRevisionName -o tsv)
+          echo "BACKEND=https://$fqdn" >> "$GITHUB_ENV"
+          echo "REVISION=$revision" >> "$GITHUB_ENV"
+
+      - name: Verify the new revision and commercial briefings API
+        if: env.HAS_AZURE == 'true'
+        run: |
+          # The new revision can take a minute to start; retry for up to 3 minutes.
+          for _ in $(seq 1 18); do
+            ready=$(az containerapp show -n "$AZURE_APP" -g "$AZURE_RG" --query properties.latestReadyRevisionName -o tsv)
+            if [ "$ready" = "$REVISION" ] && \
+              [ "$(curl -sS -m 20 -o /dev/null -w '%{http_code}' "$BACKEND/api/health")" = 200 ] && \
+              [ "$(curl -sS -m 20 -o /dev/null -w '%{http_code}' "$BACKEND/api/briefings/commercial")" = 200 ]; then
+              echo "### Backend deployed: $BACKEND" >> "$GITHUB_STEP_SUMMARY"
+              echo "Revision: $REVISION; /api/health and /api/briefings/commercial returned 200." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::The new Azure revision or its APIs did not become ready; Cloudflare will not deploy."; exit 1

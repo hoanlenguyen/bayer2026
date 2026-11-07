@@ -78,7 +78,7 @@ def test_classify_reads_product_market_and_deadline_from_the_words(client):
 
 def test_classify_existing_report_yes_and_out_of_scope(client):
     reuse = client.post("/api/v2/classify", json={
-        "request": "How are Eylea net sales and digital engagement developing in Japan?"}).json()
+        "request": "Show monthly inventory coverage and OTIF for Lynkuet in Spain."}).json()
     assert reuse["existing_report"] == "yes" and reuse["existing_report_detail"]["status"] == "usable"
     assert reuse["existing_report_detail"]["report"]["id"]
 
@@ -107,14 +107,14 @@ def test_classify_survives_vector_search_failure(client, monkeypatch):
 
 
 def test_reuse_flow_with_preview(client):
-    evs = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_eylea_jp"}))
+    evs = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_lynkuet_es"}))
     d = stage(evs, "decision")["data"]
     assert d["decision"] == "reuse" and d["preview"]["rows"]
     assert stage(evs, "deliver")
 
 
 @pytest.mark.parametrize("preset_id,value", [("req_finance_gtn", "new_build"), ("req_migrate_xarelto", "migration"),
-                                             ("scn_repair_xarelto_mx", "reuse"), ("scn_reuse_eylea_jp", "reuse")])
+                                             ("scn_repair_xarelto_mx", "review"), ("scn_reuse_eylea_jp", "review")])
 def test_flow_ends_in_a_recommendation_and_builds_nothing(client, preset_id, value):
     assets_before = len(cat.CATALOG["assets"])
     evs = sse(client.post("/api/chat", json={"preset_id": preset_id}))
@@ -180,10 +180,10 @@ def test_understand_step_carries_the_classification(client):
     assert tags["market"] == ["JP"] or tags["market"] == ["Japan"]
     assert tags["product"] == ["Eylea"]
     assert [k["name"] for k in tags["governed_kpis"]] == ["Net Sales", "Digital Engagement Index"]
-    assert tags["semantic_model"]["id"].startswith("SM-")
+    assert tags["semantic_model"]["id"] == "SM-040"
     assert tags["existing_report"] == "yes"
     # The Ask flow's own decision agrees with what the step showed.
-    assert stage(evs, "decision")["data"]["decision"] == tags["existing_report_detail"]["decision"] == "reuse"
+    assert stage(evs, "decision")["data"]["decision"] == tags["existing_report_detail"]["decision"] == "review"
     # And the standalone route gives the same tags for the same words.
     direct = client.post("/api/v2/classify", json={"request": text}).json()
     assert direct["existing_report"] == tags["existing_report"] and direct["domain"] == tags["domain"]
@@ -239,7 +239,12 @@ def test_ask_flow_shows_the_same_steps(client):
     evs = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_eylea_jp"}))
     assert "steps" not in stage(evs, "intent")["data"]["classification"]
     found = stage(evs, "discovery")["data"]["step"]
-    assert found["step"] == 3 and found["data"]["reuse_count"] >= 1
+    assert found["step"] == 3 and found["data"]["reuse_count"] == 0
+    assert found["data"]["scope_review_count"] >= 1
+    assert any(c["id"] == "AST-0079" and c["role"] == "scope review" for c in found["data"]["candidates"])
+    trust = stage(evs, "governance")["data"]["step"]["data"]
+    assert [(s["sheet"], s["row"]) for s in trust["scope_sources"]] == [("Analytics_Assets", 80), ("Semantic_Models", 41)]
+    assert "Eylea" in trust["risks"][0] and "Nubeqa" in trust["risks"][0]
     assert stage(evs, "lineage")["data"]["step"]["step"] == 4 and stage(evs, "migration")["data"]["step"]["data"]["applies"] is False
 
 
@@ -416,7 +421,7 @@ def test_country_outside_the_catalog_recommends_a_new_report(client):
 
 
 def test_country_in_the_catalog_still_uses_its_report(client):
-    d = stage(answer_until_decided(client, KERENDIA.format("Japan")), "decision")["data"]
+    d = stage(answer_until_decided(client, KERENDIA.format("Japan"), ("Track sales performance", "All available workbook months")), "decision")["data"]
     assert d["decision"] != "not_feasible" and "Japan" not in d["reason"]
     assert d["decision"] == "new_build" or "JP" in d["candidate"]["scope_note"] or "Global" in d["candidate"]["scope_note"]
 

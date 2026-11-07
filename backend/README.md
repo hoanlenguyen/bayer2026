@@ -1,6 +1,6 @@
 # Backend
 
-FastAPI service for the AnalytIQ Intelligence. It reads SinceAI's synthetic data pack, decides for each business request whether to **reuse, repair, consolidate, migrate or build** analytics, and streams every step to the frontend as Server-Sent Events.
+FastAPI service for AnalytIQ intelligence. It reads SinceAI's synthetic data pack, decides for each business request whether to **reuse, repair, consolidate, migrate or build** analytics, and streams every step to the frontend as Server-Sent Events.
 
 All data is synthetic (SinceAI 2026 Builder Data Pack). There is no patient or HCP data, and figures are not SinceAI performance.
 

@@ -1,0 +1,259 @@
+{
+  "mode": "offline_rules",
+  "store": "isolated_memory",
+  "renderer": "pbir-demo-v1",
+  "source_sha256": "962b3993f60572de74a02718abcb12bff4970a5adcd95cc2ef9459a70f4dba8f",
+  "source_snapshot": "c6bb50c0f1489579c77f387662571653d8f4101ea003dc3872ab8f42f0d823f2",
+  "checks": [
+    {
+      "check": "deterministic_artifact_repeat",
+      "preset": "demo_portfolio_sales_units",
+      "passed": true
+    },
+    {
+      "check": "deterministic_artifact_repeat",
+      "preset": "demo_nubeqa_sales_units",
+      "passed": true
+    },
+    {
+      "check": "equivalent_request_does_not_duplicate_asset",
+      "passed": true
+    }
+  ],
+  "requests": [
+    {
+      "preset": "demo_portfolio_sales_units",
+      "request_id": "c84c68482ca1",
+      "decision": "new_build",
+      "reason": "No existing report is both close enough and well governed. Build one thin report on the shared model 'Portfolio Performance 65' with approved KPIs only.",
+      "spec_hash": "621dd969f74696ff4d8567b86a67f947d41feb6b60667c3e185584a1cf915a8a",
+      "source_hash": "c6bb50c0f1489579c77f387662571653d8f4101ea003dc3872ab8f42f0d823f2",
+      "state": "validation_pending",
+      "blockers": [],
+      "validation": {
+        "renderer": "pbir-demo-v1",
+        "spec_hash": "621dd969f74696ff4d8567b86a67f947d41feb6b60667c3e185584a1cf915a8a",
+        "binding": {
+          "version": "demo-pmm-v1",
+          "mode": "synthetic_demo_model",
+          "supported": true,
+          "model_name": "BayerDemo",
+          "table": "DemoFacts",
+          "source_sheet": "Product_Market_Monthly",
+          "bindings": {
+            "net_sales": {
+              "column": "NetSalesEUR",
+              "source": "net_sales_m_eur_syn",
+              "factor": 1000000,
+              "unit": "EUR",
+              "format": "\u20ac #,0.00;(\u20ac #,0.00);\u20ac 0.00",
+              "aggregation": "SUM"
+            },
+            "units_shipped": {
+              "column": "UnitsShipped",
+              "source": "units_shipped_syn",
+              "factor": 1,
+              "unit": "units",
+              "format": "#,0",
+              "aggregation": "SUM"
+            }
+          },
+          "dimensions": {
+            "month": "Month",
+            "product": "Product",
+            "market": "Market",
+            "region": "Region",
+            "therapeutic_area": "TherapeuticArea"
+          },
+          "missing": [],
+          "data_hash": "63265b5108f0800df4a931f9e94403189d5fb1080695b0dc6dfacd5886f85b81",
+          "period": "January\u2013October 2026; monthly source grain, no daily or patient data",
+          "note": "Team-defined demo SUM formulas; EUR = workbook M EUR \u00d7 1,000,000. Shared local demo model, not a live Bayer model. All included fact rows are synthetic; this is not actual company performance."
+        },
+        "artifact_hashes": {
+          "BayerDemo.SemanticModel/definition.pbism": "cc3d122d38a9d92d4389dc68adea2588a351698913860fc826a28b7eb9d2709a",
+          "BayerDemo.SemanticModel/model.bim": "ce0e29afea11c07b24733ba42b004dc579e18d7bce8c06e6277acec93be58e22",
+          "Portfolio_sales_and_shipments.Report/definition.pbir": "102c73b288406f082f55935b0bf9263f8b184e8032521a00e694d0e3baba2b31",
+          "Portfolio_sales_and_shipments.Report/definition/pages/page00/page.json": "323d4740d201512886b2f9e6be5513e9e70543b78a004b6ef058c967db2f61b7",
+          "Portfolio_sales_and_shipments.Report/definition/pages/page00/visuals/visual00/visual.json": "69a28b0d1c3e6f85c26fd29ea901083de72c6485cfc63767689d89b91917f328",
+          "Portfolio_sales_and_shipments.Report/definition/pages/page00/visuals/visual01/visual.json": "1ff63217e0f980d70b7530da812587dc8e8d5cc30af19e4f63ebbdd628b3793d",
+          "Portfolio_sales_and_shipments.Report/definition/pages/page00/visuals/visual02/visual.json": "77288b88ff4c3c76f27cae172be66176042e22a577838ef4dfd934b737ef5a80",
+          "Portfolio_sales_and_shipments.Report/definition/pages/page00/visuals/visual03/visual.json": "4c162737bd2f66af7d0744b6debfc44c65c0bae4fb6179b5f360e99cad0cd1de",
+          "Portfolio_sales_and_shipments.Report/definition/pages/pages.json": "d5afe9d032979c72ddf614cf4fd79bf878d074a35ef20d929087a7d3369c6231",
+          "Portfolio_sales_and_shipments.Report/definition/report.json": "4c958a6f82df4897687f02fadfd80e29ec4dad941221cf67b6eedf9e03036f12",
+          "Portfolio_sales_and_shipments.Report/definition/version.json": "0f9f217a60981bf882d7b1963977fc72cc051078df8512b46caa607aff2e5220",
+          "Portfolio_sales_and_shipments.pbip": "8199f039452de6f18e877ace864d9295ffe5c1621e9e31690f56a1a436b5b8bc"
+        },
+        "schema_checks": {
+          "passed": true,
+          "files_checked": 11
+        },
+        "expected_values": {
+          "rows": 980,
+          "totals": {
+            "net_sales": 17339570000.0,
+            "units_shipped": 51381829
+          }
+        },
+        "layers": {
+          "specification": "passed",
+          "json_schemas": "passed",
+          "bindings": "passed",
+          "layout_bounds": "passed",
+          "reference_totals": "calculated",
+          "power_bi_rendering": "not_run",
+          "power_bi_numeric_reconciliation": "not_run",
+          "publication": "not_run"
+        },
+        "artifact_state": "validation_pending",
+        "validated_in_power_bi": false
+      }
+    },
+    {
+      "preset": "demo_nubeqa_sales_units",
+      "request_id": "d4779c124b2c",
+      "decision": "new_build",
+      "reason": "No existing report is both close enough and well governed. Build one thin report on the shared model 'Portfolio Performance 65' with approved KPIs only.",
+      "spec_hash": "6551a24a16c414165b14a606f9bd73839681069a55f59a180a50112e74aaf45b",
+      "source_hash": "c6bb50c0f1489579c77f387662571653d8f4101ea003dc3872ab8f42f0d823f2",
+      "state": "validation_pending",
+      "blockers": [],
+      "validation": {
+        "renderer": "pbir-demo-v1",
+        "spec_hash": "6551a24a16c414165b14a606f9bd73839681069a55f59a180a50112e74aaf45b",
+        "binding": {
+          "version": "demo-pmm-v1",
+          "mode": "synthetic_demo_model",
+          "supported": true,
+          "model_name": "BayerDemo",
+          "table": "DemoFacts",
+          "source_sheet": "Product_Market_Monthly",
+          "bindings": {
+            "net_sales": {
+              "column": "NetSalesEUR",
+              "source": "net_sales_m_eur_syn",
+              "factor": 1000000,
+              "unit": "EUR",
+              "format": "\u20ac #,0.00;(\u20ac #,0.00);\u20ac 0.00",
+              "aggregation": "SUM"
+            },
+            "units_shipped": {
+              "column": "UnitsShipped",
+              "source": "units_shipped_syn",
+              "factor": 1,
+              "unit": "units",
+              "format": "#,0",
+              "aggregation": "SUM"
+            }
+          },
+          "dimensions": {
+            "month": "Month",
+            "product": "Product",
+            "market": "Market",
+            "region": "Region",
+            "therapeutic_area": "TherapeuticArea"
+          },
+          "missing": [],
+          "data_hash": "63265b5108f0800df4a931f9e94403189d5fb1080695b0dc6dfacd5886f85b81",
+          "period": "January\u2013October 2026; monthly source grain, no daily or patient data",
+          "note": "Team-defined demo SUM formulas; EUR = workbook M EUR \u00d7 1,000,000. Shared local demo model, not a live Bayer model. All included fact rows are synthetic; this is not actual company performance."
+        },
+        "artifact_hashes": {
+          "BayerDemo.SemanticModel/definition.pbism": "cc3d122d38a9d92d4389dc68adea2588a351698913860fc826a28b7eb9d2709a",
+          "BayerDemo.SemanticModel/model.bim": "ce0e29afea11c07b24733ba42b004dc579e18d7bce8c06e6277acec93be58e22",
+          "Nubeqa_sales_and_shipments.Report/definition.pbir": "102c73b288406f082f55935b0bf9263f8b184e8032521a00e694d0e3baba2b31",
+          "Nubeqa_sales_and_shipments.Report/definition/pages/page00/page.json": "323d4740d201512886b2f9e6be5513e9e70543b78a004b6ef058c967db2f61b7",
+          "Nubeqa_sales_and_shipments.Report/definition/pages/page00/visuals/visual00/visual.json": "69a28b0d1c3e6f85c26fd29ea901083de72c6485cfc63767689d89b91917f328",
+          "Nubeqa_sales_and_shipments.Report/definition/pages/page00/visuals/visual01/visual.json": "1ff63217e0f980d70b7530da812587dc8e8d5cc30af19e4f63ebbdd628b3793d",
+          "Nubeqa_sales_and_shipments.Report/definition/pages/page00/visuals/visual02/visual.json": "77288b88ff4c3c76f27cae172be66176042e22a577838ef4dfd934b737ef5a80",
+          "Nubeqa_sales_and_shipments.Report/definition/pages/page00/visuals/visual03/visual.json": "4c162737bd2f66af7d0744b6debfc44c65c0bae4fb6179b5f360e99cad0cd1de",
+          "Nubeqa_sales_and_shipments.Report/definition/pages/pages.json": "d5afe9d032979c72ddf614cf4fd79bf878d074a35ef20d929087a7d3369c6231",
+          "Nubeqa_sales_and_shipments.Report/definition/report.json": "7b83fb2460135bd5990eeb85fdeba948722a9c4765787328aaec2b1ff8b978f6",
+          "Nubeqa_sales_and_shipments.Report/definition/version.json": "0f9f217a60981bf882d7b1963977fc72cc051078df8512b46caa607aff2e5220",
+          "Nubeqa_sales_and_shipments.pbip": "3db188bff5539a598a3dba9d542b40a03720e29ccdf563dc78bac933bf957831"
+        },
+        "schema_checks": {
+          "passed": true,
+          "files_checked": 11
+        },
+        "expected_values": {
+          "rows": 140,
+          "totals": {
+            "net_sales": 3347720000.0,
+            "units_shipped": 10095502
+          }
+        },
+        "layers": {
+          "specification": "passed",
+          "json_schemas": "passed",
+          "bindings": "passed",
+          "layout_bounds": "passed",
+          "reference_totals": "calculated",
+          "power_bi_rendering": "not_run",
+          "power_bi_numeric_reconciliation": "not_run",
+          "publication": "not_run"
+        },
+        "artifact_state": "validation_pending",
+        "validated_in_power_bi": false
+      }
+    },
+    {
+      "preset": "req_finance_gtn",
+      "request_id": "e5ecbbc960e1",
+      "decision": "new_build",
+      "reason": "No existing report is both close enough and well governed. Build one thin report on the shared model 'Portfolio Performance 05' with approved KPIs only.",
+      "spec_hash": "4ba4056a3c26b081b62ae5a12cac72e4f529f07178e262da391fe1df81bcc393",
+      "source_hash": "c6bb50c0f1489579c77f387662571653d8f4101ea003dc3872ab8f42f0d823f2",
+      "state": "execution_blocked",
+      "blockers": [
+        "Executable demo bindings unavailable for this change: gross_to_net_rate, budget_variance"
+      ]
+    },
+    {
+      "preset": "scn_repair_xarelto_mx",
+      "request_id": "62e92cadc8d1",
+      "decision": "repair",
+      "reason": "'Xarelto Supply - US' covers the request. Repair it (assign an active owner; resolve conflicting report/model scope metadata with the steward; review and endorse it) instead of building a copy.",
+      "spec_hash": "33db8c031092747692ebeab204db2d937240a6b69ffb62e7023d362b868c3c7d",
+      "source_hash": "c6bb50c0f1489579c77f387662571653d8f4101ea003dc3872ab8f42f0d823f2",
+      "state": "execution_blocked",
+      "blockers": [
+        "Owner ID is active and review date is set (RULE-003)",
+        "Executable demo bindings unavailable for this change: on_time_in_full, market_access_coverage"
+      ]
+    },
+    {
+      "preset": "demo_reuse_brazil",
+      "request_id": "2c6cd71b18d6",
+      "decision": "reuse",
+      "reason": "'All Pharma Forecast' already answers this request with approved KPIs and an active owner."
+    }
+  ],
+  "external_validation": {
+    "power_bi_rendering": "not_run",
+    "power_bi_numeric_reconciliation": "not_run",
+    "publication": "not_run",
+    "live_model_calls": "not_run",
+    "production_sso": "not_configured"
+  },
+  "application_sha256": "373f4ebc3de2882ef6db5d09679a1b466b4a7dd4d929308dd98d5af70696e1ff",
+  "automated_suite_results": {
+    "backend_pytest": {
+      "passed": 59
+    },
+    "frontend_node_tests": {
+      "passed": 36
+    },
+    "frontend_production_build": "passed"
+  },
+  "browser_checks": [
+    "request submission",
+    "requester approval disabled",
+    "independent reviewer approval",
+    "generated package download",
+    "molecular graph and source row evidence",
+    "saved request restored after reload"
+  ],
+  "reproduce": "PYTHONPATH=backend .venv/bin/python -m app.validate_demo --output backend/output/acceptance",
+  "note": "Observed synthetic demo results. Reference totals were calculated from workbook rows; they have not been reconciled in Power BI. Random request IDs and review timestamps vary between runs."
+}

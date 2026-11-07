@@ -73,6 +73,10 @@ export interface Candidate {
   owner_status?: string | null;
   platform?: string;
   scope_note?: string;
+  scope_evidence?: {
+    conflict: boolean; reason: string | null; asset_id: string; asset_product: string | null; asset_market: string | null;
+    model_id: string | null; model_product: string | null; model_region: string | null;
+  };
   coverage: number;
   freshness: number;
   governance: number;
@@ -95,7 +99,7 @@ export interface ConversationSummary {
 export interface ConversationDetail extends ConversationSummary {
   state: string;
   messages: { role: "user" | "assistant"; content: string; kind?: "question" | "result" | "retry"; suggestions?: string[] }[];
-  runs: { events: (StageEvent | { type: "user_message" | "message" | "done" })[] }[];
+  runs: { id: string; events: (StageEvent | { type: "user_message" | "message" | "done" })[] }[];
 }
 
 // ---- Chat simulator (POST /api/simulator/turn)
@@ -154,6 +158,6 @@ export interface SimulatorMessage {
   recommendation?: SimulatorRecommendation;
   report?: SimulatorReport | null;
   stages?: StageEvent[];
-  /** AnalytIQ Intelligence only: the sentence it answered, used as the title of its steps. */
+  /** AnalytIQ only: the sentence it answered, used as the title of its steps. */
   request?: string;
 }

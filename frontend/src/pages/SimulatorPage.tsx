@@ -9,7 +9,7 @@ import { Icon } from "../components/Icon";
 type Speaker = "A" | "B";
 
 /** Who is talking. The API keeps the short codes; people only ever see these names. */
-const NAMES: Record<SimulatorMessage["speaker"], string> = { A: "SinceAI", B: "Brainrot", C: "AnalytIQ Intelligence" };
+const NAMES: Record<SimulatorMessage["speaker"], string> = { A: "SinceAI", B: "Brainrot", C: "AnalytIQ" };
 
 /** Greetings and business talk stay quiet, a vague request waits for details, and two real requests get two different answers. */
 const SAMPLE: { speaker: Speaker; text: string }[] = [
@@ -92,7 +92,7 @@ function Stats({ messages }: { messages: SimulatorMessage[] }) {
   const ms = checked.reduce((sum, m) => sum + (m.ms ?? 0), 0);
   const rows: [string, string][] = [
     ["Sentences checked", String(checked.length)],
-    ["AnalytIQ Intelligence spoke", String(messages.filter((m) => m.speaker === "C").length)],
+    ["AnalytIQ spoke", String(messages.filter((m) => m.speaker === "C").length)],
     ["Jev / GPT / rules", `${count("jev")} / ${count("llm")} / ${count("rules")}`],
     ["Tokens", (checked.reduce((sum, m) => sum + tokens(m.usage), 0) + messages.reduce((sum, m) => sum + tokens(m.search_usage), 0)).toLocaleString()],
     ["Jev cost", `$${checked.reduce((sum, m) => sum + (m.cost ?? 0), 0).toFixed(6)}`],
@@ -105,7 +105,7 @@ function Stats({ messages }: { messages: SimulatorMessage[] }) {
   );
 }
 
-/** Two people chat. Jev reads each sentence, and AnalytIQ Intelligence speaks only when one needs a decision. */
+/** Two people chat. Jev reads each sentence, and AnalytIQ speaks only when one needs a decision. */
 export function SimulatorPage() {
   const [messages, setMessages] = useState<SimulatorMessage[]>([]);
   const [speaker, setSpeaker] = useState<Speaker>("A");

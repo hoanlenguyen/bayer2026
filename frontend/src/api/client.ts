@@ -15,6 +15,7 @@ export const api = {
   health: () => getJSON<Health>("/api/health"),
   presets: () => getJSON<Preset[]>("/api/presets"),
   catalog: () => getJSON<CatalogMeta>("/api/catalog"),
+  dashboards: () => getJSON<{ items: { id: string; title: string; url: string; period: { start: string; end: string } }[] }>("/api/dashboards"),
   conversations: () => getJSON<ConversationSummary[]>("/api/conversations"),
   deleteConversation: (id: string) => deleteJSON(`/api/conversations/${encodeURIComponent(id)}`),
   conversation: (id: string) => getJSON<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`),
