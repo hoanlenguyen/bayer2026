@@ -1,14 +1,17 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Sidebar, type Page } from "./components/Sidebar";
 import { AskPage } from "./pages/AskPage";
 import { CalaGraphPage } from "./pages/CalaGraphPage";
 import { ExplorerPage } from "./pages/ExplorerPage";
 import { SimulatorPage } from "./pages/SimulatorPage";
 
+const BriefingsPage = lazy(() => import("./pages/BriefingsPage").then(({ BriefingsPage }) => ({ default: BriefingsPage })));
+
 const pageFromLocation = (): Page => {
   const path = window.location.pathname.replace(/\/+$/, "");
   if (path === "/cala-graph") return "cala-graph";
   if (path === "/simulator") return "simulator";
+  if (path === "/briefings") return "briefings";
   return window.location.hash.startsWith("#explorer") ? "explorer" : "ask";
 };
 
@@ -37,6 +40,7 @@ export default function App() {
   useEffect(() => {
     if (page === "ask") document.title = "Analytics Manager";
     if (page === "simulator") document.title = "Conversation simulation · Analytics Manager";
+    if (page === "briefings") document.title = "Team briefings · Analytics Manager";
   }, [page]);
   console.log('clg')
   return (
@@ -48,6 +52,7 @@ export default function App() {
         <div hidden={page !== "simulator"}><SimulatorPage /></div>
         {page === "explorer" && <ExplorerPage focusRequest={focusRequest} />}
         {page === "cala-graph" && <CalaGraphPage />}
+        {page === "briefings" && <Suspense fallback={<main className="page" aria-busy="true">Loading team briefings…</main>}><BriefingsPage /></Suspense>}
       </div>
     </div>
   );

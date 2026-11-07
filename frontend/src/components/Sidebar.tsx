@@ -1,19 +1,9 @@
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useState } from "react";
 import { openConversation, removeConversation, useAnswerInProgress, useConversations, useCurrentConversation } from "../lib/conversations";
+import { navigate } from "../lib/navigation";
 import { Icon } from "./Icon";
 
-export type Page = "ask" | "explorer" | "cala-graph" | "simulator";
-
-/** Moves between / and /cala-graph without reloading, so the sidebar stays on screen and nothing redraws. */
-function navigate(e: MouseEvent<HTMLAnchorElement>) {
-  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; // let the browser open a new tab or window
-  const to = new URL(e.currentTarget.href);
-  if (to.pathname === window.location.pathname) return; // only the hash changes: already no reload
-  e.preventDefault();
-  history.pushState(null, "", to.pathname + to.hash);
-  window.scrollTo(0, 0);
-  window.dispatchEvent(new PopStateEvent("popstate"));
-}
+export type Page = "ask" | "explorer" | "cala-graph" | "simulator" | "briefings";
 
 function HistoryList({ page }: { page: Page }) {
   const conversations = useConversations();
@@ -119,7 +109,9 @@ export function Sidebar({ page }: { page: Page }) {
         <a href="/#ask" onClick={navigate} aria-label="Ask" title={tip("Ask")} aria-current={page === "ask" ? "page" : undefined}><Icon name="ask" /><span>Ask</span></a>
         <a href="/simulator" onClick={navigate} aria-label="Conversation simulation" title={tip("Conversation simulation")} aria-current={page === "simulator" ? "page" : undefined}><Icon name="chat" /><span><span className="nav-extra">Conversation </span>Simulation</span></a>
         <a href="/#explorer" onClick={navigate} aria-label="Estate Explorer" title={tip("Estate Explorer")} aria-current={page === "explorer" ? "page" : undefined}><Icon name="estate" /><span><span className="nav-extra">Estate </span>Explorer</span></a>
-        <a href="/cala-graph" onClick={navigate} aria-label="Knowledge Graph" title={tip("Knowledge Graph")} aria-current={page === "cala-graph" ? "page" : undefined}><Icon name="graph" /><span><span className="nav-extra">Knowledge </span>Graph</span></a>      </nav>
+        <a href="/cala-graph" onClick={navigate} aria-label="Knowledge Graph" title={tip("Knowledge Graph")} aria-current={page === "cala-graph" ? "page" : undefined}><Icon name="graph" /><span><span className="nav-extra">Knowledge </span>Graph</span></a>
+        <a href="/briefings" onClick={navigate} aria-label="Team briefings" title={tip("Team briefings")} aria-current={page === "briefings" ? "page" : undefined}><Icon name="briefings" /><span>Briefings</span></a>
+      </nav>
       {!collapsed && <HistoryList page={page} />}
       <p className="sample-note" title="All data in this app is fictional sample data">
         <span className="sample-tag">Sample<span className="sample-extra"> data</span></span>
