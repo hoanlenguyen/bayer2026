@@ -112,9 +112,8 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
       window.dispatchEvent(new Event("dashboards-changed"));
       if (!live()) return;
       setState(result);
-      // Another build saved it first: same overview with match wording, then the ordinary saved link (no automatic opening).
-      const concurrent = !!result.reused && !result.guided;
-      update({ kind: "saved", dashboardId: result.dashboard_id!, matched: concurrent || !!result.exact_reuse, autoOpen: !concurrent });
+      // Every approved run saves its own dashboard; a same-run retry returns that same one.
+      update({ kind: "saved", dashboardId: result.dashboard_id! });
     };
     const reconcile = async (why: string) => {
       try {
@@ -204,7 +203,6 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
   return <section className="db-design" aria-label="Dashboard design"><div className="db-design-head"><p className="db-label">Dashboard design</p>
     <button type="button" className="db-text-link" disabled={pending} onClick={() => setOpen(false)}>Close design</button></div>
     {state.status === "ready" ? <><h3>Review your dashboard brief</h3><Brief state={state} />
-      {state.matches_saved && <p className="db-caption">An identical dashboard was saved earlier. Building records your review and opens that saved version.</p>}
       {state.guided && <p className="db-caption">Nothing is saved until you choose Build dashboard. To change the product, countries or KPIs, choose New question.</p>}
       <button type="button" className="btn" disabled={pending} onClick={() => void buildNow(state)}>
         Build dashboard<Icon name="arrowRight" size={15}/></button></> :

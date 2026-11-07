@@ -34,7 +34,7 @@ def build(c, path):
     return res.json(), request
 
 
-def test_source_bound_dashboard_is_immutable_retrievable_and_deduplicated(monkeypatch):
+def test_source_bound_dashboard_is_immutable_retrievable_and_run_scoped(monkeypatch):
     with TestClient(app) as c:
         path = seed(c)
         ready = c.get(path).json()
@@ -53,10 +53,14 @@ def test_source_bound_dashboard_is_immutable_retrievable_and_deduplicated(monkey
         assert dash["groups"][0]["points"][-1]["values"] == {"net_sales": 37.58, "units_shipped": 33941}
         assert dash["source_records"][-1]["market_id"] == "FR" and dash["source_records"][-1]["net_sales_m_eur_syn"] == 37.58
         assert dash["source_records"][-1]["month"] == "2026-10-01"
-        assert c.post(path + "/build", json=approved).json()["dashboard_id"] == did
-        other = seed(c, "different-chat")
-        assert c.get(other).json()["reused"] and c.get(other).json()["dashboard_id"] == did
-        assert build(c, other)[0]["dashboard_id"] == did and len(c.get("/api/dashboards").json()["items"]) == 1
+        assert c.post(path + "/build", json=approved).json()["dashboard_id"] == did  # same-run retry: same dashboard
+        other = seed(c, "different-chat")  # another run with the identical brief builds its own dashboard
+        fresh = c.get(other).json()
+        assert fresh["status"] == "ready" and not fresh["reused"] and fresh["dashboard_id"] is None
+        assert fresh["review_token"] == approved["review_token"]  # same approved content, so the same review fingerprint
+        second = build(c, other)[0]
+        assert second["dashboard_id"] != did and not second["reused"] and len(c.get("/api/dashboards").json()["items"]) == 2
+        assert c.get("/api/dashboards/" + second["dashboard_id"]).json()["conversation_id"] == "different-chat"
         c.delete("/api/conversations/conversation").raise_for_status()
         monkeypatch.setitem(rows[19], "net_sales_m_eur_syn", 999)
         assert c.get("/api/dashboards/" + did).json() == dash

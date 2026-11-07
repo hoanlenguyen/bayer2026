@@ -29,10 +29,8 @@ export interface DesignState {
   summary: string[];
   storage_mode: string;
   receipt?: BuildReceipt;
-  /** A guided example run: its fixed choices. Such a run stays reviewable even if an identical dashboard exists. */
+  /** A guided example run: its fixed choices. */
   guided?: { id: string; purpose: string; period: string } | null;
-  matches_saved?: string | null;
-  exact_reuse?: boolean;
 }
 
 export interface DashboardObservation {

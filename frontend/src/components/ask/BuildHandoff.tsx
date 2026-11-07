@@ -13,8 +13,7 @@ export const READING_WINDOW_MS = BUILD_OVERVIEW_MS;
 
 export type BuildPhase =
   | { kind: "saving" }
-  /** matched: the save resolved to an identical saved dashboard. autoOpen false: offer the ordinary link instead of opening. */
-  | { kind: "saved"; dashboardId: string; matched: boolean; autoOpen: boolean }
+  | { kind: "saved"; dashboardId: string }
   /** uncertain: the outcome could not be established. recovery: "review" after a 409, "retry" with the same brief, "reload" first */
   | { kind: "failed"; message: string; recovery: "review" | "retry" | "reload"; uncertain: boolean };
 
@@ -75,8 +74,7 @@ interface Row { title: string; lines: string[] }
 /** The four rows: three from the reviewed brief (the receipt), and the saved result, which only the server confirms. */
 function rows(brief: DesignState, phase: BuildPhase): Row[] {
   const r = brief.receipt;
-  const saved = phase.kind === "saved" ? (phase.matched ? ["Matched an identical dashboard saved earlier. This request now points to it."]
-    : ["Saved for this request."]) : phase.kind === "saving" ? ["Waiting for the server to confirm the save."]
+  const saved = phase.kind === "saved" ? ["Saved as this request's own dashboard."] : phase.kind === "saving" ? ["Waiting for the server to confirm the save."]
     : [phase.uncertain ? "The save could not be confirmed." : "Not saved."];
   if (!r) return [
     { title: "Approved scope and period", lines: brief.summary.length ? brief.summary.slice(0, 3) : ["The brief you approved, unchanged."] },
@@ -154,7 +152,7 @@ export function BuildHandoff({ session, conversationId, onRetry, onReviewUpdated
   // Open exactly once, when the save is confirmed and the window has passed, if this attempt still owns the screen.
   useEffect(() => {
     if (!saved || !windowOver || opened.current) return;
-    if (autoOpen && saved.autoOpen && stillHere(conversationId)) {
+    if (autoOpen && stillHere(conversationId)) {
       opened.current = true;
       finish();
       openDashboard(saved.dashboardId);
@@ -167,9 +165,9 @@ export function BuildHandoff({ session, conversationId, onRetry, onReviewUpdated
   useEffect(() => { if (phase.kind === "failed") finish(); }, [phase.kind]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const status = phase.kind === "saving" ? "Checking and saving your dashboard…"
-    : phase.kind === "saved" ? (phase.matched ? "Matched a saved dashboard" : "Dashboard ready")
+    : phase.kind === "saved" ? "Dashboard ready"
     : phase.uncertain ? "Save could not be confirmed" : "The dashboard was not saved";
-  const showLink = saved && windowOver && !opened.current && (!autoOpen || !saved.autoOpen);
+  const showLink = saved && windowOver && !opened.current && !autoOpen;
 
   // A double click on Build would otherwise select a word in this panel, which replaces the button.
   return <section ref={panel} className={`bw bw-${phase.kind}`} aria-labelledby={`bw-${session.id}`}

@@ -104,21 +104,18 @@ async def _state(conversation_id, run_id, store):
         artifact = assemble(req, None, conversation_id, run_id, request)
     except ValueError as exc:
         return {**state, "status": "blocked", "reason": str(exc)}, doc, None
-    # Equivalent approved scopes share an immutable artifact. Changed source rows or KPI definitions are a new version.
+    # The review token fingerprints the approved content, so changed source rows or KPI definitions invalidate a review.
+    # The dashboard identity adds this run: every newly approved run saves its own immutable dashboard, and a retry
+    # within the same run returns that same one. Runs built before this rule keep the dashboard they were bound to.
     normalized = {k: sorted(v) if isinstance(v, list) and k != "dimensions" else v for k, v in req.items()}
     normalized["decision_goal"] = " ".join(req["decision_goal"].casefold().split())
     token = fingerprint([normalized, sorted(artifact["columns"], key=lambda c: c["id"]), artifact["source_records"]])
-    did = "dash_" + token[:28]
+    did = "dash_" + fingerprint([token, conversation_id, run_id])[:28]
     artifact.update(id=did, review_token=token, requirements=req)
-    existing = await store.get_artifact("dashboards", did)
-    # A guided run is a fresh review: it stays reviewable even when an identical dashboard exists. Its Build then
-    # resolves to that immutable artifact, and the result says so.
-    guided = bool(req.get("guided"))
-    built = existing is not None and not guided
-    state.update(status="built" if built else "ready", summary=_summary(req, artifact), review_token=token,
+    existing = await store.get_artifact("dashboards", did)  # only this run's own earlier save can exist under this ID
+    state.update(status="built" if existing else "ready", summary=_summary(req, artifact), review_token=token,
                  receipt=build_receipt(existing or artifact), guided=req.get("guided"),
-                 matches_saved=did if existing is not None and guided else None,
-                 dashboard_id=did if built else None, reused=built)
+                 dashboard_id=did if existing else None, reused=False)
     return state, doc, artifact
 
 
@@ -159,8 +156,9 @@ async def build_dashboard(conversation_id: str, run_id: str, request: Build, sto
     saved = await store.publish_dashboard_once({**artifact, "_id": artifact["id"], "created_at": now(),
                                                 "created_by": creator_for_build(http)})
     same_run = (saved["conversation_id"], saved["run_id"]) == (conversation_id, run_id)
-    built = {**state, "status": "built", "version": doc["version"] + 1, "dashboard_id": saved["id"], "reused": not same_run,
-             "exact_reuse": not same_run, "matches_saved": None}
+    if not same_run:  # cannot happen with run-scoped IDs; never bind another run's dashboard to this one
+        raise HTTPException(409, "This dashboard belongs to another request. Reload the brief.")
+    built = {**state, "status": "built", "version": doc["version"] + 1, "dashboard_id": saved["id"], "reused": False}
     if not await store.advance_dashboard({**doc, "version": built["version"], "built_id": saved["id"], "built_state": built}, doc["version"]):
         latest, _, _ = await _state(conversation_id, run_id, store)
         if latest.get("dashboard_id") == saved["id"]:

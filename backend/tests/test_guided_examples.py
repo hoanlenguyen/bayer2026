@@ -180,23 +180,20 @@ def test_stale_token_after_a_source_change_is_rejected(monkeypatch):
         assert res.status_code == 409 and c.get("/api/dashboards").json()["items"] == []
 
 
-def test_a_repeat_visit_reviews_again_and_build_resolves_to_the_same_artifact_honestly():
+def test_every_approved_run_builds_its_own_dashboard_and_a_retry_keeps_it():
     with TestClient(app) as c:
         cid, run_id, _, _ = guided_run(c, "xarelto-stock-shipments", "a", "all")
-        _, first, _ = build(c, cid, run_id)
+        state, first, path = build(c, cid, run_id)
+        retry = c.post(path + "/build", json={"version": state["version"], "review_token": state["review_token"]}).json()
+        assert retry["dashboard_id"] == first["dashboard_id"]  # same-run retry: idempotent
         cid2, run_id2, _, _ = guided_run(c, "xarelto-stock-shipments", "a", "all")
         fresh = c.get(f"/api/conversations/{cid2}/runs/{run_id2}/dashboard").json()
-        assert fresh["status"] == "ready" and fresh["matches_saved"] == first["dashboard_id"] and fresh["dashboard_id"] is None
+        assert fresh["status"] == "ready" and fresh["dashboard_id"] is None and "matches_saved" not in fresh
         assert c.get(f"/api/conversations/{cid}/runs/{run_id}/dashboard").json()["status"] == "built"  # the first run reopens built
         _, second, _ = build(c, cid2, run_id2)
-        assert second["dashboard_id"] == first["dashboard_id"] and second["exact_reuse"] is True
-        assert len(c.get("/api/dashboards").json()["items"]) == 1
-        # another purpose on the same scope is a separate reviewed dashboard, never a silent stand-in
-        cid3, run_id3, _, _ = guided_run(c, "xarelto-stock-shipments", "b", "all")
-        third_state = c.get(f"/api/conversations/{cid3}/runs/{run_id3}/dashboard").json()
-        assert third_state["matches_saved"] is None
-        _, third, _ = build(c, cid3, run_id3)
-        assert third["dashboard_id"] != first["dashboard_id"] and len(c.get("/api/dashboards").json()["items"]) == 2
+        assert second["dashboard_id"] != first["dashboard_id"] and second["reused"] is False
+        assert c.get(f"/api/dashboards/{second['dashboard_id']}").json()["conversation_id"] == cid2  # its own source and creator
+        assert len(c.get("/api/dashboards").json()["items"]) == 2
 
 
 def test_ordinary_ask_and_estate_scenarios_keep_their_outcomes():
