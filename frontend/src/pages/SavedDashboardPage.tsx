@@ -5,7 +5,7 @@ import { PulseDashboard } from "../components/PulseDashboard";
 import { MarketComparison } from "../components/MarketComparison";
 import { ReceiptDetails, ReceiptFacts } from "../components/ask/BuildHandoff";
 import { bi } from "../api/biEstate";
-import { openConversation } from "../lib/conversations";
+import { inSession, openConversation } from "../lib/conversations";
 import { navigate } from "../lib/navigation";
 import "./saved-dashboard.css";
 
@@ -53,11 +53,15 @@ function PageHeader({ name, kind, description, conversationId }: { name: string;
     try { await navigator.clipboard.writeText(window.location.href); setCopyState("copied"); }
     catch { setCopyState("manual"); }
   }
+  // Only a conversation this tab started can be reopened in Ask. A shared or reused dashboard keeps its brief and
+  // evidence below, but never pulls another visitor's chat into this tab.
+  const ownSource = inSession(conversationId);
   function back(event: MouseEvent<HTMLAnchorElement>) {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (!inSession(conversationId)) { event.preventDefault(); return; }
     openConversation(conversationId); navigate(event);
   }
-  return <header className="sd-header"><div className="sd-toolbar"><a href="/#ask" onClick={back}>← Open source conversation</a>
+  return <header className="sd-header"><div className="sd-toolbar">{ownSource ? <a href="/#ask" rel="noopener" onClick={back}>← Open source conversation</a> : <span />}
     <button type="button" className="btn-outline" onClick={() => void copy()}>{copyState === "copied" ? "Link copied" : "Copy link"}</button></div>
     {copyState === "manual" && <label className="sd-link-field">Dashboard link<input readOnly value={window.location.href} onFocus={e => e.currentTarget.select()}/></label>}
     <p className="sd-kicker">{kind} · Synthetic workbook</p><h1 ref={heading} tabIndex={-1}>{name}</h1><p className="sd-subtitle">{description}</p>

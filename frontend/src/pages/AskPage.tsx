@@ -4,9 +4,8 @@ import type { CatalogMeta, DecisionType, GuidedChoice, GuidedExample, Health, Pi
 import { FlowPanel, RUNNING_COPY } from "../components/ask/FlowPanel";
 import { TriageStrip } from "../components/ask/TriageStrip";
 import { VerdictCard } from "../components/ask/VerdictCard";
-import { SavedDashboards } from "../components/ask/SavedDashboards";
 import { Icon } from "../components/Icon";
-import { conversationsChanged, CURRENT_REMOVED_EVENT, getCurrentConversation, setAnswerInProgress, OPEN_CONVERSATION_EVENT, setCurrentConversation, stagesOf, takePendingConversation } from "../lib/conversations";
+import { cancelPendingConversation, CURRENT_REMOVED_EVENT, forgetConversation, getCurrentConversation, inSession, OPEN_CONVERSATION_EVENT, recordConversation, setAnswerInProgress, setCurrentConversation, stagesOf, takePendingConversation } from "../lib/conversations";
 
 interface ChatMessage {
   id: number;
@@ -97,16 +96,20 @@ export function AskPage() {
   const nextId = useRef(1);
   const listRef = useRef<HTMLDivElement>(null);
   const restoreAttempt = useRef(0);
+  const streamId = useRef<string | null>(null);
   const [restoring, setRestoring] = useState(() => getCurrentConversation() !== null);
 
-  /** Brings a saved conversation back as it was. Sending next continues it, with its context, in the backend. */
+  /** Brings a conversation of this tab back as it was. Sending next continues it, with its context, in the backend.
+   *  Only the latest selection may change the screen: an older answer, error or loading end is ignored. */
   const restore = useCallback(async (id: string) => {
+    if (!inSession(id)) return;
     const attempt = ++restoreAttempt.current;
+    const latest = () => attempt === restoreAttempt.current;
     setRestoring(true);
     setError(null);
     try {
       const conv = await api.conversation(id);
-      if (attempt !== restoreAttempt.current) return; // another conversation was picked meanwhile
+      if (!latest()) return; // another conversation was picked, or New question, meanwhile
       const restored = stagesOf(conv);
       setMessages(conv.messages.map((m) => ({ id: nextId.current++, role: m.role, content: m.content, kind: m.kind, suggestions: m.suggestions, choices: m.choices })));
       setStages(restored);
@@ -117,14 +120,13 @@ export function AskPage() {
       setCurrentConversation(conv._id);
       setOffline(false);
     } catch (err) {
-      if ((err as { status?: number }).status === 404) { // gone, such as after a restart without MongoDB
-        if (getCurrentConversation() === id) setCurrentConversation(null);
-        conversationsChanged();
-      } else {
-        setOffline(true);
+      if ((err as { status?: number }).status === 404) {
+        forgetConversation(id); // confirmed gone (e.g. a restart without MongoDB): drop only this entry
+      } else if (latest()) {
+        setOffline(true); // a passing failure: the entry stays, and picking it again retries
       }
     } finally {
-      setRestoring(false);
+      if (latest()) setRestoring(false);
     }
   }, []);
 
@@ -165,11 +167,12 @@ export function AskPage() {
   const handleEvent = useCallback((e: PipelineEvent) => {
     switch (e.type) {
       case "conversation":
+        streamId.current = e.id; // identifies the working stream only; it joins History once the server saves it
         setConvId(e.id);
-        setCurrentConversation(e.id);
         break;
       case "user_message":
-        conversationsChanged(); // saved by now, so it can appear in the list
+        // The server saved this accepted message: the conversation belongs to this tab's History from now on.
+        if (e.history && e.history._id === streamId.current) recordConversation(e.history);
         break;
       case "stage":
         setChecking(false);
@@ -210,7 +213,6 @@ export function AskPage() {
       setBusy(false);
       setChecking(false);
       setAnswerInProgress(false);
-      conversationsChanged();
     }
   }, [handleEvent]);
 
@@ -223,10 +225,15 @@ export function AskPage() {
       guided_id: guided?.guided_id ?? null, choice_id: guided?.choice_id ?? null });
   }, [convId, run]);
 
+  /** Clear the screen and the open selection; History keeps every earlier conversation. */
   const newChat = () => {
+    restoreAttempt.current++; // a restore still loading must not repaint Ask afterwards
+    cancelPendingConversation();
+    setRestoring(false);
     setCurrentConversation(null);
     setRestoredRunId(null);
     setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null);
+    requestAnimationFrame(() => document.getElementById("ask-input")?.focus());
   };
 
   useEffect(() => {
@@ -296,7 +303,6 @@ export function AskPage() {
         </div>
         <Composer onSend={(t) => send(t)} disabled={busy} autoFocus placeholder="Describe the decision or the numbers you need, in your own words" />
         <div className="ask-empty-below">
-          <SavedDashboards />
           {visible.length > 0 && <div className="starter-chips" role="group" aria-label="Example dashboards to build">
             {visible.map(starter)}
           </div>}

@@ -21,7 +21,7 @@ Open **Ask** and try one of these questions with the same local workbook.
 
 1. Type **I need a dashboard**. When asked for the measures and scope, enter **Net sales and units shipped**, then **Nubeqa in France**. Set the decision to **Decide where to allocate stock** and the period to **All available workbook months**. A fully specified request goes straight to the catalogue assessment.
 2. Choose **Review and build dashboard** and read the brief. Select **Build dashboard** to open the result. Switch metrics, filter the displayed periods and open **Dashboard brief and sources**. October shows €37.58m in sales and 33,941 units shipped, both from workbook row 21.
-3. Copy the dashboard link or find it under **Saved dashboards** on the Ask start screen. Repeat the same brief to reopen the existing dashboard. The Docker review configuration uses MongoDB so both the result and its source values survive a restart.
+3. Copy the dashboard link, or reopen the conversation from **History** in the same browser tab. Repeat the same brief to reopen the existing dashboard. The Docker review configuration uses MongoDB so both the result and its source values survive a restart.
 
 If an existing report fits, open that report or its verified workbook view. A review or repair stays with the responsible owner. When a new request mixes calculable KPIs with catalogue-only measures, the builder names the omissions and asks whether the employee wants the narrower dashboard. The dashboard runs in AnalytIQ using the synthetic workbook.
 
@@ -33,7 +33,7 @@ If an existing report fits, open that report or its verified workbook view. A re
 | Show monthly inventory coverage and OTIF for Lynkuet in Spain. | Start a new question and select this example. The chart opens inside the answer. Switch between inventory coverage and OTIF, then tap a month or use the arrow keys to inspect the source row. October inventory coverage is 8.88 weeks and OTIF is 98.5%. |
 | Use the Eylea/Japan starter question. | **Human review** shows why immediate reuse would be unsafe. The report `AST-0079` lists Eylea in `Analytics_Assets` row 80. Its linked model `SM-040` lists Nubeqa in `Semantic_Models` row 41. |
 
-From the Eylea decision, assign review work, select an owner and set a due date. Reopen the conversation through **History**, record the outcome and inspect the assignment. The action retains the request and evidence that the owner received. Publishing to a Power BI tenant requires a separate integration.
+From the Eylea decision, assign review work, select an owner and set a due date. Reopen the conversation through **History** (in the same browser tab), record the outcome and inspect the assignment. The action retains the request and evidence that the owner received. Publishing to a Power BI tenant requires a separate integration.
 
 For the Xarelto Tableau migration starter, choose a segment's recommendation beneath the migration chart to see the reports in that group and why each received that recommendation.
 

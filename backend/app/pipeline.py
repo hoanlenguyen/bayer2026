@@ -211,6 +211,11 @@ class Pipeline:
         conv["updated_at"] = now()
         await self.store.save(conv)
 
+    def _saved(self, event: Event, conv: dict[str, Any]) -> Event:
+        """The outgoing user_message for an accepted, already saved message carries the conversation's summary,
+        so a client can add it to its own history. The stored transcript event stays as it was."""
+        return {**event, "history": {"_id": conv["_id"], "title": conv["title"], "updated_at": conv["updated_at"]}}
+
     # ------------------------------------------------------------ message check
     async def _check_message(self, conv: dict[str, Any], text: str) -> AgentRun:
         open_question = None
@@ -286,7 +291,7 @@ class Pipeline:
                 await self._audit(conv, "relevance", check)
             conv["messages"].append({"role": "user", "content": text, "ts": now(), "preset_id": conv["preset_id"]})
             await self._save(conv)  # in the history from now on, even if the answer gets cut off
-            yield self._event(conv, "user_message", content=text)
+            yield self._saved(self._event(conv, "user_message", content=text), conv)
             if new_run:
                 yield self._stage(conv, "intent", "running", "Intent agent is reading your request")
                 await self._pause()
@@ -361,7 +366,7 @@ class Pipeline:
                               "_pending": "guided_purpose"}
             conv["messages"].append({"role": "user", "content": ex["text"], "ts": now(), "guided_id": ex["id"]})
             await self._save(conv)
-            yield self._event(conv, "user_message", content=ex["text"])
+            yield self._saved(self._event(conv, "user_message", content=ex["text"]), conv)
             yield self._stage(conv, "intent", "running", "Reading the example's fixed scope")
             async for ev in self._guided_ask(conv, ex, "purpose"):
                 yield ev
@@ -380,7 +385,8 @@ class Pipeline:
             yield self._event(conv, "done", state=conv["state"])
             return
         conv["messages"].append({"role": "user", "content": choice["label"], "ts": now(), "choice_id": choice["id"]})
-        yield self._event(conv, "user_message", content=choice["label"])
+        await self._save(conv)
+        yield self._saved(self._event(conv, "user_message", content=choice["label"]), conv)
         if g["step"] == "purpose":
             g.update(purpose=choice["id"], step="period")
             conv["intent"]["decision"] = choice["label"]

@@ -463,3 +463,30 @@ def test_new_build_names_the_shared_model_and_its_owner(client):
     assert d["decision"] == "new_build"
     model = cat.model_by_id(d["target_model_id"])
     assert d["target_model"] == {"id": model["id"], "name": model["name"], "owner": model["owner"], "owner_status": model["owner_status"]}
+
+
+def test_only_saved_accepted_messages_carry_their_history_summary():
+    import json
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    def events(res):
+        return [json.loads(line[6:]) for line in res.text.splitlines() if line.startswith("data: ")]
+
+    with TestClient(app) as c:
+        rejected = events(c.post("/api/chat", json={"message": "asdf qwer"}))
+        assert [e for e in rejected if e["type"] == "user_message"] and not any("history" in e for e in rejected)
+        cid = rejected[0]["id"]
+        assert c.get(f"/api/conversations/{cid}").status_code == 404  # a chat holding only rejected input is not saved
+        accepted = events(c.post("/api/chat", json={"message": "Show monthly net sales for Nubeqa in Germany."}))
+        msg = next(e for e in accepted if e["type"] == "user_message")
+        saved = c.get(f"/api/conversations/{accepted[0]['id']}").json()
+        assert msg["history"] == {"_id": saved["_id"], "title": "Show monthly net sales for Nubeqa in Germany.",
+                                  "updated_at": msg["history"]["updated_at"]}
+        assert all("history" not in e for run in saved["runs"] for e in run["events"])  # the stored transcript is unchanged
+        guided = events(c.post("/api/chat", json={"message": "", "guided_id": "nubeqa-sales-shipments"}))
+        assert next(e for e in guided if e["type"] == "user_message")["history"]["_id"] == guided[0]["id"]
+        answer = events(c.post("/api/chat", json={"conversation_id": guided[0]["id"], "message": "", "choice_id": "a"}))
+        assert next(e for e in answer if e["type"] == "user_message")["history"]["_id"] == guided[0]["id"]
+        wrong = events(c.post("/api/chat", json={"conversation_id": guided[0]["id"], "message": "nonsense"}))
+        assert not any("history" in e for e in wrong)

@@ -81,7 +81,7 @@ Each agent has `run_llm` (OpenAI) and `run_rules` (offline, deterministic). Same
 ```
 frontend/  React + TypeScript + Vite
   #ask       Ask page: chat, example question chips (each sends its preset), verdict card (scores, evidence),
-             "How this was decided" panel, dashboard review and build, owner hand-off; saved dashboards on the start screen
+             "How this was decided" panel, dashboard review and build, owner hand-off; History for this tab (sessionStorage index)
   #explorer  Estate Explorer: entity details + relationship graph ("molecular view"),
              loaded from GET /api/graph (live plant catalog, same governance scoring as the Ask flow)
   /cala-graph  Knowledge graph: full-screen 3D canvas (path route, "Knowledge Graph" in the sidebar), loaded from
@@ -126,7 +126,7 @@ backend/   Python 3.12+, FastAPI
 - `POST /api/v2/chat` – same body; returns JSON showing the input as understood (`received`, `question`, `source`, `length`, `new_conversation`). Runs no agents and saves nothing
 - `POST /api/v2/classify` – body `{request}`; returns urgency (vector vote, or deadline words), domain, market, product, governed KPIs, semantic model, existing report (yes/no), plus `steps`: SinceAI's six analysis steps (`app/steps.py`), also shown in the Ask flow's first step. No chat model and nothing saved
 - `POST /api/simulator/turn` – body `{speaker: "A"|"B", text, history}`; streams `gate` (label, probability, who decided, ms, tokens, Jev cost), then `searching` and either `reply` (C's answer), `needs_context` (too vague, C stays quiet) or `already_answered`. Saves nothing (`app/simulator.py`, `app/agents/gate.py`)
-- `GET  /api/conversations?limit=`, `GET /api/conversations/{id}` – chat history: saved as soon as a question arrives, with messages, runs and state, so a conversation can be reopened and continued (`frontend/src/lib/conversations.ts`)
+- `GET  /api/conversations?limit=`, `GET /api/conversations/{id}` – conversations saved as soon as a question is accepted, with messages, runs and state. The Ask sidebar does not use the list: History is per browser tab (`frontend/src/lib/conversations.ts`, `sessionStorage` key `analytiq.ask.session.v1`, IDs, titles and update times only) and reopens a conversation by ID only if this tab started it. An accepted, saved message's outgoing `user_message` event carries `history: {_id, title, updated_at}`; rejected ones do not, and the stored transcript is unchanged. A dashboard's "Open source conversation" shows only for this tab's own conversation
 - `DELETE /api/conversations/{id}` – removes the chat, its intents, evidence, specs, agent runs and its live requests in the vector store. Accepted actions, SinceAI's data and the catalog stay
 - `GET  /api/graph` – Estate Explorer entities and edges from the live catalog
 - `GET  /api/specs?conversation_id=` – DashboardSpec versions with status (draft / approved / rejected / superseded)
@@ -219,7 +219,7 @@ Every option serves frontend and API from one address (no CORS, no `VITE_API_BAS
 cd backend && python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
-pytest                 # 301 tests, offline (mock model, mongomock): decision rules, agents, triage and vectors, briefings, dashboards, register, API flows
+pytest                 # 302 tests, offline (mock model, mongomock): decision rules, agents, triage and vectors, briefings, dashboards, register, API flows
 python -m app.load_datapack     # load catalog into MongoDB (needs MONGODB_URI)
 
 # frontend (proxies /api to :8000)

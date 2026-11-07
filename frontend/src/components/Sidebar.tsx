@@ -37,7 +37,7 @@ function HistoryList({ page }: { page: Page }) {
 
   return (
     <section className="side-history" aria-labelledby="side-history-title">
-      <h2 id="side-history-title">History</h2>
+      <h2 id="side-history-title" title="History for this tab">History</h2>
       {conversations.length > 0 ? (
         <ul>
           {conversations.map((c) => {
@@ -72,7 +72,7 @@ function HistoryList({ page }: { page: Page }) {
           })}
         </ul>
       ) : (
-        <p>Your conversations will show here.</p>
+        <p>Conversations from this tab will appear here.</p>
       )}
     </section>
   );

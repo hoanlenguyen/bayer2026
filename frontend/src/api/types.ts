@@ -48,7 +48,8 @@ export interface MessageEvent {
 
 export type PipelineEvent =
   | { type: "conversation"; id: string; provider: string; store: string }
-  | { type: "user_message"; content: string; ts: string }
+  /** history: present only when the server saved this accepted message (the tab adds the conversation to its History) */
+  | { type: "user_message"; content: string; ts: string; history?: ConversationSummary }
   | StageEvent
   | MessageEvent
   | { type: "done"; state: "idle" | "clarifying" | "awaiting_approval"; ts: string }
