@@ -110,6 +110,11 @@ backend/   Python 3.12+, FastAPI
 - Tests use `mongomock` through an async adapter (`tests/fakes.py`); the real Atlas connection has not been exercised yet.
 - The MongoDB MCP connector is not usable: Atlas reports MCP access disabled for the organization (an Organization Owner must enable AI client access).
 
+## Request triage and vector search (`app/triage.py`, `app/vectors.py`)
+- Business_Requests urgency/status labels are not predictable from text (all 10 texts have mixed labels; best possible 54% vs 52% majority), so no classifier.
+- Urgency: stated (grill-me "When do you need this?") / inferred (time words, quoted evidence, model claims verified) / default normal. Status: new on arrival, triaged at the decision (pipeline sets it).
+- Vector search: duplicate and similar requests at intake, KPI suggestion chips. OpenAI embeddings or local hashed fallback; MongoDB Atlas `$vectorSearch` (`python -m app.build_vectors`) or in-memory. Endpoints `/api/requests/similar`, `/api/requests/clusters`, `/api/requests/label-check`.
+
 ## Secrets
 - Never commit keys. `backend/.env` is git-ignored; `backend/.env.example` lists variable names only.
 - Never paste keys into chat.

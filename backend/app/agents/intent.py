@@ -15,6 +15,7 @@ from typing import Any
 
 from .. import catalog as cat
 from ..datapack import REGION_ALIASES
+from ..triage import URGENCY_CHOICES, infer_urgency, urgency_from_answer, verify_urgency
 from .base import Agent, Step
 from .tools import catalog_brief
 
@@ -31,7 +32,10 @@ Respond with JSON only:
 {"status": "ask" | "clear", "question": string|null, "suggestions": [string],
  "intent": {"decision": string, "measures": [id], "dimensions": [id], "grain": "month",
             "filters": {"product": [name], "market": [id], "region": [name], "therapeutic_area": [name]},
-            "scope_global": boolean, "migration": object|null, "unmatched_terms": [string]}}
+            "scope_global": boolean, "migration": object|null, "unmatched_terms": [string],
+            "urgency": {"value": "normal" | "high" | "urgent", "evidence": "exact words from the request that show the deadline, or null"}}}
+Urgency is how soon the user needs it. Only raise it above normal when the user's own words give a deadline or time
+pressure, and quote those words as evidence. Never guess urgency from the topic.
 Return "clear" when the measures and the decision are known, or when you already asked {max_q} questions.
 
 CATALOG
@@ -104,7 +108,12 @@ class IntentAgent(Agent):
         out = await self.llm.json(self.role, system, user)
         steps.append(Step("model", "Extract intent from the conversation", f"status={out.get('status')}"))
         proposed = out.get("intent") or {}
-        merged = sanitize_intent({**intent, **proposed})
+        said = " ".join(m["content"] for m in ctx["transcript"] if m["role"] == "user")
+        stated = intent.get("urgency") if (intent.get("urgency") or {}).get("source") == "stated" else None
+        urgency = stated or verify_urgency(proposed.pop("urgency", None), said)
+        if urgency.get("note"):
+            steps.append(Step("check", "Urgency not supported by the request", urgency["note"], ok=False))
+        merged = sanitize_intent({**intent, **proposed, "urgency": urgency})
         dropped = set(proposed.get("measures") or []) - set(merged["measures"])
         if dropped:
             steps.append(Step("check", "Removed KPI ids not in the catalog", ", ".join(sorted(dropped)), ok=False))
@@ -124,6 +133,14 @@ class IntentAgent(Agent):
         elif pending == "scope":
             if "global" in low or "all" in low or "every" in low:
                 intent["scope_global"] = True
+        elif pending == "urgency":
+            value = urgency_from_answer(last)
+            if value:
+                intent["urgency"] = {"value": value, "source": "stated", "evidence": last}
+
+        said = " ".join(m["content"] for m in transcript if m["role"] == "user")
+        if (intent.get("urgency") or {}).get("source") != "stated":
+            intent["urgency"] = infer_urgency(said)
 
         # A preset already carries an exact intent; do not re-parse its own prompt text.
         if preset and len(transcript) == 1 and not pending:
@@ -153,14 +170,19 @@ class IntentAgent(Agent):
 
         if asked < MAX_QUESTIONS and not preset and not blocked:
             if not intent["measures"] and not intent.get("migration"):
+                semantic = [s["name"] for s in ctx.get("kpi_suggestions") or []]
+                if semantic:
+                    steps.append(Step("tool", "vector_search(kpis)", ", ".join(semantic)))
                 return ask("measures", "Which numbers do you need? For example net sales, market access coverage, OTIF or forecast accuracy.",
-                           ["Net sales and growth", "Market access coverage", "OTIF and inventory coverage"])
+                           semantic or ["Net sales and growth", "Market access coverage", "OTIF and inventory coverage"])
             if not intent.get("filters") and not intent.get("scope_global"):
                 return ask("scope", "Which products and markets should it cover?",
                            ["All products, all markets", "One product, global", "One market only"])
             if not intent.get("decision"):
                 return ask("decision", "What decision will you make with it, and how often?",
                            ["Monthly performance review", "Decide where to act this month", "Prepare a leadership update"])
+            if intent["urgency"]["source"] == "default":
+                return ask("urgency", "When do you need this?", list(URGENCY_CHOICES))
 
         if not intent["measures"] and not intent.get("unmatched_terms") and not intent.get("migration"):
             intent["unmatched_terms"] = [transcript[0]["content"]] if transcript else []

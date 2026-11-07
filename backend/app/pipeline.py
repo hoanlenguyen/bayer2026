@@ -23,6 +23,7 @@ from .agents import AgentRun, EvidenceAgent, IntentAgent, SpecAgent
 from .agents.intent import sanitize_intent
 from .decision import THRESHOLDS, Decision, data_availability, decide, rank_candidates
 from .facts import preview as facts_preview
+from .vectors import VectorStore, get_embedder, similar_requests, suggest_kpis
 from .llm import LLM, explain
 from .pbip import render_pbip, slug
 from .settings import settings
@@ -53,6 +54,11 @@ def public(intent: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in intent.items() if not k.startswith("_")}
 
 
+def run_question(conv: dict[str, Any], run: dict[str, Any]) -> str:
+    """The request that opened this run (later messages are answers to grill-me questions)."""
+    return next((m["content"] for m in conv["messages"][run["msg_start"]:] if m["role"] == "user"), "")
+
+
 def label_list(ids: list[str], kind: str) -> str:
     src = cat.CATALOG["measures" if kind == "m" else "dimensions"]
     return ", ".join(src[i]["name"] for i in ids if i in src)
@@ -65,6 +71,18 @@ class Pipeline:
         self.intent_agent = IntentAgent(llm)
         self.evidence_agent = EvidenceAgent(llm)
         self.spec_agent = SpecAgent(llm)
+        # Atlas Vector Search when the store is MongoDB and the index exists; in-memory otherwise.
+        self.vectors = VectorStore(get_embedder(llm), getattr(store, "db", None))
+
+    async def _triage(self, conv: dict[str, Any], status: str) -> dict[str, Any]:
+        """Triage tags for this request: urgency from the intent, status from the workflow."""
+        run = conv["runs"][-1]
+        tri = {"status": status, "urgency": conv["intent"].get("urgency") or {"value": "normal", "source": "default", "evidence": None},
+               "similar": run.get("similar")}
+        conv["triage"] = tri
+        if run.get("intent_id"):
+            await self.store.update_artifact("intents", run["intent_id"], {"status": status, "urgency": tri["urgency"]["value"]})
+        return tri
 
     # ------------------------------------------------------------ helpers
     def _event(self, conv: dict[str, Any], type_: str, **data: Any) -> Event:
@@ -143,7 +161,15 @@ class Pipeline:
 
             # ---- 1. Intent agent (/grill-me)
             transcript = [{"role": m["role"], "content": m["content"]} for m in conv["messages"][run["msg_start"]:]]
+            if "similar" not in run:
+                try:
+                    run["similar"] = await similar_requests(self.vectors, run_question(conv, run))
+                    run["kpi_suggestions"] = [] if conv["preset_id"] else await suggest_kpis(self.vectors, run_question(conv, run))
+                except Exception as exc:  # retrieval must never block a request
+                    run["similar"], run["kpi_suggestions"] = None, []
+                    run["retrieval_error"] = str(exc)[:200]
             agent_run = await self.intent_agent.run({"transcript": transcript, "intent": conv["intent"], "asked": conv["asked"],
+                                                     "kpi_suggestions": run.get("kpi_suggestions"),
                                                      "preset": cat.preset_by_id(conv["preset_id"])})
             await self._audit(conv, "intent", agent_run)
             result = agent_run.output
@@ -156,8 +182,9 @@ class Pipeline:
             if result["status"] == "ask" and result.get("question"):
                 conv["asked"] += 1
                 conv["state"] = "clarifying"
+                tri = await self._triage(conv, "new")
                 yield self._stage(conv, "intent", "waiting", f"Question {conv['asked']} of up to 2",
-                                  {**public(intent), "agent": agent_run.trace()})
+                                  {**public(intent), "triage": tri, "agent": agent_run.trace()})
                 yield self._say(conv, result["question"], kind="question", suggestions=result.get("suggestions", []))
                 yield self._event(conv, "done", state=conv["state"])
                 return
@@ -167,12 +194,14 @@ class Pipeline:
             intent["decision"] = intent.get("decision") or f"Monitor {label_list(intent['measures'], 'm') or 'the requested numbers'}"
             intent["department"] = intent.get("department") or cat.department_for(intent["measures"])
             conv["intent"] = intent
-            await self._artifact(conv, "intents", public(intent), preset_id=conv["preset_id"])
+            run["intent_id"] = await self._artifact(conv, "intents", public(intent), preset_id=conv["preset_id"],
+                                                    status="new", urgency=(intent.get("urgency") or {}).get("value", "normal"))
+            tri = await self._triage(conv, "new")
             scope = ", ".join(v for vals in (intent.get("filters") or {}).values() for v in vals) or ("global" if intent.get("scope_global") else "")
             summary = (f"{label_list(intent['measures'], 'm') or 'No governed KPIs'}"
                        f"{' by ' + label_list(intent['dimensions'], 'd') if intent['dimensions'] else ''}"
                        f"{' · ' + scope if scope else ''}{' · Tableau migration' if intent.get('migration') else ''}")
-            yield self._stage(conv, "intent", "done", summary, {**public(intent), "agent": agent_run.trace()})
+            yield self._stage(conv, "intent", "done", summary, {**public(intent), "triage": tri, "agent": agent_run.trace()})
             await self._pause()
 
             async for ev in self._plan(conv):
@@ -214,6 +243,8 @@ class Pipeline:
         decision["availability"] = availability
         if result.decision != Decision.NOT_FEASIBLE:
             decision["preview"] = facts_preview(intent)
+        # Intent is clear and a decision is made: the request is triaged.
+        decision["triage"] = await self._triage(conv, "triaged")
         conv["plan"] = {"decision": decision}
         label = {"reuse": "Reuse", "repair": "Repair", "consolidate": "Consolidate", "migrate": "Migrate",
                  "new_build": "New build", "not_feasible": "Not feasible"}[result.decision.value]

@@ -116,6 +116,32 @@ async def business_requests() -> list[dict[str, Any]]:
     return cat.SHEETS.get("business_requests", [])
 
 
+@app.get("/api/requests/similar")
+async def requests_similar(q: str, k: int = 30) -> dict[str, Any]:
+    """Earlier Business_Requests that ask the same thing as `q` (vector search)."""
+    from .vectors import similar_requests
+
+    return await similar_requests(pipeline().vectors, q, k)
+
+
+@app.get("/api/requests/clusters")
+async def requests_clusters() -> dict[str, Any]:
+    """The intake queue grouped into distinct asks, with the dataset's label mix per group."""
+    from .vectors import request_clusters
+
+    clusters = await request_clusters(pipeline().vectors)
+    return {"requests": sum(c["count"] for c in clusters), "distinct_asks": len(clusters), "clusters": clusters,
+            "embedder": pipeline().vectors.embedder.name}
+
+
+@app.get("/api/requests/label-check")
+async def requests_label_check() -> dict[str, Any]:
+    """How predictable urgency and status are from the request text (why triage uses rules, not a classifier)."""
+    from .triage import label_predictability
+
+    return label_predictability(cat.SHEETS.get("business_requests", []))
+
+
 @app.get("/api/datapack")
 async def datapack_summary() -> dict[str, Any]:
     """What was loaded from the Bayer data pack."""

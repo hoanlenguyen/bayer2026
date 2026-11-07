@@ -181,6 +181,32 @@ Pull requests run the tests and build the image without pushing. Set these once 
 
 For MongoDB Atlas, also allow the host's outgoing IP addresses under Network Access. Then build the frontend with `VITE_API_BASE` set to the backend's public URL (see `../frontend/README.md`).
 
+## Request triage and vector search
+
+**Triage tags** (`app/triage.py`), shown under the question and saved on the `intents` record:
+
+- **Urgency** (normal, high, urgent): *stated* when the user picks it (grill-me asks "When do you need this?" when nothing else is missing), *inferred* from explicit time words in the request, quoted as evidence ("before the board meeting"), or *default* (normal). A model's urgency claim is only accepted if the quoted words are really in the request.
+- **Status** (new, triaged): set by the pipeline. New when a request arrives, triaged once the intent is clear and the decision is made.
+
+Why rules and not a classifier: in Business_Requests every one of the 10 distinct texts carries mixed labels, and product, market and date do not explain them. Even memorising each text's labels gives 54% for urgency against a 52% majority guess. `GET /api/requests/label-check` shows the numbers.
+
+**Vector search** (`app/vectors.py`) over the 150 business requests and the 18 governed KPIs:
+
+- *Duplicate detection:* "the same request is already in the queue 22 times (REQ-0002, …)", plus a *similar* tier for paraphrases.
+- *KPI suggestions:* the "Which numbers do you need?" question offers the nearest governed KPIs.
+- Embeddings: OpenAI `text-embedding-3-small` (`EMBED_MODEL`, `EMBED_DIMS`) when `OPENAI_API_KEY` is set; otherwise a local hashed embedding (offline, good at near-duplicates, weak at synonyms).
+- Search: **MongoDB Atlas Vector Search** (`$vectorSearch`) once the index exists; in-memory cosine search otherwise, or if Atlas fails.
+
+Build the Atlas index (once, and again after changing the embedding model or data pack):
+
+```bash
+python -m app.build_vectors                                   # Windows: .venv\Scripts\python.exe -m app.build_vectors
+```
+
+It writes `request_vectors` and `kpi_vectors` and creates a `vector_index` (vectorSearch, cosine) on each. Atlas needs about a minute; check it under **Atlas Search** in the Atlas UI. The processing record shows "MongoDB Atlas Vector Search" in Technical details once it is used.
+
+Endpoints: `GET /api/requests/similar?q=…`, `GET /api/requests/clusters` (150 requests → 10 distinct asks), `GET /api/requests/label-check`.
+
 ## Troubleshooting
 
 - **Windows: "uvicorn is not recognized":** the virtual environment is not active, or the requirements are not installed in it. Use `.venv\Scripts\python.exe -m uvicorn …` as shown in Quick start.

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, streamPost } from "../api/client";
 import type { CatalogMeta, DecisionType, Health, PipelineEvent, Preset, StageEvent, StageId } from "../api/types";
 import { FlowPanel, RUNNING_COPY } from "../components/ask/FlowPanel";
+import { TriageStrip } from "../components/ask/TriageStrip";
 import { VerdictCard } from "../components/ask/VerdictCard";
 import { Icon } from "../components/Icon";
 
@@ -201,6 +202,7 @@ export function AskPage() {
           {busy && !hasVerdict && (
             <p className="working"><span className="spinner" aria-hidden="true" />{runningStage ? RUNNING_COPY[runningStage] : "Reading your question"}</p>
           )}
+          <TriageStrip stages={stages} />
           <VerdictCard stages={stages} catalog={catalog} busy={busy} onApprove={approve} />
           {error && <p className="text-bad small">{error}</p>}
         </div>

@@ -88,6 +88,14 @@ export function StageDetail({ stage, data, catalog, technical }: Props) {
             : []),
           ...(data.department ? [["Department", data.department] as [string, string]] : []),
           ...(data.unmatched_terms?.length ? [["Not in catalog", data.unmatched_terms.join(", ")] as [string, string]] : []),
+          ...(data.triage ? [
+            ["Status", data.triage.status] as [string, string],
+            ["Urgency", `${data.triage.urgency.value} (${data.triage.urgency.source}${data.triage.urgency.evidence ? `: “${data.triage.urgency.evidence}”` : ""})`] as [string, string],
+            ...(data.triage.similar ? [["Earlier requests", data.triage.similar.duplicate_count
+              ? `same as ${data.triage.similar.duplicate_count} in the queue`
+              : data.triage.similar.similar?.length ? `similar to one asked ${data.triage.similar.similar[0].asked} times` : "none found"] as [string, string]] : []),
+            ...(technical && data.triage.similar ? [["Vector search", `${data.triage.similar.embedder} embeddings, ${data.triage.similar.search === "atlas" ? "MongoDB Atlas Vector Search" : "in-memory search"}`] as [string, string]] : []),
+          ] : []),
         ]} />
         </div>
       );
