@@ -6,7 +6,7 @@ name: Backend image
 on:
   workflow_dispatch:
   push:
-    branches: [main, version-2]
+    branches: [main, version-2, version-4]
     paths:
       - backend/**
       - materials/**

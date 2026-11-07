@@ -34,7 +34,7 @@ arriving over 2.7 s as they are sent, not buffered). The Azure script was checke
 
 ## Step 1. Build the backend image (automatic)
 
-Every push to `main` or `version-2` that changes `backend/` or `materials/` runs **Actions → Backend image** and pushes
+Every push to `main`, `version-2` or `version-4` that changes `backend/` or `materials/` runs **Actions → Backend image** and pushes
 `ghcr.io/hoanlenguyen/bayer2026-backend:latest`. To run it by hand: **Actions → Backend image → Run workflow**.
 
 Check it worked: GitHub profile → **Packages** → `bayer2026-backend`.
@@ -60,7 +60,7 @@ new one below.
 3. Get the script and run it:
 
 ```bash
-git clone https://github.com/hoanlenguyen/bayer2026.git && cd bayer2026 && git checkout version-2
+git clone https://github.com/hoanlenguyen/bayer2026.git && cd bayer2026 && git checkout version-4
 ```
 
 If the repository is private, use your GitHub username and the token from step 2 (or another token with repository read access) as
@@ -108,7 +108,7 @@ It builds the frontend and uploads it with the small proxy Worker. The output en
 
 ## Updating
 
-- **Backend:** push to `version-2` (the image builds by itself), wait for the workflow to finish, then in Cloud Shell:
+- **Backend:** push to `version-4` (the image builds by itself), wait for the workflow to finish, then in Cloud Shell:
 
 ```bash
 cd ~/bayer2026 && bash deploy/azure/containerapp.sh update
