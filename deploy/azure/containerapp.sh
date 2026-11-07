@@ -5,6 +5,7 @@
 #   bash containerapp.sh create   first time: resource group, environment, app with secrets
 #   bash containerapp.sh update   after a new image was pushed: start a new revision with the latest image
 #   bash containerapp.sh url      print the backend address (BACKEND_URL for the Cloudflare Worker)
+#   bash containerapp.sh image    print the image and revision that serve production now
 #   bash containerapp.sh logs     follow the backend's console output
 #   bash containerapp.sh jev      add or replace the TypeSafe key (Jev) on an existing app
 #   bash containerapp.sh github   create the login GitHub Actions uses to deploy on push to main (AZURE_CREDENTIALS)
@@ -18,6 +19,9 @@ ENV_NAME="${ENV_NAME:-analytics-manager-env}"
 APP="${APP:-analytics-manager-api}"
 GH_OWNER="${GH_OWNER:-hoanlenguyen}"
 IMAGE="${IMAGE:-ghcr.io/${GH_OWNER}/bayer2026-backend:latest}"
+
+# The containerapp commands live in an Azure CLI extension; install it without prompting (CI and fresh machines).
+ext() { az extension add --name containerapp --upgrade --only-show-errors; }
 
 url() { az containerapp show -n "$APP" -g "$RG" --query properties.configuration.ingress.fqdn -o tsv | sed 's#^#https://#'; }
 
@@ -59,11 +63,22 @@ case "${1:-}" in
     echo "Next: set BACKEND_URL to this address in deploy/cloudflare (docs/DEPLOY_FREE.md step 5)."
     ;;
   update)
-    # Same tag (:latest), so force a new revision to pull it again.
+    ext
+    # A new revision suffix also makes a reused tag (:latest) pull again. To deploy one release, pass
+    # IMAGE=ghcr.io/<owner>/bayer2026-backend:<commit sha>.
+    echo "Deploying $IMAGE"
     az containerapp update -n "$APP" -g "$RG" --image "$IMAGE" --revision-suffix "r$(date +%m%d%H%M)" -o none
     echo "Updated: $(url)"
     ;;
+  image)
+    ext
+    az containerapp show -n "$APP" -g "$RG" \
+      --query "{image: properties.template.containers[0].image, revision: properties.latestReadyRevisionName, running: properties.runningStatus}" -o table
+    az containerapp revision list -n "$APP" -g "$RG" \
+      --query "[?properties.active].{revision: name, image: properties.template.containers[0].image, traffic: properties.trafficWeight, health: properties.healthState}" -o table
+    ;;
   jev)
+    ext
     read -rsp "TYPESAFE_API_KEY: " TYPESAFE_API_KEY; echo
     [ -n "$TYPESAFE_API_KEY" ] || { echo "No key entered, nothing changed."; exit 1; }
     az containerapp secret set -n "$APP" -g "$RG" --secrets "typesafe-api-key=$TYPESAFE_API_KEY" -o none
@@ -83,7 +98,7 @@ case "${1:-}" in
     echo "Copy the whole JSON above into GitHub: Settings > Secrets and variables > Actions > New repository secret,"
     echo "name AZURE_CREDENTIALS. Then clear this screen with: clear"
     ;;
-  url)  url ;;
-  logs) az containerapp logs show -n "$APP" -g "$RG" --follow --format text ;;
-  *)    echo "usage: bash containerapp.sh create|update|jev|github|url|logs"; exit 1 ;;
+  url)  ext; url ;;
+  logs) ext; az containerapp logs show -n "$APP" -g "$RG" --follow --format text ;;
+  *)    echo "usage: bash containerapp.sh create|update|image|jev|github|url|logs"; exit 1 ;;
 esac
