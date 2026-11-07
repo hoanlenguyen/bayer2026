@@ -1,5 +1,44 @@
 # Deploy for free: Cloudflare Workers Free (frontend) + Azure Container Apps (backend)
 
+## Push changes live
+
+Use `main` for production. This checkout is configured with a `git live` shortcut. In another checkout, install it once:
+
+```bash
+git config alias.live '!bash deploy/push-live.sh'
+```
+
+Before editing, get the latest code:
+
+```bash
+git switch main
+git pull --ff-only origin main
+```
+
+After editing, review and commit the files you want to publish, then run:
+
+```bash
+git add path/to/changed-file
+git commit -m "Describe the change"
+git live
+```
+
+`git live` fetches the latest history, safely fast-forwards when possible, and pushes your committed changes to `main`.
+It stops if there are uncommitted files or conflicting history. It never force-pushes or commits files for you.
+`git live --check` validates the history without moving your branch or pushing.
+
+Open [Actions → Deploy live](https://github.com/hoanlenguyen/bayer2026/actions/workflows/deploy-live.yml) to follow the release:
+backend tests and image → Azure update → new revision ready and commercial API returns 200 → Cloudflare `deploy:free` →
+live `/briefings` and its API return 200. The final job summary gives the verified `/briefings` URL.
+A successful Git push only starts the release; a green **Deploy live** run confirms deployment.
+If nothing new was pushed, use **Run workflow → main** there to retry a release.
+
+**One-time requirement:** the repository needs `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `CLOUDFLARE_API_TOKEN`,
+and `CLOUDFLARE_ACCOUNT_ID`.
+The account owner adds these in [Settings → Secrets and variables → Actions](https://github.com/hoanlenguyen/bayer2026/settings/secrets/actions).
+See [Automatic deploys](#automatic-deploys-on-push-to-main) below for how to obtain each value. Keep the values out of chat and Git.
+Once configured, collaborators with GitHub write access can publish without signing into Azure or Cloudflare on their own machines.
+
 ```
 Browser ──► https://analytics-manager.<your-subdomain>.workers.dev      Cloudflare Worker, Free plan
               ├─ /, /cala-graph, /assets/*  → React build (static assets)
@@ -109,32 +148,30 @@ It builds the frontend and uploads it with the small proxy Worker. The output en
 
 ## Automatic deploys on push to main
 
-After a one-time setup, every push to `main` deploys by itself:
-
-| Change in | Workflow | What happens |
-|---|---|---|
-| `backend/`, `materials/` | **Backend image** | Tests, image to ghcr.io, the Container App switches to this commit's image, health check |
-| `frontend/`, `deploy/cloudflare/` | **Frontend deploy** | Type check and build, `wrangler deploy` of the free Worker, page and API check |
+After a one-time setup, every push to `main` starts **Deploy live**. It checks all three credentials first, then calls
+**Backend image** to test, build, deploy Azure, and verify `/api/briefings/commercial`. Only after that passes does it call
+**Frontend deploy** to run `npm run deploy:free` and verify the live `/briefings` page and proxied API.
 
 Pushes to `version-2` and `version-4` only test and build the backend image; they never deploy.
-Until the secrets below exist, both workflows still run as checks and skip the deploy step with a notice.
+Missing credentials fail the production workflow with the exact missing secret names; deployment is never silently skipped.
 
 **One-time setup** (GitHub → **Settings → Secrets and variables → Actions → New repository secret**):
 
 1. `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`: in Azure Cloud Shell (Bash), run
 
    ```bash
-   cd ~/bayer2026 && git pull && bash deploy/azure/containerapp.sh github
+   cd ~/bayer2026 && git pull origin main && bash deploy/azure/containerapp.sh github
    ```
 
-   It creates a managed identity `bayer2026-github-deploy` in `analytics-manager-rg`, lets it change only that resource group, and
-   trusts GitHub Actions runs on this repository's `main` branch to sign in as it (OpenID Connect). It prints the three IDs to add as
-   secrets. They are IDs, not passwords: each run gets a short-lived token. This works with school accounts that may not register
-   applications ("Insufficient privileges"), because a managed identity is an ordinary resource in your own resource group.
+   It creates a managed identity `bayer2026-github-deploy` in `analytics-manager-rg`, lets it change only that resource group,
+   and trusts GitHub Actions runs on this repository's `main` branch to sign in as it (OpenID Connect). It prints the three IDs to
+   add as secrets. They are IDs, not passwords: each run gets a short-lived token. This works with school accounts that may not
+   register applications ("Insufficient privileges"), because a managed identity is a normal resource in your own resource group.
 2. `CLOUDFLARE_API_TOKEN`: Cloudflare dashboard → **My Profile → API Tokens → Create Token → "Edit Cloudflare Workers"** template.
 3. `CLOUDFLARE_ACCOUNT_ID`: Cloudflare dashboard → **Workers & Pages** → Account ID on the right.
 
-Check: **Actions** → the latest run → the summary shows "Backend deployed" or "Frontend deployed" with the address.
+Check: **Actions → Deploy live → Run workflow → main**. A successful release ends with **Live briefings** and its verified address
+in the frontend job summary. Local Wrangler login is only needed for a manual deployment from your machine.
 
 ## Updating by hand
 
@@ -145,6 +182,8 @@ cd ~/bayer2026 && bash deploy/azure/containerapp.sh update
 ```
 
 - **Frontend:** `npm run deploy:free` in `deploy/cloudflare` again.
+
+The separate **Legacy Cloudflare Containers (paid)** workflow is for the paid alternative, not this deployment.
 
 ## Daily operations (Cloud Shell, in `~/bayer2026`)
 

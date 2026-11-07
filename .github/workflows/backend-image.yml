@@ -1,18 +1,26 @@
 # Backend: test, build the image, and on main deploy it to Azure Container Apps.
 #
-#   push to main, version-2 or version-4 (backend/, materials/ ...)  → tests → image to ghcr.io
-#   push to main only                                                → also deploy that image to the Container App
+#   version-2/version-4 pushes → tests → image to ghcr.io
+#   Deploy live calls this workflow on main → also deploy the image to Azure
 #
 # Image: ghcr.io/<owner>/bayer2026-backend:latest and :<commit sha>
 # Deploy needs the repository secrets AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID from
-# `bash deploy/azure/containerapp.sh github` (a managed identity GitHub signs in as with OIDC, no password).
-# Without it the deploy job is skipped and says so; nothing fails.
+# `bash deploy/azure/containerapp.sh github`: a managed identity GitHub signs in as with OIDC, no password.
+# A production deployment fails clearly if the credential is missing.
 name: Backend image
 
 on:
+  workflow_call:
+    secrets:
+      AZURE_CLIENT_ID:
+        required: false
+      AZURE_TENANT_ID:
+        required: false
+      AZURE_SUBSCRIPTION_ID:
+        required: false
   workflow_dispatch:
   push:
-    branches: [main, version-2, version-4]
+    branches: [version-2, version-4]
     paths:
       - backend/**
       - materials/**
@@ -85,14 +93,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      id-token: write   # OIDC sign-in to Azure
+      id-token: write   # OIDC sign-in to Azure (managed identity)
       contents: read
     env:
       HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' }}
     steps:
-      - name: Skip when Azure is not connected yet
+      - name: Require the Azure deployment credential
         if: env.HAS_AZURE != 'true'
-        run: echo "::notice::AZURE_CLIENT_ID, AZURE_TENANT_ID or AZURE_SUBSCRIPTION_ID is not set, so the backend was built but not deployed. See docs/DEPLOY_FREE.md, Automatic deploys."
+        run: |
+          echo "::error::Add AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID (from bash deploy/azure/containerapp.sh github) in repository Settings > Secrets and variables > Actions. See docs/DEPLOY_FREE.md."
+          echo "### Deployment blocked: the Azure sign-in IDs are missing" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
       - uses: azure/login@v2
         if: env.HAS_AZURE == 'true'
@@ -109,16 +120,23 @@ jobs:
           az containerapp update -n "$AZURE_APP" -g "$AZURE_RG" \
             --image "${{ needs.build.outputs.image }}:${{ github.sha }}" -o none
           fqdn=$(az containerapp show -n "$AZURE_APP" -g "$AZURE_RG" --query properties.configuration.ingress.fqdn -o tsv)
+          revision=$(az containerapp show -n "$AZURE_APP" -g "$AZURE_RG" --query properties.latestRevisionName -o tsv)
           echo "BACKEND=https://$fqdn" >> "$GITHUB_ENV"
+          echo "REVISION=$revision" >> "$GITHUB_ENV"
 
-      - name: Health check
+      - name: Verify the new revision and commercial briefings API
         if: env.HAS_AZURE == 'true'
         run: |
           # The new revision can take a minute to start; retry for up to 3 minutes.
           for _ in $(seq 1 18); do
-            if body=$(curl -fsS -m 20 "$BACKEND/api/health"); then
-              echo "$body"; echo "### Backend deployed: $BACKEND" >> "$GITHUB_STEP_SUMMARY"; exit 0
+            ready=$(az containerapp show -n "$AZURE_APP" -g "$AZURE_RG" --query properties.latestReadyRevisionName -o tsv)
+            if [ "$ready" = "$REVISION" ] && \
+              [ "$(curl -sS -m 20 -o /dev/null -w '%{http_code}' "$BACKEND/api/health")" = 200 ] && \
+              [ "$(curl -sS -m 20 -o /dev/null -w '%{http_code}' "$BACKEND/api/briefings/commercial")" = 200 ]; then
+              echo "### Backend deployed: $BACKEND" >> "$GITHUB_STEP_SUMMARY"
+              echo "Revision: $REVISION; /api/health and /api/briefings/commercial returned 200." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
             fi
             sleep 10
           done
-          echo "::error::$BACKEND/api/health did not answer after deploy"; exit 1
+          echo "::error::The new Azure revision or its APIs did not become ready; Cloudflare will not deploy."; exit 1

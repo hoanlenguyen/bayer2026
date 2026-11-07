@@ -2,7 +2,7 @@
 # Runs only when started by hand: Actions > Deploy to Cloudflare > Run workflow (pick the branch).
 # Needs repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.
 # App keys (OPENAI_API_KEY, MONGODB_URI) are stored once on the Worker with `wrangler secret put`, not here.
-name: Deploy to Cloudflare
+name: Legacy Cloudflare Containers (paid)
 
 on:
   workflow_dispatch:
