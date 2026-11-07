@@ -108,11 +108,11 @@ export function Sidebar({ page }: { page: Page }) {
       </div>
       <nav className="app-nav" aria-label="Main">
         <a href="/#ask" onClick={navigate} aria-label="Ask" title={tip("Ask")} aria-current={page === "ask" ? "page" : undefined}><Icon name="ask" /><span>Ask</span></a>
-        <a href="/simulator" onClick={navigate} aria-label="Conversation simulation" title={tip("Conversation simulation")} aria-current={page === "simulator" ? "page" : undefined}><Icon name="chat" /><span><span className="nav-extra">Conversation </span>Simulation</span></a>
         <a href="/#explorer" onClick={navigate} aria-label="Estate Explorer" title={tip("Estate Explorer")} aria-current={page === "explorer" ? "page" : undefined}><Icon name="estate" /><span><span className="nav-extra">Estate </span>Explorer</span></a>
         <a href="/cala-graph" onClick={navigate} aria-label="Knowledge Graph" title={tip("Knowledge Graph")} aria-current={page === "cala-graph" ? "page" : undefined}><Icon name="graph" /><span><span className="nav-extra">Knowledge </span>Graph</span></a>
         <a href="/briefings" onClick={navigate} aria-label="Team briefings" title={tip("Team briefings")} aria-current={page === "briefings" ? "page" : undefined}><Icon name="briefings" /><span>Briefings</span></a>
         <a href="/bi-estate" onClick={navigate} aria-label="BI Portfolio" title={tip("BI Portfolio")} aria-current={page === "bi-estate" ? "page" : undefined}><Icon name="search" /><span><span className="nav-extra">BI </span>Portfolio</span></a>
+        <a href="/simulator" onClick={navigate} aria-label="Conversation simulation" title={tip("Conversation simulation")} aria-current={page === "simulator" ? "page" : undefined}><Icon name="chat" /><span><span className="nav-extra">Conversation </span>Simulation</span></a>
       </nav>
       {!collapsed && <HistoryList page={page} />}
       <p className="sample-note" title="All data in this app is synthetic, provided by SinceAI">

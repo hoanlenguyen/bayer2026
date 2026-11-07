@@ -44,12 +44,28 @@ function Composer({ onSend, disabled, autoFocus, placeholder }: {
 }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
+  /** Grow with the text, up to 200px. While the page is hidden (e.g. under /introduction) there is nothing to measure:
+   *  scrollHeight is 0 and would fix the box at 0px, so leave the height to rows={1} until it shows. */
+  const fit = () => {
     const el = ref.current;
     if (!el) return;
+    if (!el.getClientRects().length) { el.style.height = ""; return; }
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
-  }, [text]);
+  };
+  useEffect(fit, [text]);
+  useEffect(() => {
+    // Measure again when the box appears or its width changes (a page switch, a wider window).
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let width = -1;
+    const observer = new ResizeObserver(([entry]) => {
+      const w = entry!.contentRect.width;
+      if (w !== width) { width = w; fit(); } // height changes come from fit() itself; ignore them
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   const submit = () => {
     const t = text.trim();
     if (!t || disabled) return;

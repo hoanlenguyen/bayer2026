@@ -206,7 +206,7 @@ export function SimulatorPage() {
       <div className="sim-chat">
         <header className="sim-head">
           <div>
-            <h1>Conversation simulation</h1>
+            <h1>Conversation simulation <span className="sim-developing">(Developing)</span></h1>
             <p>{NAMES.A} and {NAMES.B} talk. Jev reads each sentence, and {NAMES.C} speaks only when one needs a decision.</p>
           </div>
           <div className="sim-actions">
