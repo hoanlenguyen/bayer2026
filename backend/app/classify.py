@@ -18,21 +18,14 @@ from typing import Any
 
 from . import catalog as cat
 from .agents.intent import OUT_OF_SCOPE, jev_match, jev_urgency, match_dimensions, match_filters, match_measures
-from .decision import data_availability, decide, intent_products, rank_candidates
+from .assessment import REPORT_STATUS, tags_for_intent  # noqa: F401  (re-exported for callers)
 from .geo import other_markets
-from .steps import analysis_steps, recommendation
 from .triage import URGENCY_VALUES, infer_urgency
 from .vectors import DUPLICATE_THRESHOLD, SIMILAR_THRESHOLD, VectorStore, suggest_kpis
 
 log = logging.getLogger(__name__)
 
 NEIGHBOURS = 30  # the most repeated request text appears 22 times
-# How a decision answers "does a report already exist?"
-REPORT_STATUS = {"reuse": ("yes", "usable"), "repair": ("yes", "needs_repair"), "migrate": ("yes", "needs_migration"),
-                 "consolidate": ("no", "partial_match"), "new_build": ("no", "none"), "not_feasible": ("no", "none"),
-                 "retire": ("yes", "retire"), "review": ("yes", "needs_review")}
-
-
 def vote_urgency(neighbours: list[tuple[str | None, float]], duplicate_at: float, similar_at: float) -> dict[str, Any] | None:
     """Majority urgency among the closest labelled requests. Exact asks outrank merely similar ones; ties go to the more urgent."""
     same = [u for u, score in neighbours if score >= duplicate_at and u in URGENCY_VALUES]
@@ -70,60 +63,6 @@ async def urgency_for(text: str, store: VectorStore, decider: Any | None = None)
     if vote:
         return {"source": "vector_vote", "evidence": None, **vote}, error
     return {"value": "normal", "source": "default", "evidence": None, "vector_vote": None}, error
-
-
-def tags_for_intent(intent: dict[str, Any], matched_by: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
-    """The tags that follow from an intent, however it was extracted. Same rules as the Ask flow, so the answers agree."""
-    C = cat.CATALOG
-    filters = intent.get("filters") or {}
-    governed = [m for m in intent.get("measures") or [] if m in C["measures"] and C["measures"][m]["certified"]]
-    matched_by = matched_by or {}
-
-    candidates = rank_candidates(intent, C)
-    availability = data_availability(intent, C)
-    result = decide(candidates, availability, intent, C)
-
-    domains = Counter(C["measures"][m]["domain"] for m in governed)
-    model = availability.get("best_model")
-    target_id = result.target_model_id
-    if not target_id and result.candidate and result.decision.value in {"reuse", "repair", "consolidate", "retire", "review"}:
-        target_id = result.candidate.scope_evidence.get("model_id")
-    if target_id and (not model or model["id"] != target_id):
-        target = cat.model_by_id(target_id)
-        if target:
-            model = {"id": target["id"], "name": target["name"], "workspace": target["workspace"], "platform": target["platform"],
-                     "endorsement": target["endorsement"], "refresh_status": target["refresh_status"],
-                     "measures_served": sorted(set(governed) & set(target["measures"]))}
-
-    exists, status = REPORT_STATUS[result.decision.value]
-    c = result.candidate
-    # A closest report is only worth naming when it is the one the answer refers to.
-    report = None
-    if c and status != "none":
-        asset = cat.asset_by_id(c.asset_id) or {}
-        report = {"id": c.asset_id, "name": c.name, "platform": c.platform, "workspace": asset.get("workspace"), "owner": asset.get("owner"),
-                  "coverage": c.coverage, "governance": c.governance}
-    market = ([C["markets"][m]["name"] for m in filters.get("market", []) if m in C["markets"]] + list(filters.get("region", []))
-              + list(intent.get("other_markets") or []))
-
-    tags = {
-        "domain": domains.most_common(1)[0][0] if domains else None,
-        "market": market or (["Global"] if intent.get("scope_global") else []),
-        "product": intent_products(intent, C),
-        "breakdown": [C["dimensions"][d]["name"] for d in intent.get("dimensions") or [] if d in C["dimensions"]],
-        "governed_kpis": [{"id": m, "kpi_id": C["measures"][m].get("kpi_id"), "name": C["measures"][m]["name"],
-                           "domain": C["measures"][m]["domain"], **matched_by.get(m, {})} for m in governed],
-        "not_available": list(intent.get("unmatched_terms") or []),
-        "semantic_model": None if not model else {
-            "id": model["id"], "name": model["name"], "workspace": model["workspace"], "platform": model["platform"],
-            "endorsement": model["endorsement"], "refresh_status": model["refresh_status"],
-            "serves_all_kpis": set(model["measures_served"]) >= set(governed),
-        },
-        "existing_report": exists,
-        "existing_report_detail": {"status": status, "decision": result.decision.value, "report": report},
-    }
-    steps = analysis_steps(intent, tags, candidates, result)
-    return {**tags, "recommendation": recommendation(result, steps), "steps": steps}
 
 
 async def classify_request(text: str, store: VectorStore, decider: Any | None = None) -> dict[str, Any]:

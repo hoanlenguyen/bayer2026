@@ -215,8 +215,10 @@ def check_reuse(req):
     return f"The clarified scope leads to {result.decision.value.replace('_', ' ')}. {result.reason}", link
 
 
-def assemble(req, dashboard_id, conversation_id, run_id, request):
-    C = catalog.CATALOG
+def select_source(req):
+    """Resolve the governed bindings and select the approved scope's workbook rows, with every existing check
+    (complete contiguous months, valid numbers, unique observations, known record types). One snapshot feeds the
+    approval fingerprint and the calculation, so they agree. Raises ValueError when the evidence cannot be used."""
     start, end = req["period"]["start"], req["period"]["end"]
     months = [m for m in workbook_months() if start <= m <= end]
     if len(months) != (int(end[:4]) - int(start[:4])) * 12 + int(end[5:]) - int(start[5:]) + 1:
@@ -230,9 +232,7 @@ def assemble(req, dashboard_id, conversation_id, run_id, request):
         columns.append({"id": key, "name": meta["name"], "unit": meta["fact_unit"] or meta["unit"], "field": meta["fact_column"],
                         "kpi_id": meta["kpi_id"], "aggregation": method, "lower_is_better": meta["lower_is_better"]})
     fields = {col["field"] for col in columns}
-    groups = defaultdict(lambda: defaultdict(list))
     records, seen = [], set()
-    axes = [d for d in req["dimensions"] if d != "month"]
     for i, row in enumerate(catalog.SHEETS[SOURCE.lower()], 2):
         p, m, period = row["product_id"], row["market_id"], row["month"][:7]
         if p not in products or m not in markets or period not in months:
@@ -244,12 +244,22 @@ def assemble(req, dashboard_id, conversation_id, run_id, request):
             raise ValueError(f"Missing or invalid numeric evidence in {SOURCE} row {i}.")
         if row.get("value_type") not in ("actual_like_synthetic", "forecast_like_synthetic"):
             raise ValueError(f"The record type in {SOURCE} row {i} cannot be verified.")
-        record = {"row": i, "product_id": p, "market_id": m, "month": row["month"], "value_type": row["value_type"],
-                  **{field: row[field] for field in sorted(fields)}}
-        records.append(record)
-        groups[tuple(_axis(p, m, d) for d in axes)][period].append(record)
+        records.append({"row": i, "product_id": p, "market_id": m, "month": row["month"], "value_type": row["value_type"],
+                        **{field: row[field] for field in sorted(fields)}})
     if len(seen) != len(products) * len(markets) * len(months):
         raise ValueError("A requested product, market or month is missing source observations. Narrow or revise the brief.")
+    return {"columns": columns, "records": records, "months": months}
+
+
+def calculate(req, source, dashboard_id, conversation_id, run_id, request):
+    """Aggregate a verified source snapshot into the approved monthly series and groups. Reads no workbook rows."""
+    C = catalog.CATALOG
+    columns, records = source["columns"], source["records"]
+    products, markets = set(req["products"]), set(req["markets"])
+    groups = defaultdict(lambda: defaultdict(list))
+    axes = [d for d in req["dimensions"] if d != "month"]
+    for record in records:
+        groups[tuple(_axis(record["product_id"], record["market_id"], d) for d in axes)][record["month"][:7]].append(record)
     result = []
     for group, monthly in sorted(groups.items()):
         points = []
@@ -282,6 +292,13 @@ def assemble(req, dashboard_id, conversation_id, run_id, request):
             "source": SOURCE, "source_records": records, "synthetic": True,
             **({"presentation": req["presentation"], "lead_measure": req["lead_measure"], "guided": req["guided"],
                 "market_order": [C["markets"][m]["name"] for m in req["markets"]]} if req.get("presentation") else {})}
+
+
+
+
+def assemble(req, dashboard_id, conversation_id, run_id, request):
+    """Select and validate the source rows, then calculate the view: the review preview and older callers."""
+    return calculate(req, select_source(req), dashboard_id, conversation_id, run_id, request)
 
 
 def _join(names: list[str]) -> str:

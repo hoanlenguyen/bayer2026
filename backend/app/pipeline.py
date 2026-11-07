@@ -9,6 +9,7 @@ workbook-backed view. Agents propose and Python verifies. Every stage emits ``st
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -23,10 +24,10 @@ from .agents.base import Step
 from .agents.gate import ConversationGateAgent
 from .agents.intent import sanitize_intent
 from .agents.relevance import EXAMPLES, retry_message
-from .decision import THRESHOLDS, Decision, data_availability, decide, rank_candidates
+from .decision import THRESHOLDS, Decision
 from .facts import preview as facts_preview
 from .employee_report_match import native_reuse, supports_monthly_workbook
-from .classify import tags_for_intent
+from .assessment import Assessment
 from .decider import Decider
 from .vectors import VectorStore, get_embedder, similar_requests, suggest_kpis
 from .llm import LLM, explain, merge_usage, usage_scope, usage_total
@@ -58,8 +59,9 @@ def public(intent: dict[str, Any]) -> dict[str, Any]:
 
 
 def classification(intent: dict[str, Any]) -> dict[str, Any]:
-    """The tags for the first step. The analysis steps and the recommendation get their own stages."""
-    return {k: v for k, v in tags_for_intent(intent).items() if k not in ("steps", "recommendation")}
+    """The first step's tags: what the intent alone says. The semantic model and existing report depend on the catalog
+    assessment, so they arrive with the discovery stage (its `classification`), never by running it early."""
+    return Assessment(intent).scope()
 
 
 def run_question(conv: dict[str, Any], run: dict[str, Any]) -> str:
@@ -72,9 +74,10 @@ def label_list(ids: list[str], kind: str) -> str:
     return ", ".join(src[i]["name"] for i in ids if i in src)
 
 
-ANALYSIS_STAGES = (("kpis", 2, "Resolving metric definitions"), ("discovery", 3, "Searching the catalog"),
+ANALYSIS_STAGES = (("kpis", 2, "Resolving metric definitions"), ("discovery", 3, "Ranking reports and checking data availability"),
                    ("lineage", 4, "Tracing data dependencies"), ("governance", 5, "Checking trust and ownership"),
                    ("migration", 6, "Checking for Tableau reports"))
+STAGE_STEP = {stage: n for stage, n, _ in ANALYSIS_STAGES}
 
 
 def intent_summary(intent: dict[str, Any]) -> str:
@@ -84,27 +87,30 @@ def intent_summary(intent: dict[str, Any]) -> str:
             f"{' · ' + scope if scope else ''}{' · Tableau migration' if intent.get('migration') else ''}")
 
 
-def analyse(intent: dict[str, Any]) -> dict[str, Any]:
-    """Steps 2 to 6 and the recommendation for a complete intent. Pure: reads the catalog, saves nothing.
-    Shared by the Ask flow and the conversation simulation, so both show the same evidence."""
-    candidates = rank_candidates(intent, cat.CATALOG)
-    availability = data_availability(intent, cat.CATALOG)
-    result = decide(candidates, availability, intent, cat.CATALOG)
-    tags = tags_for_intent(intent)
-    steps = {s["step"]: s for s in tags["steps"]}
-    shown = candidates[: THRESHOLDS["max_candidates_shown"]]
-    extra = {
-        "discovery": {"candidates": [c.to_dict() for c in shown], "total_candidates": len(candidates),
-                      "in_scope": sum(1 for c in candidates if c.scope_score >= THRESHOLDS["min_scope"]),
-                      "availability": availability, "searched": len(cat.CATALOG["assets"])},
-        "governance": {"candidates": [{"asset_id": c.asset_id, "name": c.name, "governance": c.governance,
-                                       "checks": [vars(k) for k in c.checks], "gates_failed": c.gates_failed} for c in shown]},
-    }
-    stages = {stage: {"running": running, "summary": steps[n]["summary"], "data": {**extra.get(stage, {}), "step": steps[n]}}
-              for stage, n, running in ANALYSIS_STAGES}
+def stage_payload(a: Assessment, stage: str) -> dict[str, Any]:
+    """A completed stage's summary and evidence, from the assessment's own result for that stage."""
+    n = STAGE_STEP[stage]
+    step = a.steps[n]
+    extra: dict[str, Any] = {}
+    if stage == "discovery":
+        shown = a.candidates[: THRESHOLDS["max_candidates_shown"]]
+        extra = {"candidates": [c.to_dict() for c in shown], "total_candidates": len(a.candidates),
+                 "in_scope": sum(1 for c in a.candidates if c.scope_score >= THRESHOLDS["min_scope"]),
+                 "availability": a.availability, "searched": len(cat.CATALOG["assets"]),
+                 # The model and existing report are known from here on: the intent step's classification gains them.
+                 "classification": {**a.scope(), **a.assessed}}
+    elif stage == "governance":
+        shown = a.candidates[: THRESHOLDS["max_candidates_shown"]]
+        extra = {"candidates": [{"asset_id": c.asset_id, "name": c.name, "governance": c.governance,
+                                 "checks": [vars(k) for k in c.checks], "gates_failed": c.gates_failed} for c in shown]}
+    return {"summary": step["summary"], "data": {**extra, "step": step}}
 
+
+def recommend(a: Assessment) -> dict[str, Any]:
+    """The rules decision with its evidence, once every stage has run."""
+    intent, result, tags = a.intent, a.result, a.tags()
     decision = result.to_dict()
-    decision["availability"] = availability
+    decision["availability"] = a.availability
     decision["recommendation"] = tags["recommendation"]
     # A new build has no report yet: the shared model it would sit on, and whoever owns that, is who to talk to.
     target_model = cat.model_by_id(result.target_model_id) if result.decision == Decision.NEW_BUILD else None
@@ -113,7 +119,15 @@ def analyse(intent: dict[str, Any]) -> dict[str, Any]:
     # No preview for a country without data: the rows would be other countries' numbers.
     if result.decision not in (Decision.NOT_FEASIBLE, Decision.RETIRE) and not intent.get("other_markets"):
         decision["preview"] = facts_preview(intent)
-    return {"result": result, "tags": tags, "stages": stages, "decision": decision}
+    return decision
+
+
+def analyse(intent: dict[str, Any]) -> dict[str, Any]:
+    """Steps 2 to 6 and the recommendation for a complete intent, in one call. Pure: reads the catalog, saves nothing.
+    The Ask flow runs the same Assessment stage by stage; the conversation simulation uses this, so both agree."""
+    a = Assessment(intent).run()
+    stages = {stage: {"running": running, **stage_payload(a, stage)} for stage, _n, running in ANALYSIS_STAGES}
+    return {"result": a.result, "tags": a.tags(), "stages": stages, "decision": recommend(a)}
 
 
 class Pipeline:
@@ -205,6 +219,14 @@ class Pipeline:
         conv["updated_at"] = now()
         await self.store.save(conv)
 
+    async def _done(self, conv: dict[str, Any], state: str) -> Event:
+        """The terminal event, sent only after the run (with this event) is saved, so a client that sees `done` can rely
+        on reading the run back. A failed save raises instead, and the stream ends with an error, never after `done`."""
+        ev = self._event(conv, "done", state=state)
+        if conv["runs"]:  # a chat that only ever held rejected messages stays out of the history
+            await self._save(conv)
+        return ev
+
     def _saved(self, event: Event, conv: dict[str, Any]) -> Event:
         """The outgoing user_message for an accepted, already saved message carries the conversation's summary,
         so a client can add it to its own history. The stored transcript event stays as it was."""
@@ -232,7 +254,6 @@ class Pipeline:
             self._say(conv, retry_message(check.output["verdict"], open_question["content"] if open_question else None),
                       kind="retry", rejected=True, verdict=check.output["verdict"],
                       suggestions=open_question.get("suggestions", []) if open_question else EXAMPLES),
-            self._event(conv, "done", state=conv["state"]),
         ]
 
     # ------------------------------------------------------------ chat turn
@@ -254,11 +275,15 @@ class Pipeline:
             yield {"type": "conversation", "id": conv["_id"], "provider": self.llm.name, "store": self.store.name}
 
             # ---- 0. Is this a usable business message? A preset's own prompt always is.
-            check = None if preset and text == preset["prompt"] else await self._check_message(conv, text)
+            check = None
+            if not (preset and text == preset["prompt"]):
+                yield {"type": "processing", "phase": "relevance"}  # not stored: the message check is running
+                check = await self._check_message(conv, text)
             if check and check.output["verdict"] != "accept":
                 await self._audit(conv, "relevance", check)
                 for ev in self._reject(conv, text, check):
                     yield ev
+                yield await self._done(conv, conv["state"])
                 return
 
             conv["title"] = conv["title"] or text[:70]
@@ -288,6 +313,8 @@ class Pipeline:
             yield self._saved(self._event(conv, "user_message", content=text), conv)
             if new_run:
                 yield self._stage(conv, "intent", "running", "Intent agent is reading your request")
+            else:  # an answer to the open question: the same intent stage continues, so no new stage starts
+                yield {"type": "processing", "phase": "intent"}
 
             # ---- 1. Intent agent (/grill-me)
             transcript = [{"role": m["role"], "content": m["content"]} for m in conv["messages"][run["msg_start"]:] if not m.get("rejected")]
@@ -321,7 +348,7 @@ class Pipeline:
                                   {**public(intent), "triage": tri, "agent": agent_run.trace(),
                                    **({"classification": classification(intent)} if intent["measures"] else {})})
                 yield self._say(conv, result["question"], kind="question", suggestions=result.get("suggestions", []))
-                yield self._event(conv, "done", state=conv["state"])
+                yield await self._done(conv, conv["state"])
                 return
 
             intent.pop("_pending", None)
@@ -388,7 +415,7 @@ class Pipeline:
             yield self._say(conv, "Please pick one of the two answers below. To ask something else, choose New question.",
                             kind="retry", rejected=True, verdict="guided_choice", suggestions=[o["label"] for o in options],
                             choices=options, guided_step=g["step"])
-            yield self._event(conv, "done", state=conv["state"])
+            yield await self._done(conv, conv["state"])
             return
         if g["step"] == "period" and not guided.still_covered(ex, choice):
             conv["messages"].append({"role": "user", "content": choice["label"], "ts": now(), "rejected": True})
@@ -438,7 +465,7 @@ class Pipeline:
                 conv["state"] = "idle"
                 yield self._say(conv, "This example's workbook coverage has a gap now, so it cannot be built as offered. "
                                       "Choose New question to pick another example or ask your own question.", kind="result")
-                yield self._event(conv, "done", state="idle")
+                yield await self._done(conv, "idle")
                 return
         conv["asked"] += 1
         conv["state"] = "clarifying"
@@ -454,32 +481,36 @@ class Pipeline:
             question = f"{note} {question}"
         yield self._say(conv, question, kind="question", suggestions=[o["label"] for o in options], choices=options, guided_step=step,
                         facts=guided.scope_facts(ex))
-        yield self._event(conv, "done", state=conv["state"])
+        yield await self._done(conv, conv["state"])
 
     # ------------------------------------------------------------ the analysis steps → recommendation
     async def _plan(self, conv: dict[str, Any], user_turns: list[str]) -> AsyncIterator[Event]:
+        """Steps 2 to 6, then the recommendation. Each stage's `running` is sent before its operation starts and its `done`
+        carries that operation's own result, which the next stage uses. Catalog work runs off the event loop, so the
+        `running` event is delivered while the work is still going."""
         intent = conv["intent"]
-        yield {"type": "processing", "phase": "catalog"}  # not stored: it marks when the grouped assessment starts
-        plan = analyse(intent)
-        result = plan["result"]
-        decision = await native_reuse(self.store, intent, user_turns, plan["decision"]) or plan["decision"]
+        a = Assessment(intent)
+        a.parse()
+        # ---- 2 to 6: KPI_Catalog, Analytics_Assets, Semantic_Models, Governance_Signals, Migration_Backlog
+        for stage, _n, running in ANALYSIS_STAGES:
+            yield self._stage(conv, stage, "running", running)
+            await asyncio.to_thread(a.run_stage, stage)
+            done = stage_payload(a, stage)
+            yield self._stage(conv, stage, "done", done["summary"], done["data"])
+
+        # ---- Recommendation and follow-up: the rules decision, the reuse override, the explanation and proposals
+        yield self._stage(conv, "decision", "running", "Preparing the recommendation")
+        result = a.result
+        estate = recommend(a)
+        decision = await native_reuse(self.store, intent, user_turns, estate) or estate
         if decision["decision"] == "reuse" and supports_monthly_workbook(user_turns):
             decision["metric_series"] = metric_series(intent, decision)
         decision["run_id"] = conv["runs"][-1]["id"]
         missing = decision["availability"]["missing_terms"]
-
-        # ---- 2 to 6: KPI_Catalog, Analytics_Assets, Semantic_Models, Governance_Signals, Migration_Backlog
-        for stage, _n, _running in ANALYSIS_STAGES:
-            s = plan["stages"][stage]
-            yield self._stage(conv, stage, "running", s["running"])
-            yield self._stage(conv, stage, "done", s["summary"], s["data"])
-
-        # ---- Recommendation (deterministic)
         # Intent is clear and a recommendation is made: the request is triaged.
         decision["triage"] = await self._triage(conv, "triaged")
         conv["plan"] = {"decision": decision}
         await self._artifact(conv, "evidence", {"recommendation": decision["recommendation"]})
-        yield self._stage(conv, "decision", "done", decision["recommendation"]["label"], decision)
         employee = decision.get("employee_report")
         if employee:
             explanation = decision["reason"]
@@ -488,8 +519,10 @@ class Pipeline:
                 explanation = await explain(self.llm, {"decision": decision, "intent": public(intent),
                                                        "missing_text": ("Missing: " + ", ".join(missing) + ".") if missing else ""})
             self._count_tokens(conv, used)
+        yield self._stage(conv, "decision", "done", decision["recommendation"]["label"], decision)
 
         # ---- Follow-up actions (proposed by Python, accepted by a person)
+        yield self._stage(conv, "actions", "running", "Proposing follow-up work")
         existing = await self.store.list_artifacts("actions", limit=500)
         proposals = act.propose({**intent, "preset_id": conv.get("preset_id")}, decision, existing)
         conv["plan"]["proposed_actions"] = proposals
@@ -515,4 +548,4 @@ class Pipeline:
                                          "How are Eylea net sales and digital engagement developing in Japan?"])
         else:
             yield self._say(conv, explanation, kind="result", decision=result.decision.value)
-        yield self._event(conv, "done", state="idle")
+        yield await self._done(conv, "idle")

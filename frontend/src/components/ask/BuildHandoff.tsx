@@ -1,23 +1,26 @@
 import { useEffect, useRef, useState } from "react";
-import { dashboardUrl, type BuildReceipt, type DesignState } from "../../api/dashboardBuilder";
+import { dashboardUrl, type BuildReceipt, type BuildStepId, type DesignState } from "../../api/dashboardBuilder";
 import { getCurrentConversation, useCurrentConversation } from "../../lib/conversations";
 import { prefetchDashboard } from "../../lib/dashboardPrefetch";
-import { BUILD_OVERVIEW_MS } from "../../lib/overview";
 
-/* "Preparing your dashboard": the hand-off from an approved brief to the saved dashboard, shown as the four steps the
-   build actually performs. Truth and timing are separate. Steps 1 to 3 describe work established during review (the
-   receipt). Step 4 changes to "Dashboard saved" only after the server confirms the save. The reading window decides
-   only when a confirmed dashboard may open by itself: at max(confirmed save, approval + window). */
-
-export const READING_WINDOW_MS = BUILD_OVERVIEW_MS;
+/* "How your dashboard is prepared": the approved build as it runs. Each row is one checkpoint the server reports before
+   its work starts and completes with that work's verified facts. "Dashboard saved" shows only after the server
+   confirmed the committed result, and the dashboard opens at once if this attempt still owns the screen.
+   No timer decides anything here. A server that answers with plain JSON gets one row for the single operation. */
 
 export type BuildPhase =
   | { kind: "saving" }
-  | { kind: "saved"; dashboardId: string }
+  | { kind: "saved"; dashboardId: string; replayed: boolean }
   /** uncertain: the outcome could not be established. recovery: "review" after a 409, "retry" with the same brief, "reload" first */
   | { kind: "failed"; message: string; recovery: "review" | "retry" | "reload"; uncertain: boolean };
 
-export interface BuildSession { id: number; startedAt: number; phase: BuildPhase; brief: DesignState }
+export interface BuildStep { status: "running" | "complete" | "failed"; facts?: Record<string, unknown> }
+export interface BuildSession {
+  id: number; startedAt: number; phase: BuildPhase; brief: DesignState;
+  /** live: the server streams checkpoints. single: it answered with one JSON result, so only one operation is known. */
+  mode: "live" | "single";
+  steps: Partial<Record<BuildStepId, BuildStep>>;
+}
 
 const monthName = (m: string | null | undefined, opts: Intl.DateTimeFormatOptions = { month: "long", year: "numeric" }) =>
   m ? new Date(m.slice(0, 7) + "-01T00:00:00Z").toLocaleDateString("en-GB", { ...opts, timeZone: "UTC" }) : "";
@@ -69,41 +72,42 @@ export function openDashboard(id: string) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-interface Row { title: string; lines: string[] }
+const STEPS: [BuildStepId, string][] = [["brief", "Check the approved brief"], ["source", "Validate workbook evidence"],
+  ["calculate", "Calculate the dashboard view"], ["save", "Save this dashboard"]];
+const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+const n = (v: unknown) => (typeof v === "number" ? v : 0);
 
-/** The four rows: three from the reviewed brief (the receipt), and the saved result, which only the server confirms. */
-function rows(brief: DesignState, phase: BuildPhase): Row[] {
-  const r = brief.receipt;
-  const saved = phase.kind === "saved" ? ["Saved as this request's own dashboard."] : phase.kind === "saving" ? ["Waiting for the server to confirm the save."]
-    : [phase.uncertain ? "The save could not be confirmed." : "Not saved."];
-  if (!r) return [
-    { title: "Approved scope and period", lines: brief.summary.length ? brief.summary.slice(0, 3) : ["The brief you approved, unchanged."] },
-    { title: "Workbook coverage and source rows", lines: ["The synthetic workbook rows matched during review are checked again."] },
-    { title: "Governed measures and view", lines: ["The approved measures, as monthly figures with their source rows."] },
-    { title: "Saved result", lines: saved },
-  ];
-  const scope = [[scopeText(r), periodText(r)].filter(Boolean).join(" · ")];
-  if (r.decision_goal) scope.unshift(`Purpose: ${r.decision_goal}`);
-  if (r.omitted_measures.length) scope.push(`Left out, as you agreed: ${omitted(r)}.`);
-  const coverage = [`${plural(r.months, "month")} of figures in ${r.source ?? "the workbook"}`
-    + (r.observations !== r.months ? `, from ${plural(r.observations, "source row")}` : "") + "."];
-  if (r.observations) coverage.push(`${r.actual_like} actual-like and ${r.forecast_like} forecast-like synthetic records.`);
-  return [
-    { title: "Approved scope and period", lines: scope },
-    { title: "Workbook coverage and source rows", lines: coverage },
-    { title: "Governed measures and view", lines: [measureText(r), r.arrangement] },
-    { title: "Saved result", lines: saved },
-  ];
+/** The facts a completed checkpoint reported, in plain words. Nothing here comes from the review: only from this build. */
+function factLines(id: BuildStepId, f: Record<string, unknown> = {}): string[] {
+  switch (id) {
+    case "brief": {
+      const period = f.period as { start?: string; end?: string } | undefined;
+      const when = period?.start ? periodText({ period, first_month: period.start, last_month: period.end } as unknown as BuildReceipt) : "";
+      return [[places(list(f.products), "products"), places(list(f.markets), "markets")].filter(Boolean).join(" in ") + (when ? ` · ${when}` : ""),
+        list(f.measures).join(" · ")].filter(Boolean);
+    }
+    case "source":
+      return [`${plural(n(f.rows), "source row")} in ${String(f.sheet ?? "the workbook")}, ${String(f.first)} to ${String(f.last)} (${plural(n(f.months), "month")})`,
+        `${n(f.actual_like)} actual-like and ${n(f.forecast_like)} forecast-like synthetic records, checked for gaps, duplicates and valid numbers`];
+    case "calculate": {
+      const groups = list(f.groups);
+      return [`${plural(n(f.points), "monthly point")} in ${plural(groups.length, "group")}: ${groups.join(", ")}`,
+        list(f.measures).join(" · "), String(f.arrangement ?? "")].filter(Boolean);
+    }
+    case "save":
+      return ["Saved as this request's own dashboard.", String(f.title ?? "")].filter(Boolean);
+  }
 }
+
+const STATE_TEXT = { pending: "Not started", running: "In progress", complete: "Done", failed: "Stopped", earlier: "Done earlier" };
 
 export function BuildHandoff({ session, conversationId, onRetry, onReviewUpdated, onReload, onFinished }: {
   session: BuildSession; conversationId: string; onRetry: () => void; onReviewUpdated: () => void; onReload: () => void;
   /** The hand-off is over: the dashboard opened, or opening by itself is no longer allowed. */
   onFinished: () => void;
 }) {
-  const { phase, brief, startedAt } = session;
-  const [windowOver, setWindowOver] = useState(() => performance.now() - startedAt >= READING_WINDOW_MS);
-  const [autoOpen, setAutoOpen] = useState(true);  // permission to take over the screen, separate from the window
+  const { phase, brief, steps, mode } = session;
+  const [autoOpen, setAutoOpen] = useState(true);  // permission to take over the screen
   const opened = useRef(false);
   const finished = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -112,7 +116,7 @@ export function BuildHandoff({ session, conversationId, onRetry, onReviewUpdated
 
   const finish = () => { if (!finished.current) { finished.current = true; onFinished(); } };
 
-  // On approval: bring the heading into view inside Ask's pane (only in a visible Ask), and warm the destination's code.
+  // On approval: bring the heading into view inside Ask's pane (only in a visible Ask), and load the destination's code.
   useEffect(() => {
     void import("../../pages/SavedDashboardPage");
     if (!stillHere(conversationId)) return;
@@ -120,12 +124,6 @@ export function BuildHandoff({ session, conversationId, onRetry, onReviewUpdated
     panel.current?.scrollIntoView({ block: "nearest" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // The overview: one window from approval. It only decides when a confirmed dashboard may open; it never saves or completes anything.
-  useEffect(() => {
-    const timer = window.setTimeout(() => setWindowOver(true), Math.max(0, READING_WINDOW_MS - (performance.now() - startedAt)));
-    return () => window.clearTimeout(timer);
-  }, [startedAt]);
 
   // Leaving Ask, Back, opening an entity, hiding the tab or switching conversation: this attempt never takes over later.
   useEffect(() => {
@@ -145,13 +143,11 @@ export function BuildHandoff({ session, conversationId, onRetry, onReviewUpdated
   }, [autoOpen]);
   useEffect(() => { if (current !== conversationId && !opened.current) setAutoOpen(false); }, [current, conversationId]);
 
-  // Start the destination's one canonical read as soon as the server confirmed the dashboard ID.
+  // The committed result: start the destination's one canonical read and open it once, if this attempt still owns the screen.
   const saved = phase.kind === "saved" ? phase : null;
-  useEffect(() => { if (saved) prefetchDashboard(saved.dashboardId); }, [saved?.dashboardId]);  // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Open exactly once, when the save is confirmed and the window has passed, if this attempt still owns the screen.
   useEffect(() => {
-    if (!saved || !windowOver || opened.current) return;
+    if (!saved || opened.current) return;
+    prefetchDashboard(saved.dashboardId);
     if (autoOpen && stillHere(conversationId)) {
       opened.current = true;
       finish();
@@ -161,20 +157,30 @@ export function BuildHandoff({ session, conversationId, onRetry, onReviewUpdated
       finish();  // the parent may now show the saved result; this panel offers the ordinary link
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [saved?.dashboardId, windowOver, autoOpen]);
+  }, [saved?.dashboardId, autoOpen]);
   useEffect(() => { if (phase.kind === "failed") finish(); }, [phase.kind]);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const status = phase.kind === "saving" ? "Checking and saving your dashboard…"
-    : phase.kind === "saved" ? "Dashboard ready"
+  const status = phase.kind === "saving" ? "Building your dashboard…"
+    : phase.kind === "saved" ? (opened.current ? "Dashboard saved. Opening it…" : "Dashboard saved")
     : phase.uncertain ? "Save could not be confirmed" : "The dashboard was not saved";
-  const showLink = saved && windowOver && !opened.current && !autoOpen;
+  const showLink = saved && !opened.current && !autoOpen;
+  const r = brief.receipt;
+  const rows: { id: string; title: string; state: keyof typeof STATE_TEXT; lines: string[] }[] = mode === "single"
+    ? [{ id: "all", title: "Check and save your dashboard", lines: phase.kind === "saved" ? ["Saved as this request's own dashboard."] : [],
+         state: phase.kind === "saving" ? "running" : phase.kind === "saved" ? "complete" : "failed" }]
+    : STEPS.map(([id, title]) => {
+        const step = steps[id];
+        const earlier = saved?.replayed && !step;
+        const state = earlier ? "earlier" : step?.status ?? (phase.kind === "failed" ? "pending" : "pending");
+        return { id, title, state, lines: step?.status === "complete" ? factLines(id, step.facts) : earlier ? ["Completed when this approval was first saved."] : [] };
+      });
+  const announce = phase.kind === "saving" ? (STEPS.find(([id]) => steps[id]?.status === "running")?.[1] ?? "") : status;
 
   // A double click on Build would otherwise select a word in this panel, which replaces the button.
   return <section ref={panel} className={`bw bw-${phase.kind}`} aria-labelledby={`bw-${session.id}`}
     onMouseDown={e => { if (e.detail > 1) e.preventDefault(); }}>
     <h3 id={`bw-${session.id}`} ref={heading} tabIndex={-1}>How your dashboard is prepared</h3>
     <p className="bw-status">{phase.kind === "saving" && <span className="bh-spinner" aria-hidden="true" />}<strong>{status}</strong></p>
-    {saved && <p className="bw-lede">Take a moment to review what went into it.</p>}
     {phase.kind === "failed" && <div className="db-error" role="alert">
       <p>{phase.message}</p>
       {phase.recovery === "review" ? <button type="button" className="btn-outline" onClick={onReviewUpdated}>Review updated brief</button>
@@ -184,18 +190,15 @@ export function BuildHandoff({ session, conversationId, onRetry, onReviewUpdated
     {showLink && <a className="btn" href={dashboardUrl(saved.dashboardId)}
       onClick={e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); opened.current = true; openDashboard(saved.dashboardId); }}>
       Open saved dashboard</a>}
-    <p className="db-label">From your reviewed brief</p>
-    <ol className="bw-steps">{rows(brief, phase).map((row, i) => {
-      const last = i === 3;
-      return <li key={row.title} className={`bw-step${last ? ` bw-final bw-${phase.kind}` : ""}`}>
-        <span className="bw-num" aria-hidden="true">{i + 1}</span>
-        <div className="bw-body">
-          <p className="bw-title">{row.title}</p>
-          {row.lines.map((l, j) => <p key={j} className="bw-line">{l}</p>)}
-        </div>
-      </li>;
-    })}</ol>
-    {/* One short announcement per outcome. */}
-    <p className="sr-only" role="status" aria-live="polite">{phase.kind === "saving" ? "" : status}</p>
+    {r && <p className="bw-context">Approved brief: {[scopeText(r), periodText(r)].filter(Boolean).join(" · ")}</p>}
+    <ol className="bw-steps">{rows.map((row, i) => <li key={row.id} className={`bw-step bws-${row.state}`}>
+      <span className="bw-num" aria-hidden="true">{row.state === "running" ? <span className="bh-spinner" /> : row.state === "complete" || row.state === "earlier" ? "✓" : i + 1}</span>
+      <div className="bw-body">
+        <p className="bw-title">{row.title} <span className="bw-state">{STATE_TEXT[row.state]}</span></p>
+        {row.lines.map((l, j) => <p key={j} className="bw-line">{l}</p>)}
+      </div>
+    </li>)}</ol>
+    {/* One short announcement per meaningful change. */}
+    <p className="sr-only" role="status" aria-live="polite">{announce}</p>
   </section>;
 }

@@ -46,7 +46,7 @@ def guided_run(c, example_id, purpose, period):
     cid, first = start(c, example_id)
     second = answer(c, cid, purpose)
     third = answer(c, cid, period)
-    decision = next(e for e in third if e["type"] == "stage" and e["stage"] == "decision")["data"]
+    decision = next(e for e in third if e["type"] == "stage" and e["stage"] == "decision" and e["status"] == "done")["data"]
     return cid, decision["run_id"], (first, second, third), decision
 
 
@@ -164,7 +164,7 @@ def test_refresh_restores_the_pending_question_and_the_review():
         assert conv["state"] == "clarifying" and last["content"] == guided_examples.PURPOSE_QUESTION and len(last["choices"]) == 2
         answer(c, cid, "b")
         third = answer(c, cid, "all")
-        run_id = next(e for e in third if e["type"] == "stage" and e["stage"] == "decision")["data"]["run_id"]
+        run_id = next(e for e in third if e["type"] == "stage" and e["stage"] == "decision" and e["status"] == "done")["data"]["run_id"]
         path = f"/api/conversations/{cid}/runs/{run_id}/dashboard"
         assert c.get(path).json() == c.get(path).json()  # reloading the review changes nothing
         assert c.get(path).json()["status"] == "ready"
@@ -201,7 +201,7 @@ def test_ordinary_ask_and_estate_scenarios_keep_their_outcomes():
         outcomes = {}
         for preset in ("scn_reuse_lynkuet_es", "scn_reuse_eylea_jp", "req_migrate_xarelto"):
             evs = events(c.post("/api/chat", json={"message": "", "preset_id": preset}))
-            outcomes[preset] = next(e for e in evs if e["type"] == "stage" and e["stage"] == "decision")["data"]["decision"]
+            outcomes[preset] = next(e for e in evs if e["type"] == "stage" and e["stage"] == "decision" and e["status"] == "done")["data"]["decision"]
         assert outcomes == {"scn_reuse_lynkuet_es": "reuse", "scn_reuse_eylea_jp": "review", "req_migrate_xarelto": "migrate"}
         # the same sentence typed into the composer is ordinary Ask, not a guided run
         evs = events(c.post("/api/chat", json={"message": guided_examples.BY_ID["nubeqa-sales-shipments"]["text"]}))

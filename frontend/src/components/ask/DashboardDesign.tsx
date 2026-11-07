@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { builderPath, dashboardUrl, type BuildAnswer, type DesignState } from "../../api/dashboardBuilder";
+import { builderPath, dashboardUrl, type BuildAnswer, type BuildErrorEvent, type BuildEvent, type BuildResultEvent, type DesignState } from "../../api/dashboardBuilder";
+import { readEvents } from "../../api/client";
 import { readHandoff } from "../../api/handoff";
 import { navigate } from "../../lib/navigation";
 import { Icon } from "../Icon";
 import { BuildHandoff, type BuildSession } from "./BuildHandoff";
-import { ASK_OVERVIEW_MS } from "../../lib/overview";
 import "./dashboard-design.css";
 
 function Brief({ state }: { state: DesignState }) {
@@ -94,32 +94,37 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
   const guidedReady = !!state?.guided && state.status === "ready";
   useEffect(() => { if (guidedReady) setOpen(true); }, [guidedReady]);
 
-  /** Final Build: one POST per explicit approval, sent at once. The workflow shows while it runs; only a validated
-   *  built response marks it saved. An uncertain outcome is checked once against the run, never posted again. */
+  /** Final Build: one POST per explicit approval, sent at once, asking for the live checkpoints. Each checkpoint is shown
+   *  as the server reports it; only a committed result marks the dashboard saved. A server that answers with JSON gets
+   *  one pending operation. An uncertain outcome is checked once against the run, never posted again. */
   async function buildNow(reviewed: DesignState) {
     if (submitting.current || !reviewed.review_token) return;
     submitting.current = true;
     const id = ++sessions.current;
-    const startedAt = performance.now();
     const body = { version: reviewed.version, review_token: reviewed.review_token };
     const live = () => mounted.current && sessions.current === id;  // a newer attempt or an unmount makes this one stale
-    const update = (phase: BuildSession["phase"]) => { if (live()) setSession(s => s && s.id === id ? { ...s, phase } : s); };
-    setSession({ id, startedAt, brief: reviewed, phase: { kind: "saving" } });
+    const patch = (fn: (s: BuildSession) => Partial<BuildSession>) => { if (live()) setSession(s => s && s.id === id ? { ...s, ...fn(s) } : s); };
+    const update = (phase: BuildSession["phase"]) => patch(s => ({
+      phase,
+      // a failure stops the checkpoint that was running; completed ones keep their evidence
+      steps: phase.kind === "failed" ? Object.fromEntries(Object.entries(s.steps).map(([k, v]) => [k, v?.status === "running" ? { ...v, status: "failed" } : v])) : s.steps,
+    }));
+    setSession({ id, startedAt: performance.now(), brief: reviewed, phase: { kind: "saving" }, mode: "live", steps: {} });
     setError("");
     const built = (r: unknown): boolean =>
       !!r && typeof r === "object" && (r as DesignState).status === "built" && typeof (r as DesignState).dashboard_id === "string" && !!(r as DesignState).dashboard_id;
-    const succeed = (result: DesignState) => {
+    const succeed = (result: DesignState, replayed = false) => {
       window.dispatchEvent(new Event("dashboards-changed"));
       if (!live()) return;
       setState(result);
       // Every approved run saves its own dashboard; a same-run retry returns that same one.
-      update({ kind: "saved", dashboardId: result.dashboard_id! });
+      update({ kind: "saved", dashboardId: result.dashboard_id!, replayed });
     };
     const reconcile = async (why: string) => {
       try {
         const latest = await readHandoff<DesignState>(path);
-        if (built(latest)) { succeed(latest); return; }  // a valid recovery read counts like the original answer
-        const unchanged = latest.status === "ready" && latest.version === reviewed.version && latest.review_token === reviewed.review_token;
+        if (built(latest)) { succeed(latest, true); return; }  // only the committed binding counts, never a record alone
+        const unchanged = latest.status === "ready" && latest.review_token === reviewed.review_token;
         update(unchanged
           ? { kind: "failed", message: `${why} The save could not be confirmed. Your reviewed brief is unchanged.`, recovery: "retry", uncertain: true }
           : { kind: "failed", message: `${why} The save could not be confirmed, and the brief has changed since you approved it.`, recovery: "reload", uncertain: true });
@@ -130,14 +135,40 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
     try {
       let response: Response | null = null;
       try {
-        response = await fetch(path + "/build", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        response = await fetch(path + "/build", { method: "POST", body: JSON.stringify(body),
+          headers: { "Content-Type": "application/json", Accept: "text/event-stream" } });
       } catch {
         response = null; // lost: the save may still have committed
       }
       if (!response) { await reconcile("The connection dropped."); return; }
+      if (response.ok && response.body && (response.headers.get("content-type") ?? "").startsWith("text/event-stream")) {
+        let terminal: "result" | "error" | "invalid" | null = null;
+        let failure: BuildErrorEvent | null = null;
+        let result: BuildResultEvent | null = null;
+        try {
+          await readEvents<BuildEvent>(response.body, (e) => {
+            if (terminal) return;  // one terminal per attempt: anything after it is ignored
+            if (e.type === "build_stage") patch(s => ({ steps: { ...s.steps, [e.phase]: { status: e.status, facts: e.facts } } }));
+            else if (e.type === "build_result") { terminal = built(e.state) ? "result" : "invalid"; result = e; }
+            else if (e.type === "build_error") { terminal = "error"; failure = e; }
+          });
+        } catch {
+          if (!terminal) { await reconcile("The connection dropped during the build."); return; }
+        }
+        // A confirmed terminal stays the outcome even if the connection closed afterwards.
+        const done = result as BuildResultEvent | null, failed = failure as BuildErrorEvent | null;
+        if (terminal === "result" && done) succeed(done.state, done.replayed);
+        else if (terminal === "error" && failed) {
+          if (failed.kind === "retry") await reconcile(failed.message);  // an unexpected server error: the save may have committed
+          else update({ kind: "failed", message: failed.message, recovery: failed.kind, uncertain: false });
+        } else await reconcile(terminal === "invalid" ? "The server's answer could not be read." : "The connection closed before the build finished.");
+        return;
+      }
+      // An older server answers with JSON: one operation, no milestones.
+      patch(() => ({ mode: "single" }));
       if (response.ok) {
-        const result = await response.json().catch(() => null);
-        if (built(result)) succeed(result as DesignState);
+        const answer = await response.json().catch(() => null);
+        if (built(answer)) succeed(answer as DesignState);
         else await reconcile("The server's answer could not be read.");
         return;
       }
@@ -151,26 +182,21 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
     }
   }
 
-  /** A design answer: the versioned POST starts at once; its result is revealed when it returned and the overview passed. */
-  const [answering, setAnswering] = useState<{ id: number; label: string; result?: DesignState; overviewDone: boolean } | null>(null);
+  /** A design answer: the versioned POST starts at once and its result shows as soon as it returns. */
+  const [answering, setAnswering] = useState<{ id: number; label: string } | null>(null);
   const answerIds = useRef(0);
   async function send(part: "answers", body: object, label: string) {
     if (answering) return;
     const id = ++answerIds.current;
-    setAnswering({ id, label, overviewDone: false });
+    setAnswering({ id, label });
     setPending(true); setError("");
-    const timer = window.setTimeout(() => setAnswering(a => a && a.id === id ? { ...a, overviewDone: true } : a), ASK_OVERVIEW_MS);
     try {
       const result = await readHandoff<DesignState>(path + "/" + part, "POST", body);
-      if (mounted.current) setAnswering(a => a && a.id === id ? { ...a, result } : a);
+      if (mounted.current) { setState(result); setAnswering(a => (a && a.id === id ? null : a)); }
     } catch (e) {
-      window.clearTimeout(timer);  // errors show at once
       if (mounted.current) { setAnswering(null); setError(e instanceof Error ? e.message : "Could not save the dashboard design."); }
     } finally { if (mounted.current) setPending(false); }
   }
-  useEffect(() => {
-    if (answering?.result && answering.overviewDone) { setState(answering.result); setAnswering(null); }
-  }, [answering]);
   const answerLabel = (value: BuildAnswer): string => {
     const q = state?.question;
     if (typeof value === "string") return q?.options.find(o => o.value === value)?.label ?? value;
@@ -207,8 +233,8 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
       <button type="button" className="btn" disabled={pending} onClick={() => void buildNow(state)}>
         Build dashboard<Icon name="arrowRight" size={15}/></button></> :
       answering ? <div className="proc" aria-live="off">
-        {answering.result ? <><p className="proc-label">Your selection</p><p className="proc-fact">{answering.label}</p></>
-          : <p className="proc-status"><span className="spinner" aria-hidden="true" />Checking your dashboard details…</p>}
+        <p className="proc-status"><span className="spinner" aria-hidden="true" />Checking your answer against the workbook…</p>
+        <p className="proc-fact">{answering.label}</p>
       </div> :
       state.question && <><DesignQuestion key={state.question.key} state={state} pending={pending}
         submit={value => void send("answers", { version: state.version, key: state.question!.key, value }, answerLabel(value))}/>

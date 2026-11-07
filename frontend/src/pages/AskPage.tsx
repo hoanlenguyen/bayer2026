@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { api, streamPost } from "../api/client";
 import type { CatalogMeta, DecisionType, GuidedChoice, GuidedExample, GuidedFacts, Health, PipelineEvent, Preset, StageEvent, StageId } from "../api/types";
 import { FlowPanel, RUNNING_COPY } from "../components/ask/FlowPanel";
 import { TriageStrip } from "../components/ask/TriageStrip";
 import { VerdictCard } from "../components/ask/VerdictCard";
 import { Icon } from "../components/Icon";
-import { ASK_OVERVIEW_MS } from "../lib/overview";
+import { LiveSteps, type TurnPhase } from "../components/ask/LiveSteps";
 import { cancelPendingConversation, CURRENT_REMOVED_EVENT, forgetConversation, getCurrentConversation, inSession, OPEN_CONVERSATION_EVENT, recordConversation, setAnswerInProgress, setCurrentConversation, stagesOf, takePendingConversation } from "../lib/conversations";
 
 interface ChatMessage {
@@ -19,44 +19,19 @@ interface ChatMessage {
 }
 
 type Stages = Partial<Record<StageId, StageEvent>>;
-/** One submission and its real progress. The outcome stays hidden until the stream settled cleanly AND the overview passed. */
+/** One submission and its real progress. Its new messages and recommendation show once the stream settled with `done`. */
 interface Turn {
   id: number; kind: "guided" | "typed" | "choice"; label: string; msgFrom: number; stagesBefore: Stages;
-  phase: "scope" | "periods" | "catalog" | null; newRun: boolean; settled: boolean; failed: boolean; overviewDone: boolean; rejected: boolean;
+  phase: TurnPhase; newRun: boolean; settled: boolean; failed: boolean; rejected: boolean; timelineBefore: number | null;
 }
-
-const PENDING: Record<string, string> = {
-  guided: "Checking the example scope…", typed: "Reading your request…", choice: "Checking your answer…",
-  periods: "Checking workbook periods…", catalog: "Checking the catalog…",
-};
 
 const withoutOutcome = (s: Stages): Stages => { const { decision: _d, actions: _a, deliver: _v, ...rest } = s; return rest; };
 
-/** The panel beside the message just sent: the real status while work is pending, then confirmed facts until the reveal. */
-function ProcessingPanel({ turn, messages, stages }: { turn: Turn; messages: ChatMessage[]; stages: Stages }) {
-  const ready = turn.settled && !turn.failed;
-  let label = "", facts: string[] = [];
-  if (ready) {
-    const question = messages.slice(turn.msgFrom).find((m) => m.kind === "question");
-    if (stages.decision?.status === "done" && stages.decision !== turn.stagesBefore.decision) {
-      label = "Checks complete";
-      facts = [stages.kpis?.summary, stages.discovery?.summary].filter((x): x is string => !!x);
-    } else if (turn.kind === "guided" && question?.facts) {
-      label = "Example brief";
-      facts = [`${question.facts.product} in ${question.facts.markets.join(" and ")}`, question.facts.measures.join(" and ")];
-    } else if (turn.kind === "choice") {
-      label = "Your answer";
-      facts = [turn.label];
-    } else {
-      label = "Request received";
-      facts = [turn.label];
-    }
-  }
-  return <div className="proc" aria-live="off">
-    {ready ? <p className="proc-label">{label}</p>
-      : <p className="proc-status"><span className="spinner" aria-hidden="true" />{PENDING[turn.phase ?? turn.kind]}</p>}
-    {facts.slice(0, 2).map((f, i) => <p key={i} className="proc-fact">{f}</p>)}
-  </div>;
+/** The discovery step completes the classification shown under Understand the request (model, existing report). */
+export function withClassification(s: Stages, e: StageEvent): Stages {
+  const extra = e.stage === "discovery" && e.status === "done" ? e.data?.classification : null;
+  if (!extra || !s.intent) return { ...s, [e.stage]: e };
+  return { ...s, [e.stage]: e, intent: { ...s.intent, data: { ...s.intent.data, classification: { ...(s.intent.data?.classification ?? {}), ...extra } } } };
 }
 
 type ConvState = "idle" | "clarifying" | "awaiting_approval"; // awaiting_approval only exists in older saved conversations
@@ -142,18 +117,17 @@ export function AskPage() {
   const [turn, setTurn] = useState<Turn | null>(null);
   const turnRef = useRef<Turn | null>(null);
   const turnIds = useRef(0);
-  const overviewTimer = useRef<number | undefined>(undefined);
+  // The user message whose steps show under it: the latest accepted submission, or the restored conversation's last one.
+  const [timelineAt, setTimelineAt] = useState<number | null>(null);
   const updateTurn = useCallback((id: number, patch: Partial<Turn>) => setTurn((t) => {
     const next = t && t.id === id ? { ...t, ...patch } : t;
     turnRef.current = next;
     return next;
   }), []);
   const endTurn = useCallback(() => {  // reset, conversation change or unmount: no late update may repaint Ask
-    window.clearTimeout(overviewTimer.current);
     turnRef.current = null;
     setTurn(null);
   }, []);
-  useEffect(() => () => window.clearTimeout(overviewTimer.current), []);
   const streamId = useRef<string | null>(null);
   const [restoring, setRestoring] = useState(() => getCurrentConversation() !== null);
 
@@ -170,7 +144,11 @@ export function AskPage() {
       const conv = await api.conversation(id);
       if (!latest()) return; // another conversation was picked, or New question, meanwhile
       const restored = stagesOf(conv);
-      setMessages(conv.messages.map((m) => ({ id: nextId.current++, role: m.role, content: m.content, kind: m.kind, suggestions: m.suggestions, choices: m.choices })));
+      const restoredMessages: ChatMessage[] = conv.messages.map((m) => ({ id: nextId.current++, role: m.role, content: m.content, kind: m.kind, suggestions: m.suggestions, choices: m.choices }));
+      setMessages(restoredMessages);
+      // A saved run comes back as completed evidence under its last accepted message; nothing is replayed.
+      const accepted = conv.messages.map((m, i) => (m.role === "user" && !(m as { rejected?: boolean }).rejected ? i : -1)).filter((i) => i >= 0);
+      setTimelineAt(Object.keys(restored).length && accepted.length ? restoredMessages[accepted.at(-1)!].id : null);
       setStages(restored);
       setRestoredRunId(conv.runs.at(-1)?.id ?? null);
       setDecision(restored.decision?.data?.decision ?? null);
@@ -248,7 +226,7 @@ export function AskPage() {
           setDecision(null);
           break;
         }
-        setStages((s) => ({ ...s, [e.stage]: e }));
+        setStages((s) => withClassification(s, e));
         if (e.stage === "decision" && e.status === "done") setDecision(e.data.decision);
         break;
       case "message":
@@ -287,17 +265,19 @@ export function AskPage() {
     }
   }, [handleEvent, updateTurn]);
 
-  // Reveal the turn's outcome when the stream settled and the overview passed; a rejection or failure shows at once.
+  // The turn's outcome shows as soon as the stream settled with `done`. A failed or interrupted stream never reveals a
+  // success: the screen goes back to the last valid outcome. A rejected message leaves the earlier steps where they were.
   useEffect(() => {
     if (!turn || !turn.settled) return;
-    if (turn.failed) {  // an interrupted or failed stream never reveals a success: back to what was shown before
+    if (turn.failed) {
       setStages(turn.stagesBefore);
       setDecision(turn.stagesBefore.decision?.data?.decision ?? null);
       setMessages((m) => m.slice(0, turn.msgFrom));
-      endTurn();
-    } else if (turn.rejected || turn.overviewDone) {
-      endTurn();
+      setTimelineAt(turn.timelineBefore);
+    } else if (turn.rejected) {
+      setTimelineAt(turn.timelineBefore);
     }
+    endTurn();
   }, [turn, endTurn]);
 
   const send = useCallback((text: string, presetId?: string, guided?: { guided_id?: string; choice_id?: string }) => {
@@ -306,19 +286,19 @@ export function AskPage() {
     // A reply to an open question (typed, a suggestion or an offered choice) is an answer, not a new request.
     const kind = guided?.guided_id ? "guided" : guided?.choice_id || convState === "clarifying" ? "choice" : "typed";
     const t: Turn = { id, kind, label: text,
-      msgFrom: messages.length + 1, stagesBefore: stages, phase: null, newRun: false, settled: false, failed: false,
-      overviewDone: false, rejected: false };
+      msgFrom: messages.length + 1, stagesBefore: stages, phase: "sent", newRun: false, settled: false, failed: false,
+      rejected: false, timelineBefore: timelineAt };
     turnRef.current = t;
     setTurn(t);
-    window.clearTimeout(overviewTimer.current);
-    overviewTimer.current = window.setTimeout(() => updateTurn(id, { overviewDone: true }), ASK_OVERVIEW_MS);
     setChecking(true);
-    setMessages((m) => [...m, { id: nextId.current++, role: "user", content: text }]);
+    const messageId = nextId.current++;
+    setMessages((m) => [...m, { id: messageId, role: "user", content: text }]);
+    setTimelineAt(messageId);
     // A guided example starts a fresh conversation; its answers continue the current one.
     const conversation = guided?.guided_id ? null : convId;
     void run("/api/chat", { conversation_id: conversation, message: guided?.guided_id ? "" : text, preset_id: presetId ?? null,
       guided_id: guided?.guided_id ?? null, choice_id: guided?.choice_id ?? null }, id);
-  }, [convId, convState, run, messages.length, stages, updateTurn]);
+  }, [convId, convState, run, messages.length, stages, timelineAt]);
 
   /** Clear the screen and the open selection; History keeps every earlier conversation. */
   const newChat = () => {
@@ -328,7 +308,7 @@ export function AskPage() {
     setRestoring(false);
     setCurrentConversation(null);
     setRestoredRunId(null);
-    setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null);
+    setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null); setTimelineAt(null);
     requestAnimationFrame(() => document.getElementById("ask-input")?.focus());
   };
 
@@ -339,15 +319,18 @@ export function AskPage() {
       restoreAttempt.current++;
       setRestoring(false);
       setRestoredRunId(null);
-      setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null);
+      setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null); setTimelineAt(null);
     };
     window.addEventListener(CURRENT_REMOVED_EVENT, cleared);
     return () => window.removeEventListener(CURRENT_REMOVED_EVENT, cleared);
   }, [endTurn]);
 
-  // While a turn is open, only what was on screen before it plus the sent message shows; its outcome waits for the reveal.
+  // While a turn is open, only what was on screen before it plus the sent message shows; its replies and recommendation
+  // come with `done`. The steps under the message show the turn's real progress meanwhile.
   const shownMessages = turn ? messages.slice(0, turn.msgFrom) : messages;
   const shownStages = turn ? (turn.newRun ? {} : turn.stagesBefore) : stages;
+  // A new request has no steps of its own until its first stage arrives (the previous run's stay in the side panel).
+  const turnStages: Stages = turn && !turn.newRun && turn.kind !== "choice" ? {} : stages;
   const lastId = shownMessages.length ? shownMessages[shownMessages.length - 1].id : -1;
   const runningStage = (Object.values(stages) as StageEvent[]).find((s) => s.status === "running")?.stage;
   const hasVerdict = shownStages.decision?.status === "done";
@@ -358,8 +341,8 @@ export function AskPage() {
     if ((checking || turn) && shownMessages[tailStart - 1]?.role === "user") tailStart--;
     while (tailStart >= 2 && shownMessages[tailStart - 1].kind === "retry" && shownMessages[tailStart - 2].role === "user") tailStart -= 2;
   }
-  const renderMessage = (m: ChatMessage) => (
-    <div key={m.id} className={`msg msg-${m.role}`}>
+  const renderMessage = (m: ChatMessage) => (<Fragment key={m.id}>
+    <div className={`msg msg-${m.role}`}>
       <p><RichText text={m.content} /></p>
       {m.id === lastId && !busy && !turn && m.choices && m.choices.length > 0 && (
         <div className="chips guided-choices" role="group" aria-label="Choose an answer">
@@ -373,8 +356,10 @@ export function AskPage() {
         </div>
       )}
     </div>
-  );
-  const working = turn ? <ProcessingPanel turn={turn} messages={messages} stages={stages} />
+    {m.id === timelineAt && (turn || Object.keys(stages).length > 0) && !(turn?.settled && turn.rejected)
+      && <LiveSteps stages={turnStages} active={!!turn && !turn.settled} phase={turn?.phase ?? null} />}
+  </Fragment>);
+  const working = turn ? null
     : busy && (!hasVerdict || checking) && (
       <p className="working"><span className="spinner" aria-hidden="true" />{runningStage ? RUNNING_COPY[runningStage] : "Reading your question"}</p>);
   const runId = shownStages.decision?.data?.run_id ?? (turn ? null : restoredRunId);

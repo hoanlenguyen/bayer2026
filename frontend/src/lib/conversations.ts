@@ -124,6 +124,9 @@ export function stagesOf(conv: ConversationDetail): Partial<Record<StageId, Stag
     if (event.type !== "stage") continue;
     if (event.status === "running") delete stages[event.stage];
     else stages[event.stage] = event;
+    // The discovery step completes the classification shown under Understand the request (model, existing report).
+    const extra = event.stage === "discovery" && event.status === "done" ? event.data?.classification : null;
+    if (extra && stages.intent) stages.intent = { ...stages.intent, data: { ...stages.intent.data, classification: { ...(stages.intent.data?.classification ?? {}), ...extra } } };
   }
   return stages;
 }

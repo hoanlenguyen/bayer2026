@@ -77,3 +77,11 @@ export function builderPath(conversationId: string, runId: string) {
 export const dashboardUrl = (id: string) => `/dashboards/${encodeURIComponent(id)}`;
 export const workbookViewUrl = (conversationId: string, runId: string) =>
   `/workbook-view/${encodeURIComponent(conversationId)}/${encodeURIComponent(runId)}`;
+
+/* The approved build, streamed. Each checkpoint is announced before its work and completed with that work's facts;
+   the stream ends with one build_result (the committed state) or build_error. */
+export type BuildStepId = "brief" | "source" | "calculate" | "save";
+export interface BuildStageEvent { type: "build_stage"; phase: BuildStepId; status: "running" | "complete"; facts?: Record<string, unknown> }
+export interface BuildResultEvent { type: "build_result"; state: DesignState; replayed: boolean }
+export interface BuildErrorEvent { type: "build_error"; kind: "review" | "retry" | "reload"; status: number; message: string }
+export type BuildEvent = BuildStageEvent | BuildResultEvent | BuildErrorEvent;

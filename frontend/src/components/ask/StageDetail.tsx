@@ -59,8 +59,9 @@ function classificationRows(t: any): [string, React.ReactNode][] {
     ["Governed KPIs", t.governed_kpis.length
       ? t.governed_kpis.map((k: { kpi_id?: string; name: string }) => (k.kpi_id ? `${k.name} (${k.kpi_id})` : k.name)).join(", ")
       : "None found"],
-    ["Semantic model", model ? `${model.name} (${model.id})${model.serves_all_kpis ? "" : ", does not serve every KPI"}` : "None found"],
-    ["Existing report", existingReport(t)],
+    // Known from the catalog assessment on; a clarification shows only what the request itself says.
+    ...("semantic_model" in t ? [["Semantic model", model ? `${model.name} (${model.id})${model.serves_all_kpis ? "" : ", does not serve every KPI"}` : "None found"] as [string, React.ReactNode],
+      ["Existing report", existingReport(t)] as [string, React.ReactNode]] : []),
   ];
 }
 

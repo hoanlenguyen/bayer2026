@@ -15,28 +15,109 @@ def events(res):
     return [json.loads(line[6:]) for line in res.text.splitlines() if line.startswith("data: ")]
 
 
-def test_catalog_phase_is_yielded_before_the_assessment_runs(monkeypatch):
-    order = []
-    real = pipeline_module.analyse
+def test_each_ask_stage_starts_before_its_operation_and_completes_with_its_result(monkeypatch):
+    """Spies on the real helpers: every stage's running event comes before its own operation, its done after it, and
+    the catalog ranking, availability and decision run exactly once for the turn."""
+    from app import assessment
+    order, calls = [], {"rank": 0, "availability": 0, "decide": 0}
 
-    def recording(intent):
-        order.append("analyse ran")
-        return real(intent)
+    def spy(name, fn, counter=None):
+        def wrapped(*a, **k):
+            order.append("op:" + name)
+            if counter:
+                calls[counter] += 1
+            return fn(*a, **k)
+        return wrapped
 
-    monkeypatch.setattr(pipeline_module, "analyse", recording)
+    for name, attr in (("kpis", "resolve_kpis"), ("lineage", "trace_lineage"), ("governance", "check_trust"),
+                       ("migration", "handle_migration"), ("discovery", "find_analytics")):
+        monkeypatch.setattr(assessment, attr, spy(name, getattr(assessment, attr)))
+    monkeypatch.setattr(assessment, "rank_candidates", spy("rank", assessment.rank_candidates, "rank"))
+    monkeypatch.setattr(assessment, "data_availability", spy("availability", assessment.data_availability, "availability"))
+    monkeypatch.setattr(assessment, "decide", spy("decide", assessment.decide, "decide"))
+    real_explain = pipeline_module.explain
+
+    async def explaining(*a, **k):
+        order.append("op:explain")
+        return await real_explain(*a, **k)
+    monkeypatch.setattr(pipeline_module, "explain", explaining)
 
     async def run():
         with TestClient(app):
-            p = app.state.pipeline
-            async for e in p.chat(None, "", "scn_reuse_lynkuet_es"):
-                order.append(e["type"] + (":" + e["phase"] if e["type"] == "processing" else "")
-                             + (":" + e["stage"] + ":" + e["status"] if e["type"] == "stage" else ""))
+            async for e in app.state.pipeline.chat(None, "", "scn_reuse_lynkuet_es"):
+                if e["type"] == "stage":
+                    order.append(f"{e['stage']}:{e['status']}")
+                elif e["type"] == "done":
+                    order.append("done")
     asyncio.run(run())
-    assert order.index("processing:catalog") < order.index("analyse ran") < order.index("stage:kpis:done")
-    assert order.index("stage:decision:done") < order.index("done")
-    # completed evidence follows the work: no catalog step is reported done before the assessment ran
-    assert all(order.index(s) > order.index("analyse ran") for s in order if s.startswith("stage:") and s.endswith(":done")
-               and s.split(":")[1] in ("kpis", "discovery", "lineage", "governance", "migration"))
+    i = order.index
+    for stage in ("kpis", "lineage", "governance", "migration"):
+        assert i(f"{stage}:running") < i("op:" + stage) < i(f"{stage}:done"), stage
+    assert i("discovery:running") < i("op:rank") < i("op:decide") < i("op:discovery") < i("discovery:done")
+    assert i("kpis:done") < i("discovery:running") and i("migration:done") < i("decision:running") < i("op:explain") < i("decision:done")
+    assert i("decision:done") < i("actions:running") < i("actions:done") < i("done")
+    assert calls == {"rank": 1, "availability": 1, "decide": 1}  # one shared assessment, no repeated catalog scans
+
+
+def test_a_live_stage_reaches_the_client_before_its_work_finishes(monkeypatch):
+    """A held operation: the discovery stage's running event is already out while the ranking is still blocked."""
+    import threading
+    from app import assessment
+    gate, started = threading.Event(), threading.Event()
+    real = assessment.rank_candidates
+
+    def held(*a, **k):
+        started.set()
+        assert gate.wait(5)
+        return real(*a, **k)
+    monkeypatch.setattr(assessment, "rank_candidates", held)
+
+    async def run():
+        seen = []
+        with TestClient(app):
+            agen = app.state.pipeline.chat(None, "", "scn_reuse_lynkuet_es")
+            async for e in agen:
+                seen.append((e["type"], e.get("stage"), e.get("status")))
+                if e.get("stage") == "discovery" and e.get("status") == "running":
+                    break
+            nxt = asyncio.ensure_future(agen.__anext__())
+            await asyncio.to_thread(started.wait, 5)
+            await asyncio.sleep(0.05)
+            assert not nxt.done()  # the stage is shown running; its result has not been produced
+            gate.set()
+            e = await nxt
+            assert (e["stage"], e["status"]) == ("discovery", "done")
+            async for _ in agen:
+                pass
+        return seen
+    seen = asyncio.run(run())
+    assert ("stage", "kpis", "done") in seen and ("stage", "discovery", "done") not in seen
+
+
+def test_a_clarification_does_not_run_the_assessment(monkeypatch):
+    from app import assessment
+    ran = []
+    monkeypatch.setattr(assessment, "rank_candidates", lambda *a, **k: ran.append(1) or [])
+    with TestClient(app) as c:
+        evs = events(c.post("/api/chat", json={"message": "Please build a new report for market access coverage and reimbursement status by product."}))
+    assert any(e.get("stage") == "intent" and e.get("status") == "waiting" for e in evs)
+    assert not ran and not any(e.get("stage") in ("kpis", "discovery") for e in evs)
+
+
+def test_done_is_sent_only_after_the_run_is_saved(monkeypatch):
+    with TestClient(app) as c:
+        store = app.state.pipeline.store
+        real = store.save
+        log = []
+
+        async def saving(conv):
+            evs_ = conv["runs"][-1]["events"] if conv.get("runs") else []
+            log.append(("save", evs_[-1]["type"] if evs_ else None))
+            return await real(conv)
+        monkeypatch.setattr(store, "save", saving)
+        evs = events(c.post("/api/chat", json={"message": "", "preset_id": "scn_reuse_lynkuet_es"}))
+    assert evs[-1]["type"] == "done"
+    assert ("save", "done") in log  # the saved run already holds its terminal event when the client receives it
 
 
 def test_a_deployed_stage_delay_does_not_slow_ask(monkeypatch):
@@ -105,6 +186,6 @@ def test_an_older_saved_run_without_offered_dates_gets_a_fresh_period_question()
         msg = [e for e in evs if e["type"] == "message"][-1]
         assert "checked again" in msg["content"] and [o["id"] for o in msg["choices"]] == ["all", "last6"]
         done = events(c.post("/api/chat", json={"conversation_id": cid, "message": "", "choice_id": "all"}))
-        decision = next(e for e in done if e["type"] == "stage" and e["stage"] == "decision")["data"]
+        decision = next(e for e in done if e["type"] == "stage" and e["stage"] == "decision" and e["status"] == "done")["data"]
         assert decision["decision"] == "new_build"
         assert c.get(f"/api/conversations/{cid}").json()["runs"][-1]["guided"]["window"]["start"] == "2026-01"

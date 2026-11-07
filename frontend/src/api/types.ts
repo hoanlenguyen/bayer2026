@@ -49,7 +49,8 @@ export interface MessageEvent {
 }
 
 /** Marks the start of real work on the server (not stored). The UI shows it as the turn's status. */
-export interface ProcessingEvent { type: "processing"; phase: "scope" | "periods" | "catalog" }
+/** Not stored: marks work that has started inside the Understand step (message check, reading an answer, guided scope or periods). */
+export interface ProcessingEvent { type: "processing"; phase: "relevance" | "intent" | "scope" | "periods" }
 export interface GuidedFacts { product: string; markets: string[]; measures: string[] }
 
 export type PipelineEvent =

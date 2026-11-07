@@ -45,7 +45,7 @@ def test_multi_metric_source_series_freezes_and_detects_changes_outside_the_late
         monkeypatch.setitem(rows[590], "inventory_weeks_syn", before)
         assert c.get(path).json()["metric_series"] == pulse
         # No new numbers may be attached to runs saved before this feature.
-        saved_decision = next(e["data"] for e in conv["runs"][-1]["events"] if e.get("stage") == "decision")
+        saved_decision = next(e["data"] for e in conv["runs"][-1]["events"] if e.get("stage") == "decision" and e.get("status") == "done")
         del saved_decision["metric_series"]
         c.portal.call(app.state.pipeline.store.save, conv)
         assert c.get(path).json()["metric_series"] is None

@@ -62,3 +62,14 @@
 .bw-final .db-error{display:grid;gap:6px;margin-top:4px;justify-items:start}
 .bw-final .db-error p{margin:0}
 @media (prefers-reduced-motion:reduce){.bw-step{transition:none}}
+/* Live build checkpoints: state in words beside each title, never colour alone. */
+.bw-context{margin:0;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.bw-state{font-weight:400;font-size:12px;color:var(--muted);margin-left:6px}
+.bws-pending .bw-title{color:var(--muted)}
+.bws-running{background:var(--surface-2)}
+.bws-running .bw-num{border-color:var(--fg);box-shadow:0 0 0 1px var(--fg)}
+.bws-complete .bw-num,.bws-earlier .bw-num{background:var(--fg);color:var(--surface);border-color:var(--fg)}
+.bws-failed .bw-num{border-color:var(--bad);color:var(--bad)}
+.bws-failed .bw-state{color:var(--bad)}
+.bw .db-error{display:grid;gap:6px;justify-items:start}.bw .db-error p{margin:0}
+.bw>.btn{min-height:44px;justify-self:start}

@@ -176,6 +176,8 @@ def test_understand_step_carries_the_classification(client):
     text = "How are Eylea net sales and digital engagement developing in Japan?"
     evs = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_eylea_jp", "guided_id": None, "choice_id": None}))
     tags = stage(evs, "intent")["data"]["classification"]
+    assert "semantic_model" not in tags  # known from the assessment on: the discovery stage completes the classification
+    tags = {**tags, **stage(evs, "discovery")["data"]["classification"]}
     assert tags["domain"] == "Commercial"
     assert tags["market"] == ["JP"] or tags["market"] == ["Japan"]
     assert tags["product"] == ["Eylea"]
@@ -196,7 +198,8 @@ def test_classification_shows_while_a_follow_up_is_open(client):
     tags = waiting["data"]["classification"]
     assert tags["domain"] == "Market Access"
     assert [k["kpi_id"] for k in tags["governed_kpis"]] == ["KPI-027", "KPI-031"]
-    assert tags["breakdown"] == ["Product"] and tags["semantic_model"]["id"].startswith("SM-")
+    # The model is the assessment's result: a clarification shows the known scope without running it early.
+    assert tags["breakdown"] == ["Product"] and "semantic_model" not in tags
 
 
 def test_classify_returns_the_six_analysis_steps(client):
