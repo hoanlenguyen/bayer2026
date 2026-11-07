@@ -22,7 +22,7 @@ from .settings import settings
 
 log = logging.getLogger(__name__)
 
-ARTIFACTS = ("intents", "evidence", "specs", "agent_runs", "actions", "briefing_selections")
+ARTIFACTS = ("intents", "evidence", "specs", "agent_runs", "actions", "briefing_selections", "dashboard_drafts", "dashboards")
 # Deleted along with a conversation. Actions stay: a person accepted them, and they outlive the chat that proposed them.
 CONVERSATION_ARTIFACTS = ("intents", "evidence", "specs", "agent_runs")
 CATALOG_MAPS = ("measures", "dimensions", "models", "owners", "workspaces", "products", "markets")
@@ -64,6 +64,20 @@ class MemoryStore:
     async def insert_action_once(self, action: dict[str, Any]) -> dict[str, Any]:
         saved = self.artifacts["actions"].setdefault(action["_id"], copy.deepcopy(action))
         return copy.deepcopy(saved)
+
+    async def advance_dashboard(self, doc: dict, previous_version: int) -> bool:
+        existing = self.artifacts["dashboard_drafts"].get(doc["_id"], {})
+        if existing.get("version", 0) != previous_version or existing.get("built_id"):
+            return False
+        self.artifacts["dashboard_drafts"][doc["_id"]] = copy.deepcopy(doc)
+        return True
+
+    async def publish_dashboard_once(self, doc: dict) -> dict:
+        return copy.deepcopy(self.artifacts["dashboards"].setdefault(doc["_id"], copy.deepcopy(doc)))
+
+    async def dashboard_directory(self) -> list[dict]:
+        docs = sorted(self.artifacts["dashboards"].values(), key=lambda d: d["created_at"], reverse=True)
+        return [{k: d[k] for k in ("id", "title", "created_at", "period", "decision_goal")} for d in docs]
 
     async def replace_briefing_action(self, action: dict[str, Any], prior_history: list) -> bool:
         current = self.artifacts["actions"].get(action["_id"])
@@ -177,6 +191,29 @@ class MongoStore:
 
         return await self.db["actions"].find_one_and_update(
             {"_id": action["_id"]}, {"$setOnInsert": action}, upsert=True, return_document=ReturnDocument.AFTER)
+
+    async def advance_dashboard(self, doc: dict, previous_version: int) -> bool:
+        from pymongo.errors import DuplicateKeyError
+
+        if previous_version == 0:
+            try:
+                await self.db["dashboard_drafts"].insert_one(doc)
+                return True
+            except DuplicateKeyError:
+                return False
+        result = await self.db["dashboard_drafts"].replace_one(
+            {"_id": doc["_id"], "version": previous_version, "built_id": None}, doc)
+        return bool(result.matched_count)
+
+    async def publish_dashboard_once(self, doc: dict) -> dict:
+        from pymongo import ReturnDocument
+
+        return await self.db["dashboards"].find_one_and_update(
+            {"_id": doc["_id"]}, {"$setOnInsert": doc}, upsert=True, return_document=ReturnDocument.AFTER)
+
+    async def dashboard_directory(self) -> list[dict]:
+        fields = {k: 1 for k in ("id", "title", "created_at", "period", "decision_goal")}
+        return [d async for d in self.db["dashboards"].find({}, {**fields, "_id": 0}).sort("created_at", -1)]
 
     async def replace_briefing_action(self, action: dict[str, Any], prior_history: list) -> bool:
         result = await self.db["actions"].replace_one({"_id": action["_id"], "history": prior_history}, action)

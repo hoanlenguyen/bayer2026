@@ -421,7 +421,7 @@ def test_country_outside_the_catalog_recommends_a_new_report(client):
 
 
 def test_country_in_the_catalog_still_uses_its_report(client):
-    d = stage(answer_until_decided(client, KERENDIA.format("Japan")), "decision")["data"]
+    d = stage(answer_until_decided(client, KERENDIA.format("Japan"), ("Track sales performance", "All available workbook months")), "decision")["data"]
     assert d["decision"] != "not_feasible" and "Japan" not in d["reason"]
     assert d["decision"] == "new_build" or "JP" in d["candidate"]["scope_note"] or "Global" in d["candidate"]["scope_note"]
 

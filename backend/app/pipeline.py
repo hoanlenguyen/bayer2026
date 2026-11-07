@@ -3,8 +3,8 @@
 Flow: parse the request (intent agent) → resolve KPIs → find analytics → trace lineage → check trust → Tableau
         → recommend: reuse, consolidation, migration, retirement or new build, with its evidence
 
-The system only recommends. It builds, changes and retires nothing, and no approval step exists: people act on the
-recommendation themselves. Agents propose; Python verifies and decides. Every stage emits ``stage`` events
+The assessment records a recommendation. The dashboard builder can then use the reviewed brief to create a
+workbook-backed view. Agents propose and Python verifies. Every stage emits ``stage`` events
 (running / waiting / done) with a payload for the UI, and every agent run, intent and recommendation is saved for audit.
 """
 from __future__ import annotations
@@ -307,7 +307,7 @@ class Pipeline:
                 conv["asked"] += 1
                 conv["state"] = "clarifying"
                 tri = await self._triage(conv, None)
-                yield self._stage(conv, "intent", "waiting", f"Question {conv['asked']} of up to 2",
+                yield self._stage(conv, "intent", "waiting", f"Clarifying question {conv['asked']}",
                                   {**public(intent), "triage": tri, "agent": agent_run.trace(),
                                    **({"classification": classification(intent)} if intent["measures"] else {})})
                 yield self._say(conv, result["question"], kind="question", suggestions=result.get("suggestions", []))

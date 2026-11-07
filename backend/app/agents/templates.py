@@ -28,8 +28,9 @@ def decision_text(p: dict[str, Any]) -> str:
         if others:
             return (f"No existing report covers {others}, and the catalog holds no data for it yet. I recommend one new thin report on the "
                     f"shared model **{model.get('name', d.get('target_model_id'))}** once that data is added. Nothing has been built.{tail}")
-        return (f"No existing report is both close enough and well governed. I recommend one new thin report on the shared model "
-                f"**{model.get('name', d.get('target_model_id'))}** using approved KPIs only. Nothing has been built.{tail}")
+        return (f"The imported catalogue has no reusable report covering this request. "
+                f"**{model.get('name', d.get('target_model_id'))}** is a candidate shared model. "
+                f"Use the next step to open a saved dashboard that matches, or build one from the available workbook figures.{tail}")
     if dec == "review":
         return f"I recommend a human review first. {d.get('reason', '')}"
     if dec == "retire":

@@ -3,6 +3,8 @@ import { handoffPath, readHandoff, type AssignedWork, type DecisionHandoff, type
 import type { CatalogMeta } from "../../api/types";
 import { navigate } from "../../lib/navigation";
 import { Icon } from "../Icon";
+import { DashboardDesign } from "./DashboardDesign";
+import { workbookViewUrl } from "../../api/dashboardBuilder";
 import { DecisionDashboard } from "./DecisionDashboard";
 import "./request-handoff.css";
 
@@ -90,7 +92,8 @@ function DecisionEvidence({ data }: { data: DecisionHandoff }) {
   </details>;
 }
 
-function Assignment({ data, path, completed }: {
+function Assignment({ data, path, completed, label = "Assign next step", secondary = false }: {
+  label?: string; secondary?: boolean;
   data: DecisionHandoff; path: string; completed: (action: AssignedWork) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -136,13 +139,14 @@ function Assignment({ data, path, completed }: {
     {error && <p role="alert" className="text-bad">{error}</p>}
     <div className="rh-buttons"><button type="submit" className="btn" disabled={busy}>{busy ? "Saving…" : "Save assignment"}</button>
       <button type="button" className="btn-outline" onClick={() => setEditing(false)} disabled={busy}>Cancel</button></div>
-  </form> : <button type="button" className={data.verdict === "reuse" && (data.preview || data.employee_report) ? "btn-outline" : "btn"} onClick={() => setEditing(true)}>
-    Assign next step <Icon name="arrowRight" size={15}/></button>;
+  </form> : <button type="button" className={secondary ? "btn-outline" : "btn"} onClick={() => setEditing(true)}>
+    {label} <Icon name="arrowRight" size={15}/></button>;
 }
 
-export function RequestHandoff({ conversationId, runId, catalog, isNative, onRecheck }: {
+export function RequestHandoff({ conversationId, runId, catalog, isNative, onRecheck, onBuilt, dashboardReady }: {
   conversationId: string; runId: string; catalog: CatalogMeta | null; isNative: boolean;
   onRecheck: (runId: string, reason: string | null) => void;
+  onBuilt: (runId: string, reused: boolean) => void; dashboardReady: boolean;
 }) {
   const path = handoffPath(conversationId, runId);
   const [data, setData] = useState<DecisionHandoff | null>(null);
@@ -163,15 +167,16 @@ export function RequestHandoff({ conversationId, runId, catalog, isNative, onRec
     ? <>Could not open this decision’s next step. {error} <button type="button" className="btn-outline" onClick={() => setAttempt(n => n + 1)}>Retry</button></>
     : "Loading the saved decision…"}</div>;
   const employee = data.employee_report;
-  return <div className="rh" aria-label="Decision handoff">
-    <DecisionDashboard data={data} />
-    {employee && isNative && <div className="rh-native">
-      <a className="btn" href={employee.url} onClick={navigate}>Open matching employee report <Icon name="arrowRight" size={15}/></a></div>}
-    {data.current_review && <div className="rh-recheck"><strong>Saved recommendation · Reuse</strong>
-      <p>Current catalog check · {data.current_review.reason}</p></div>}
-    {data.metric_series?.points.length ? <details className="rh-provenance"><summary>How the report fits your request</summary>
-      <RequestFit data={data} catalog={catalog} /></details> : <RequestFit data={data} catalog={catalog} />}
-    <section className="rh-next"><span className="rh-kicker">{isNative ? "Optional follow-up" : "Next step"}</span><h3>{data.action_title}</h3>
+  const verdict = data.handoff_verdict || data.verdict;
+  const canDesign = !data.current_review && ["new_build", "create", "extend"].includes(verdict);
+  const workbook = verdict === "reuse" && !data.current_review && !isNative && !!data.metric_series?.points.length;
+  const hasPrimary = canDesign || isNative || workbook;
+  const labels: Partial<Record<typeof verdict, string>> = {
+    repair: "Plan repairs with an owner", review: "Start owner review", migrate: "Plan migration with an owner",
+    consolidate: "Review consolidation", retire: "Review retirement", not_feasible: "Assign a feasibility review",
+  };
+  const label = labels[verdict] ?? "Assign next step";
+  const followUp = (<section className="rh-next"><span className="rh-kicker">{hasPrimary ? "Optional follow-up" : "Next step"}</span><h3>{data.action_title}</h3>
       {data.plan_steps[0] && <p>{data.plan_steps[0]}</p>}
       {data.plan_steps.length > 1 && <details className="rh-provenance"><summary>Work to check ({data.plan_steps.length - 1})</summary>
         <ol className="rh-plan">{data.plan_steps.slice(1).map((step, i) => <li key={i}>{step}</li>)}</ol></details>}
@@ -183,7 +188,7 @@ export function RequestHandoff({ conversationId, runId, catalog, isNative, onRec
       {data.preview && <><button type="button" className={data.verdict === "reuse" && !employee ? "btn" : "btn-outline"} aria-expanded={showPreview}
         onClick={() => setShowPreview(open => !open)}>{showPreview ? "Hide workbook preview" : "View workbook preview"}</button>
         {showPreview && <Preview preview={data.preview} />}</>}
-      <Assignment data={data} path={path} completed={action => {
+      <Assignment data={data} path={path} secondary={hasPrimary} label={label} completed={action => {
         setData({ ...data, action }); setNotice(action.status === "done" ? "Outcome saved." : "Assignment saved.");
       }} />
       {notice && <p role="status" className="rh-notice">{notice}</p>}
@@ -192,7 +197,24 @@ export function RequestHandoff({ conversationId, runId, catalog, isNative, onRec
       {data.related_actions.length > 0 && <details className="rh-provenance"><summary>Other work from this decision ({data.related_actions.length})</summary>
         <ul>{data.related_actions.map(action => <li key={action._id}>{action.title} · {action.owner} · {statusText(action.status)}</li>)}</ul></details>}
       {data.storage_mode === "memory" && <p className="rh-sub">Demo storage resets when the server restarts.</p>}
-    </section>
+    </section>);
+  return <div className="rh" aria-label="Decision handoff">
+    {canDesign && <DashboardDesign conversationId={conversationId} runId={runId} onBuilt={onBuilt}/>}
+    {dashboardReady ? <details className="rh-provenance"><summary>Original catalog assessment</summary>
+      <RequestFit data={data} catalog={catalog}/><DecisionEvidence data={data}/>
+      {data.action && followUp}
+    </details> : <>
+    {employee && isNative && <div className="rh-native"><a className="btn" href={employee.url} onClick={navigate}>Open matching employee report <Icon name="arrowRight" size={15}/></a></div>}
+    {workbook && <div className="rh-native"><a className="btn" href={workbookViewUrl(conversationId, runId)} onClick={navigate}>Open verified workbook view <Icon name="arrowRight" size={15}/></a></div>}
+    {data.current_review && <div className="rh-recheck"><strong>Saved recommendation · Reuse</strong>
+      <p>Current catalog check · {data.current_review.reason}</p></div>}
+    {!hasPrimary && followUp}
+    <DecisionDashboard data={data} />
+    {data.metric_series?.points.length ? <details className="rh-provenance"><summary>How the report fits your request</summary>
+      <RequestFit data={data} catalog={catalog} /></details> : <RequestFit data={data} catalog={catalog} />}
+    {hasPrimary && (canDesign && !data.action
+      ? <details className="rh-provenance"><summary>Assign a separate owner follow-up</summary>{followUp}</details> : followUp)}
     <DecisionEvidence data={data} />
+    </>}
   </div>;
 }

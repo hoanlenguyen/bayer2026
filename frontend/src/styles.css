@@ -123,6 +123,12 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .ask-empty { max-width: 800px; min-height: 100dvh; margin: 0 auto; display: grid; grid-template-rows: 1fr auto 1fr; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 32px 24px; }
 .ask-empty-above { display: grid; gap: 16px; align-content: end; }
 .ask-empty-below { display: grid; gap: 16px; align-content: start; }
+.ask-saved { font-size: 13px; }
+.ask-saved summary { cursor: pointer; font-weight: 600; }
+.ask-saved ul { list-style: none; padding: 0; margin: 8px 0; }
+.ask-saved li { display: flex; gap: 6px 12px; justify-content: space-between; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.ask-saved a { color: var(--fg); text-underline-offset: 2px; }
+.ask-saved small { color: var(--kg-dot); }
 /* Too little room to centre: stack from the top so the chips stay on screen. */
 @media (max-width: 768px), (max-height: 660px) {
   .ask-empty { grid-template-rows: auto auto auto; align-content: start; }

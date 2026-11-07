@@ -4,6 +4,7 @@ import type { CatalogMeta, DecisionType, Health, PipelineEvent, Preset, StageEve
 import { FlowPanel, RUNNING_COPY } from "../components/ask/FlowPanel";
 import { TriageStrip } from "../components/ask/TriageStrip";
 import { VerdictCard } from "../components/ask/VerdictCard";
+import { SavedDashboards } from "../components/ask/SavedDashboards";
 import { Icon } from "../components/Icon";
 import { conversationsChanged, CURRENT_REMOVED_EVENT, getCurrentConversation, setAnswerInProgress, OPEN_CONVERSATION_EVENT, setCurrentConversation, stagesOf, takePendingConversation } from "../lib/conversations";
 
@@ -17,9 +18,10 @@ interface ChatMessage {
 
 type ConvState = "idle" | "clarifying" | "awaiting_approval"; // awaiting_approval only exists in older saved conversations
 
-/** Each matches a preset's prompt in the backend, so a click also sends that preset's certified measures. */
+/** Workbook presets carry their governed intent. The dashboard example exercises ordinary free-text intake. */
 const STARTER_QUESTIONS = [
   "Please create a Power BI replacement for our legacy Tableau Xarelto commercial workbook.",
+  "Build a monthly dashboard for Nubeqa net sales and units shipped in France.",
   "Show monthly inventory coverage and OTIF for Lynkuet in Spain.",
   "How are Eylea net sales and digital engagement developing in Japan?",
   "We need a monthly supply-risk dashboard by medicine and country.",
@@ -279,6 +281,7 @@ export function AskPage() {
         </div>
         <Composer onSend={(t) => send(t)} disabled={busy} autoFocus placeholder="Describe the decision or the numbers you need, in your own words" />
         <div className="ask-empty-below">
+          <SavedDashboards />
           <div className="starter-chips" role="group" aria-label="Example questions">
             {STARTER_QUESTIONS.map(starter)}
           </div>

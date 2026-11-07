@@ -1,7 +1,6 @@
 """Intent agent (/grill-me): turns a business request into a structured intent.
 
-Asks at most two plain-language questions about the decision, never about
-specifications. Output: {"status": "ask"|"clear", "question", "suggestions", "intent"}.
+Clarifies the decision and asks for missing dashboard requirements.
 
 Intent fields: decision, measures (canonical KPI ids), dimensions (breakdowns),
 grain (month), filters {product, market, region, therapeutic_area} as lists,
@@ -14,11 +13,12 @@ import re
 from typing import Any
 
 from .. import catalog as cat
+from .. import dashboard_intake
 from ..datapack import REGION_ALIASES
 from ..decider import JEV_THRESHOLDS
 from ..geo import split_other_markets
 from ..triage import URGENCY_CHOICES, infer_urgency, urgency_from_answer, verify_urgency
-from .base import Agent, Step
+from .base import Agent, AgentRun, Step
 from .tools import catalog_brief
 
 MAX_QUESTIONS = 2
@@ -142,6 +142,18 @@ class IntentAgent(Agent):
     role = "fast"
     jev_phase = "kpis"
 
+    async def run(self, ctx: dict[str, Any]) -> AgentRun:
+        transcript = ctx["transcript"]
+        if ctx.get("preset") or not transcript or not dashboard_intake.is_dashboard_request(transcript[0]["content"]):
+            return await super().run(ctx)
+        previous = ctx["intent"].get("dashboard_brief") or {}
+        pending = ctx["intent"].get("_pending")
+        run = await super().run({**ctx, "dashboard_request": True})
+        run.output = dashboard_intake.clarify(ctx, run.output["intent"], previous, pending)
+        if run.output["status"] == "ask":
+            run.steps.append(Step("check", "Clarify the dashboard brief", run.output["question"]))
+        return run
+
     def needs_no_model(self, ctx: dict[str, Any]) -> bool:
         # A preset's own text already has an exact, governed intent: nothing to extract.
         preset, transcript = ctx.get("preset"), ctx.get("transcript") or []
@@ -177,6 +189,8 @@ class IntentAgent(Agent):
     async def run_llm(self, ctx: dict[str, Any], steps: list[Step]) -> dict[str, Any]:
         intent, asked = ctx["intent"], ctx["asked"]
         system = SYSTEM.replace("{max_q}", str(MAX_QUESTIONS)).replace("{catalog}", catalog_brief())
+        if ctx.get("dashboard_request"):
+            system += "\nExtract explicitly requested metrics, dimensions and scope. Preserve earlier answers. Leave unstated fields empty. The application will ask for the missing dashboard details."
         user = json.dumps({"conversation": ctx["transcript"], "questions_already_asked": asked, "preset": ctx.get("preset"),
                            "current_intent": {k: v for k, v in intent.items() if not k.startswith("_")}}, ensure_ascii=False)
         out = await self.llm.json(self.role, system, user)
@@ -187,6 +201,11 @@ class IntentAgent(Agent):
         urgency = stated or ctx.get("urgency_hint") or verify_urgency(proposed.pop("urgency", None), said)
         if urgency.get("note"):
             steps.append(Step("check", "Urgency not supported by the request", urgency["note"], ok=False))
+        if ctx.get("dashboard_request"):
+            # Scope comes from the employee's actual words. An invented country could generate a convincing wrong dashboard.
+            proposed["filters"] = match_filters(said)
+            explicit = match_measures(said)
+            proposed["measures"] = list(dict.fromkeys((intent.get("measures") or []) + explicit))
         merged = sanitize_intent({**intent, **proposed, "urgency": urgency})
         merged["other_markets"], merged["unmatched_terms"] = split_other_markets(said, merged["unmatched_terms"])
         dropped = set(proposed.get("measures") or []) - set(merged["measures"])
@@ -238,6 +257,9 @@ class IntentAgent(Agent):
             intent.setdefault("unmatched_terms", []).append(f"patient or prescriber-level data ({', '.join(blocked)})")
         steps.append(Step("rule", "Match catalog keywords",
                           f"KPIs={found_m or '-'}, breakdowns={found_d or '-'}, filters={found_f or '-'}"))
+
+        if ctx.get("dashboard_request"):
+            return {"status": "clear", "question": None, "suggestions": [], "intent": sanitize_intent(intent)}
 
         def ask(field: str, question: str, suggestions: list[str]) -> dict[str, Any]:
             intent["_pending"] = field

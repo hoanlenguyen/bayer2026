@@ -312,10 +312,21 @@ def data_availability(intent: dict[str, Any], catalog: dict[str, Any]) -> dict[s
 def rank_models(intent: dict[str, Any], catalog: dict[str, Any]) -> list[dict[str, Any]]:
     """Shared semantic models that could host the request, best first (RULE-001: reuse shared models)."""
     req = set(intent.get("measures", []))
-    regions = set((intent.get("filters") or {}).get("region") or [])
+    filters = intent.get("filters") or {}
+    brief = intent.get("dashboard_brief") or {}
+    regions = set(filters.get("region") or [])
+    regions.update(catalog["markets"][market]["region"] for market in filters.get("market", []) if market in catalog["markets"])
     products = set(intent_products(intent, catalog))
     out = []
     for m in catalog["models"].values():
+        if products and m["product_scope"] != "All Pharma" and products != {m["product_scope"]}:
+            continue
+        if regions and m["region_scope"] != "Global" and regions != {m["region_scope"]}:
+            continue
+        if brief.get("all_products") and m["product_scope"] != "All Pharma":
+            continue
+        if brief.get("all_markets") and m["region_scope"] != "Global":
+            continue
         served = sorted(req & set(m["measures"]))
         if not served:
             continue
@@ -361,6 +372,11 @@ def decide(candidates: list[AssetScore], availability: dict[str, Any], intent: d
     t = THRESHOLDS
     intent = intent or {}
     best_model = availability.get("best_model")
+    missing = (availability.get("missing_terms") or []) + (availability.get("uncertified_measures") or [])
+    if missing:
+        return DecisionResult(Decision.NOT_FEASIBLE, "Required KPIs are missing or unapproved.",
+                              "The governed data cannot answer the full request. Unavailable requirements: " + ", ".join(missing),
+                              None)
 
     if catalog is not None:
         result = _decide_retirement(candidates, intent, catalog)

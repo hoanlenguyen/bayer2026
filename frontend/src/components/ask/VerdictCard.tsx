@@ -51,6 +51,9 @@ function ScoreMeter({ label, hint, value, target, floor }: { label: string; hint
 
 /** The answer to "do we already have this?": the recommendation and its scores. The evidence is in the steps beside it. It only recommends. */
 export function VerdictCard({ stages, catalog, busy, handoff }: Props) {
+  const [builtRun, setBuiltRun] = useState<{ id: string; reused: boolean }>();
+  const onBuilt = useCallback((id: string, reused: boolean) => setBuiltRun({ id, reused }), []);
+  const saved = builtRun && handoff && builtRun.id === handoff.runId ? builtRun : null;
   const [recheck, setRecheck] = useState<{ runId: string; reason: string | null } | null>(null);
   const onRecheck = useCallback((runId: string, reason: string | null) => setRecheck({ runId, reason }), []);
   const currentReview = !!(handoff && recheck?.runId === handoff.runId && recheck.reason);
@@ -97,15 +100,15 @@ export function VerdictCard({ stages, catalog, busy, handoff }: Props) {
   return (
     <article className="verdict" aria-label="Decision">
       <header className="verdict-head">
-        <RecommendationChip value={currentReview ? "review" : String(d.decision)} />
-        <h2>{title}</h2>
-        {reportName && (
+        {saved ? <span className="rec-chip rec-reuse">Saved dashboard</span> : <RecommendationChip value={currentReview ? "review" : String(d.decision)} />}
+        <h2>{saved ? (saved.reused ? "Use the saved dashboard" : "Your dashboard is ready") : title}</h2>
+        {!saved && reportName && (
           <p className="verdict-subject">
             <strong>{reportName}</strong>
             {ownerText && <span className="muted"> · {ownerText}</span>}
           </p>
         )}
-        {!reportName && building && targetModel && (
+        {!saved && !reportName && building && targetModel && (
           <p className="verdict-subject">
             <span className="muted">Shared model: </span><strong>{targetModel.name}</strong>
             {ownerText && <span className="muted"> · {ownerText}</span>}
@@ -118,8 +121,9 @@ export function VerdictCard({ stages, catalog, busy, handoff }: Props) {
       {native && !handoff && <div className="verdict-actions">
         <a className="btn" href={native.url} onClick={navigate}>Open matching employee report <Icon name="arrowRight" /></a>
       </div>}
-      {handoff && <RequestHandoff key={`${handoff.conversationId}/${handoff.runId}`} {...handoff} catalog={catalog} isNative={!!native} onRecheck={onRecheck} />}
+      {handoff && <RequestHandoff key={`${handoff.conversationId}/${handoff.runId}`} {...handoff} catalog={catalog} isNative={!!native} onRecheck={onRecheck} onBuilt={onBuilt} dashboardReady={!!saved} />}
 
+      {!saved && <>
       {building && c && !handoff && (
         <p className="muted verdict-note">Closest existing report, which can't be reused: <strong>{c.name}</strong></p>
       )}
@@ -150,7 +154,7 @@ export function VerdictCard({ stages, catalog, busy, handoff }: Props) {
 
       {d.rules_applied?.length > 0 && <p className="muted small verdict-fine">Rules applied: {d.rules_applied.join(", ")}</p>}
 
-      {d.decision !== "reuse" && d.decision !== "not_feasible" && (
+      {!handoff && d.decision !== "reuse" && d.decision !== "not_feasible" && (
         <p className="muted small verdict-fine">This is a recommendation. Nothing has been built, changed or retired.</p>
       )}
 
@@ -162,6 +166,7 @@ export function VerdictCard({ stages, catalog, busy, handoff }: Props) {
           <a className="btn btn-outline" href={`/briefings?report=${encodeURIComponent(reportId)}`} onClick={navigate}>Open BI register record</a>
         </div>
       )}
+      </>}
     </article>
   );
 }
