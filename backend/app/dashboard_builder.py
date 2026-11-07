@@ -1,6 +1,7 @@
 """Resolve a saved dashboard brief and calculate an immutable local workbook view."""
 from __future__ import annotations
 
+from datetime import datetime
 import hashlib
 import json
 import math
@@ -264,3 +265,48 @@ def assemble(req, dashboard_id, conversation_id, run_id, request):
             "period": req["period"], "scope": scope, "dimensions": req["dimensions"], "columns": columns, "groups": result,
             "requested_measures": req["requested_measures"], "omitted_measures": req["omitted_measures"],
             "source": SOURCE, "source_records": records, "synthetic": True}
+
+
+def _join(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _month_label(period: str) -> str:
+    return datetime.strptime(period[:7], "%Y-%m").strftime("%B %Y")
+
+
+def build_receipt(artifact: dict) -> dict:
+    """What a dashboard holds and how it opens, computed from the assembled or saved artifact. No model, no extra reads.
+
+    Shown during the hand-off from the reviewed brief to the saved dashboard, and again on the dashboard itself."""
+    columns = artifact.get("columns") or []
+    ids = {c["id"] for c in columns}
+    # The saved page charts every measure except a sales forecast shown beside net sales (it draws as the comparison line).
+    charted = [c for c in columns if not (c["id"] == "sales_forecast" and "net_sales" in ids)]
+    groups = artifact.get("groups") or []
+    periods = sorted({p["period"] for g in groups for p in g["points"]})
+    records = artifact.get("source_records") or []
+    rows = sorted(r["row"] for r in records)
+    actual = sum(r.get("value_type") == "actual_like_synthetic" for r in records)
+    label = lambda c: f"{c['name']} ({c['unit']})" if c.get("unit") else c["name"]
+    names = [label(c) for c in charted]
+    if len(periods) == 1:
+        layout = f"{_join(names)} for {_month_label(periods[0])}"
+        layout = ("Switch between " if len(names) > 1 else "") + layout + "."
+    elif len(names) > 1:
+        layout = f"Switch between {_join(names)} in a monthly trend."
+    else:
+        layout = f"A monthly trend of {names[0]}." if names else "A monthly table."
+    if len(groups) > 1:
+        layout += f" Choose one of {len(groups)} groups ({_join([g['label'] for g in groups][:4])}{', …' if len(groups) > 4 else ''}) to see its figures."
+    layout += " The table below lists the figures and their workbook rows."
+    scope = artifact.get("scope") or {}
+    return {
+        "products": scope.get("products", []), "markets": scope.get("markets", []), "period": artifact.get("period"),
+        "measures": [{"id": c["id"], "kpi_id": c.get("kpi_id"), "name": c["name"], "unit": c.get("unit", "")} for c in columns],
+        "charted_measures": len(charted), "groups": len(groups), "group_labels": [g["label"] for g in groups],
+        "months": len(periods), "first_month": periods[0] if periods else None, "last_month": periods[-1] if periods else None,
+        "observations": len(records), "rows": {"first": rows[0], "last": rows[-1]} if rows else None,
+        "actual_like": actual, "forecast_like": len(records) - actual, "source": artifact.get("source"),
+        "omitted_measures": artifact.get("omitted_measures") or [], "arrangement": layout,
+    }

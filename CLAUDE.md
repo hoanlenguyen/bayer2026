@@ -4,7 +4,7 @@ Project context for Claude Code and for the team. Keep this file current: it is 
 
 ## Project
 
-**AnalytIQ intelligence** (formerly "Agentic AnalytIQ"). SinceAI Hackathon 2026, challenge "Build Less, Build Better: AI for Governed Analytics".
+**AnalytIQ intelligence** (formerly "Agentic Analytics Manager"). SinceAI Hackathon 2026, challenge "Build Less, Build Better: AI for Governed Analytics".
 
 An AI workspace that helps a pharma manufacturing plant ask the right business question, reuse or create trustworthy analytics, and manage the follow-up actions. It decides what deserves to exist before anything is built.
 
@@ -41,6 +41,7 @@ Rules:
 - Conversation simulation (`/simulator`, under Ask in the sidebar): SinceAI and Brainrot chat (speakers `A` and `B` in the API; AnalytIQ is `C`), the gate agent labels each sentence off topic, business talk or needs a decision (Jev, then GPT, then rules; `speak` 0.70, `stay_quiet` 0.30 in `JEV_THRESHOLDS`). Its `conversation` phase is on whenever `TYPESAFE_API_KEY` is set. Only "needs a decision" runs `classify_request` on the open thread. A request too vague to check (no KPI, or a loose match with no product or market) gets no reply: AnalytIQ keeps listening, and business talk that follows is checked with it until there is enough. It never asks questions; AnalytIQ's sentence comes from Python templates, never a model, and its evidence is the same verdict and six steps as Ask (`analyse()` in `pipeline.py`, shared by both), and only a plain Reuse is called "already exists". Its accuracy on this question has not been measured yet.
 - A preset's own text skips the Intent model call: its intent is already known.
 - Token use is recorded per agent run (`usage` in `agent_runs`) and per question (`runs[].tokens`).
+- Build hand-off (`frontend/src/components/ask/BuildHandoff.tsx`): the final Build click shows the approved brief's facts while saving, then "Dashboard ready" only after the server confirms, with Open now. A new build opens by itself 5.5 s after the click (`READING_TARGET_MS`), or as soon as a slower save confirms. Stay here, View build details, leaving Ask, switching chats or hiding the tab cancel it. A cross-run match shows the existing dashboard's link with no hand-off. A 409 offers Review updated brief; a lost response is reconciled from the run's design state. The saved page repeats the summary under "Dashboard brief and sources".
 - `repair` stays an internal decision, shown as "Reuse after repair". Follow-up actions are proposed, and a person accepts them.
 - `app/agents/evidence.py`, `app/agents/spec.py` and `app/pbip.py` are no longer part of the flow.
 
@@ -125,7 +126,7 @@ backend/   Python 3.12+, FastAPI
 - `GET  /api/specs?conversation_id=` – DashboardSpec versions with status (draft / approved / rejected / superseded)
 - `GET  /api/agent-runs?conversation_id=` – audit log of agent runs
 - `GET  /api/briefings/{team}` (`commercial`, `supply`) – the team briefing; `PUT …/selection` pins views; `POST …/actions`, `PATCH …/actions/{id}` – briefing actions
-- `GET/POST /api/conversations/{cid}/runs/{rid}/dashboard`, `…/dashboard/answers`, `…/dashboard/build` – dashboard questions, brief and build for an Ask result
+- `GET/POST /api/conversations/{cid}/runs/{rid}/dashboard`, `…/dashboard/answers`, `…/dashboard/build` – dashboard questions, brief and build for an Ask result. Ready and built states carry an optional `receipt` (scope, period, measures with KPI IDs and units, months, rows, record classes, groups, arrangement sentence) computed from the assembled artifact by `build_receipt`; `GET /api/dashboards/{id}` returns it too. It is outside the review token and the saved artifact
 - `GET  /api/dashboards`, `GET /api/dashboards/{id}` – saved dashboards (`items`, `storage_mode`)
 - `GET  /api/report-register`, `…/titles`, `…/{report_id}`; `POST …/{report_id}/changes` – BI report register and reviewed changes
 - `GET  /api/conversations/{cid}/runs/{rid}/handoff`; `POST/PATCH …/handoff/actions` – owner assignments from a result
@@ -200,7 +201,7 @@ Every option serves frontend and API from one address (no CORS, no `VITE_API_BAS
 cd backend && python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
-pytest                 # 263 tests, offline (mock model, mongomock): decision rules, agents, triage and vectors, briefings, dashboards, register, API flows
+pytest                 # 265 tests, offline (mock model, mongomock): decision rules, agents, triage and vectors, briefings, dashboards, register, API flows
 python -m app.load_datapack     # load catalog into MongoDB (needs MONGODB_URI)
 
 # frontend (proxies /api to :8000)

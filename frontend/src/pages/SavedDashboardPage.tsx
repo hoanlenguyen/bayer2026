@@ -1,7 +1,8 @@
-import { useEffect, useId, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { handoffPath, readHandoff, type DecisionHandoff } from "../api/handoff";
 import type { DashboardObservation, SavedDashboard, SourceRecord } from "../api/dashboardBuilder";
 import { PulseDashboard } from "../components/PulseDashboard";
+import { ReceiptDetails, ReceiptFacts } from "../components/ask/BuildHandoff";
 import { bi } from "../api/biEstate";
 import { openConversation } from "../lib/conversations";
 import { navigate } from "../lib/navigation";
@@ -32,13 +33,21 @@ function useRecord<T>(path: string) {
 
 function Status({ error, retry }: { error: string; retry: () => void }) {
   return <main className="sd-page" role={error ? "alert" : "status"}>{error
-    ? <><h1>Could not open this view</h1><p>{error}</p><button type="button" className="btn-outline" onClick={retry}>Try again</button></>
+    ? <><h1>Could not open this view</h1><p>{error}</p><button type="button" className="btn-outline" onClick={retry}>Retry opening dashboard</button></>
     : <p>Opening dashboard…</p>}</main>;
 }
 
 function PageHeader({ name, kind, description, conversationId }: { name: string; kind: string; description: string; conversationId: string }) {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "manual">("idle");
+  const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { document.title = name + " · AnalytIQ intelligence"; }, [name]);
+  // Arriving from a build: move focus to the dashboard, once per history entry.
+  useEffect(() => {
+    const state = (history.state ?? {}) as { focusHeading?: boolean };
+    if (!state.focusHeading) return;
+    heading.current?.focus();
+    try { history.replaceState({ ...state, focusHeading: false }, ""); } catch { /* focus once per mount instead */ }
+  }, []);
   async function copy() {
     try { await navigator.clipboard.writeText(window.location.href); setCopyState("copied"); }
     catch { setCopyState("manual"); }
@@ -50,7 +59,7 @@ function PageHeader({ name, kind, description, conversationId }: { name: string;
   return <header className="sd-header"><div className="sd-toolbar"><a href="/#ask" onClick={back}>← Open source conversation</a>
     <button type="button" className="btn-outline" onClick={() => void copy()}>{copyState === "copied" ? "Link copied" : "Copy link"}</button></div>
     {copyState === "manual" && <label className="sd-link-field">Dashboard link<input readOnly value={window.location.href} onFocus={e => e.currentTarget.select()}/></label>}
-    <p className="sd-kicker">{kind} · Synthetic workbook</p><h1>{name}</h1><p className="sd-subtitle">{description}</p>
+    <p className="sd-kicker">{kind} · Synthetic workbook</p><h1 ref={heading} tabIndex={-1}>{name}</h1><p className="sd-subtitle">{description}</p>
   </header>;
 }
 
@@ -149,7 +158,10 @@ export function SavedDashboardPage({ id }: { id: string }) {
     <div className="sd-meta"><span>{places}</span><span>{periodName(period.start)} – {periodName(period.end)}</span>
       <span>{record.columns.length} governed {record.columns.length === 1 ? "KPI" : "KPIs"}</span></div>
     <DashboardData groups={record.groups} columns={record.columns} source={record.source} scope={places}/>
-    <SourceNotes><p><strong>Original request</strong><br/>{record.request}</p>
+    <SourceNotes>{record.receipt && <section className="sd-receipt" aria-label="What this dashboard holds">
+        <p><strong>Built from the approved brief</strong></p><ReceiptFacts receipt={record.receipt} saved/><ReceiptDetails receipt={record.receipt}/>
+        {record.created_by && <p>Built by {record.created_by.name}</p>}</section>}
+      <p><strong>Original request</strong><br/>{record.request}</p>
       <p><strong>Scope</strong><br/>{scope.products.join(", ")} · {scope.markets.join(", ")}</p>
       {record.omitted_measures?.length > 0 && <p><strong>Outside this dashboard</strong><br/>{record.omitted_measures.map(pretty).join(", ")}</p>}
       <p><strong>Measures</strong></p><ul>{record.columns.map(col => <li key={col.id}>{col.name} ({col.kpi_id}) · {pretty(col.aggregation)} · <code>{col.field}</code></li>)}</ul>

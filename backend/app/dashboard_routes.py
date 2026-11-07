@@ -8,7 +8,7 @@ from . import catalog
 from .actions import now
 from .bi_estate import creator_for_build
 from .briefing_routes import StoreDep
-from .dashboard_builder import assemble, check_reuse, fingerprint, resolve, validate_answer
+from .dashboard_builder import assemble, build_receipt, check_reuse, fingerprint, resolve, validate_answer
 from .request_handoff import _saved_run
 
 router = APIRouter()
@@ -87,6 +87,7 @@ async def _state(conversation_id, run_id, store):
     artifact.update(id=did, review_token=token, requirements=req)
     existing = await store.get_artifact("dashboards", did)
     state.update(status="built" if existing else "ready", summary=_summary(req, artifact), review_token=token,
+                 receipt=build_receipt(existing or artifact),
                  dashboard_id=did if existing else None, reused=existing is not None)
     return state, doc, artifact
 
@@ -148,4 +149,4 @@ async def opened_dashboard(dashboard_id: str, store: StoreDep) -> dict[str, Any]
     saved = await store.get_artifact("dashboards", dashboard_id)
     if not saved:
         raise HTTPException(404, "No built dashboard has this ID.")
-    return {**{k: v for k, v in saved.items() if k != "_id"}, "storage_mode": store.name}
+    return {**{k: v for k, v in saved.items() if k != "_id"}, "receipt": build_receipt(saved), "storage_mode": store.name}

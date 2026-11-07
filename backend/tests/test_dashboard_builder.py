@@ -147,3 +147,39 @@ async def test_store_rejects_stale_draft_writes_and_preserves_published_data(mak
     await store.publish_dashboard_once(deepcopy(artifact))
     assert (await store.publish_dashboard_once({**artifact, "title": "Second"}))["title"] == "First"
     assert len(await store.dashboard_directory()) == 1
+
+
+def test_build_receipt_describes_the_real_artifact_for_the_handoff():
+    catalog.reset_catalog()
+    with TestClient(app) as c:
+        path = seed(c, "receipt-chat")
+        ready = c.get(path).json()
+        r = ready["receipt"]
+        assert r["products"] == ["Nubeqa"] and r["markets"] == ["France"]
+        assert [m["kpi_id"] for m in r["measures"]] == ["KPI-001", "KPI-014"]
+        assert r["months"] == 10 and r["observations"] == 10 and r["rows"] == {"first": 12, "last": 21}
+        assert r["actual_like"] + r["forecast_like"] == 10 and r["source"] == "Product_Market_Monthly"
+        assert r["groups"] == 1 and r["charted_measures"] == 2
+        assert r["arrangement"].startswith("Switch between Net Sales") and "monthly trend" in r["arrangement"]
+        assert "group" not in r["arrangement"]
+        state, _ = build(c, path)
+        assert state["receipt"] == r and not state["reused"]
+        # the receipt is presentation only: the token and the saved values are unchanged by it
+        dash = c.get("/api/dashboards/" + state["dashboard_id"]).json()
+        assert dash["receipt"] == r and "receipt" not in c.portal.call(app.state.pipeline.store.get_artifact, "dashboards", state["dashboard_id"])
+
+
+def test_build_receipt_wording_follows_months_measures_and_groups():
+    catalog.reset_catalog()
+    intent = {"measures": ["units_shipped"], "dimensions": ["month"], "grain": "month", "decision": "Compare distribution",
+              "filters": {"product": ["Nubeqa"], "market": ["DE", "FR"]}, "dashboard_brief": {"period": {"start": "2026-10", "end": "2026-10"}}}
+    req, q, err = resolve(intent, "new_build", {}, "October shipments")
+    assert q is None and err is None, (q, err)
+    from app.dashboard_builder import build_receipt
+    one = build_receipt(assemble(req, "x", "c", "r", ""))
+    assert one["months"] == 1 and one["charted_measures"] == 1 and not one["arrangement"].startswith("Switch")
+    assert "October 2026" in one["arrangement"] and sorted(one["markets"]) == ["France", "Germany"]
+    grouped_intent = {**intent, "measures": ["net_sales", "units_shipped", "on_time_in_full"]}
+    per, _, _ = resolve(grouped_intent, "new_build", {"rates": "separate"}, "")
+    grouped = build_receipt(assemble(per, "y", "c", "r", ""))
+    assert grouped["groups"] == 2 and "Choose one of 2 groups" in grouped["arrangement"]

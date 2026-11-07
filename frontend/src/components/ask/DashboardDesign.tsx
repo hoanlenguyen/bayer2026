@@ -3,6 +3,7 @@ import { builderPath, dashboardUrl, type BuildAnswer, type DesignState } from ".
 import { readHandoff } from "../../api/handoff";
 import { navigate } from "../../lib/navigation";
 import { Icon } from "../Icon";
+import { BuildHandoff, type BuildSession } from "./BuildHandoff";
 import "./dashboard-design.css";
 
 function Brief({ state }: { state: DesignState }) {
@@ -66,6 +67,12 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
+  // The final build: one submission at a time, blocked synchronously against double clicks.
+  const [session, setSession] = useState<BuildSession | null>(null);
+  const submitting = useRef(false);
+  const sessions = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
     let active = true;
     readHandoff<DesignState>(path).then(result => { if (active) { setState(result); setError(""); } })
@@ -76,22 +83,69 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
     if (state?.status === "built" && state.dashboard_id) onBuilt(runId, !!state.reused);
   }, [state, onBuilt, runId]);
 
-  async function send(part: "answers" | "build", body: object) {
-    const previousLocation = window.location.href;
-    setPending(true); setError("");
-    try {
-      const result = await readHandoff<DesignState>(path + "/" + part, "POST", body);
+  /** Final Build: send at once, show the reviewed facts while saving, then the hand-off. Clarification answers use send(). */
+  async function buildNow(reviewed: DesignState) {
+    if (submitting.current) return;
+    submitting.current = true;
+    const id = ++sessions.current;
+    const startedAt = performance.now();
+    const body = { version: reviewed.version, review_token: reviewed.review_token };
+    const update = (phase: BuildSession["phase"]) => { if (mounted.current) setSession(s => s && s.id === id ? { ...s, phase } : s); };
+    setSession({ id, startedAt, brief: reviewed, phase: { kind: "saving" } });
+    setError("");
+    const succeed = (result: DesignState) => {
+      window.dispatchEvent(new Event("dashboards-changed"));
+      if (!mounted.current) return;
       setState(result);
-      if (part === "build" && result.status === "built" && result.dashboard_id) {
-        window.dispatchEvent(new Event("dashboards-changed"));
-        if (previousLocation !== window.location.href) return;
-        history.pushState(null, "", dashboardUrl(result.dashboard_id));
-        window.scrollTo(0, 0); window.dispatchEvent(new PopStateEvent("popstate"));
+      if (result.reused) { setSession(null); return; }  // an existing dashboard: its link, no new-build sequence
+      update({ kind: "ready", dashboardId: result.dashboard_id!, savedAfterMs: performance.now() - startedAt });
+    };
+    try {
+      let response: Response | null = null;
+      try {
+        response = await fetch(path + "/build", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      } catch {
+        response = null; // lost: the save may still have committed
       }
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not save the dashboard design."); }
+      if (response?.ok) {
+        const result = await response.json() as DesignState;
+        if (result.status === "built" && result.dashboard_id) succeed(result);
+        else update({ kind: "failed", message: result.reason || "The dashboard was not saved.", stale: true });
+        return;
+      }
+      if (response) {
+        const data = await response.json().catch(() => ({}));
+        const message = typeof data.detail === "string" ? data.detail : `The server returned ${response.status}. Your brief is kept.`;
+        update({ kind: "failed", message, stale: response.status === 409 });
+        return;
+      }
+      // No answer: ask the run whether the save committed before saying anything.
+      try {
+        const latest = await readHandoff<DesignState>(path);
+        if (latest.status === "built" && latest.dashboard_id) { succeed(latest); return; }
+        update({ kind: "failed", message: "The connection dropped before the save was confirmed, and nothing was saved. Your brief is kept.", stale: false });
+      } catch {
+        update({ kind: "failed", message: "The connection dropped and the result could not be checked. Your brief is kept; try again.", stale: false });
+      }
+    } finally {
+      submitting.current = false;
+    }
+  }
+
+  async function send(part: "answers", body: object) {
+    setPending(true); setError("");
+    try { setState(await readHandoff<DesignState>(path + "/" + part, "POST", body)); }
+    catch (e) { setError(e instanceof Error ? e.message : "Could not save the dashboard design."); }
     finally { setPending(false); }
   }
   const refresh = () => setAttempt(previous => previous + 1);
+  if (session && state) return <section className="db-design" aria-label="Dashboard build">
+    <BuildHandoff key={session.id} session={session} conversationId={conversationId}
+      onRetry={() => void buildNow(session.brief)}
+      onReviewUpdated={() => { setSession(null); setOpen(true); refresh(); }}
+      onStay={() => undefined} />
+    {session.phase.kind === "ready" && session.brief.storage_mode === "memory" && <p className="db-caption">Demo storage · The saved dashboard is available until the server restarts.</p>}
+  </section>;
   if (!state) return <section className="db-design" aria-label="Dashboard design">{error
     ? <><p role="alert">{error}</p><button type="button" className="btn-outline" onClick={refresh}>Reload design</button></>
     : <p role="status">Checking which workbook views can be built…</p>}</section>;
@@ -107,8 +161,8 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
   return <section className="db-design" aria-label="Dashboard design"><div className="db-design-head"><p className="db-label">Dashboard design</p>
     <button type="button" className="db-text-link" disabled={pending} onClick={() => setOpen(false)}>Close design</button></div>
     {state.status === "ready" ? <><h3>Review your dashboard brief</h3><Brief state={state} />
-      <button type="button" className="btn" disabled={pending} onClick={() => void send("build", { version: state.version, review_token: state.review_token })}>
-        {pending ? "Building…" : "Build dashboard"}<Icon name="arrowRight" size={15}/></button></> :
+      <button type="button" className="btn" disabled={pending} onClick={() => void buildNow(state)}>
+        Build dashboard<Icon name="arrowRight" size={15}/></button></> :
       state.question && <><DesignQuestion key={state.question.key} state={state} pending={pending}
         submit={value => void send("answers", { version: state.version, key: state.question!.key, value })}/>
         {state.summary.length > 0 && <details className="db-progress"><summary>What’s in the brief so far</summary><Brief state={state}/></details>}</>}

@@ -17,3 +17,24 @@
 .db-brief{border-left:2px solid var(--line-strong);padding-left:10px}
 .db-brief ul{padding-left:18px;font-size:13px}
 .db-error{color:var(--bad)}
+/* Build hand-off: approved brief → saved dashboard */
+.bh{display:grid;gap:9px;width:100%;min-width:0}
+.bh-head{display:flex;align-items:center;gap:8px}
+.bh-head h3{margin:0;font-size:16px}
+.bh-head h3:focus{outline:none}
+.bh-spinner{width:14px;height:14px;border-radius:50%;border:2px solid var(--line-strong);border-top-color:var(--fg);animation:bh-spin .8s linear infinite;flex:none}
+.bh-done{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--ok-soft);color:var(--ok);flex:none}
+.bh-ready .bh-facts{animation:bh-reveal .35s ease-out}
+.bh-facts{display:grid;gap:6px;margin:0;width:100%}
+.bh-facts div{display:grid;grid-template-columns:minmax(96px,max-content) 1fr;gap:10px}
+.bh-facts dt{font-size:13px;color:var(--kg-dot)}
+.bh-facts dd{margin:0;font-weight:500;min-width:0;overflow-wrap:anywhere}
+.bh-more{font-size:13px;width:100%}
+.bh-more summary{cursor:pointer;padding:6px 0;min-height:32px}
+.bh-details{margin:4px 0;padding-left:18px;display:grid;gap:3px}
+.bh-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px}
+.bh-actions .btn{min-height:44px}
+@keyframes bh-spin{to{transform:rotate(360deg)}}
+@keyframes bh-reveal{from{opacity:.4;transform:translateY(2px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.bh-spinner{animation:none;border-top-color:var(--line-strong)}.bh-ready .bh-facts{animation:none}}
+@media (max-width:480px){.bh-facts div{grid-template-columns:1fr;gap:0}}

@@ -36,3 +36,5 @@
 .sd-row-lookup dl{display:grid;gap:2px;margin:0}
 .sd-row-lookup dl>div{display:flex;gap:10px;flex-wrap:wrap}
 .sd-row-lookup dd{margin:0;color:var(--fg)}
+.sd-header h1:focus{outline:none}
+.sd-receipt{display:grid;gap:6px;padding-bottom:10px;border-bottom:1px solid var(--line)}
