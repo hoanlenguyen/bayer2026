@@ -20,6 +20,15 @@ export interface HandoffPreview {
   source_rows: number[];
 }
 
+export interface MetricSeries {
+  source: string;
+  product: string;
+  market: string;
+  display_mode: "chart" | "table";
+  columns: { id: string; name: string; unit: string; field: string }[];
+  points: { period: string; row: number; value_type: string; values: Record<string, number> }[];
+}
+
 export interface AssignedWork {
   _id: string;
   title: string;
@@ -44,14 +53,16 @@ export interface DecisionHandoff {
   plan_steps: string[];
   intent: {
     measures: string[]; dimensions: string[]; filters: Record<string, string[]>; grain: string | null;
-    unmatched_terms?: string[]; other_markets?: string[]; scope_global?: boolean;
+    unmatched_terms?: string[]; other_markets?: string[]; scope_global?: boolean; migration?: boolean;
   };
   candidate: Candidate | null;
   candidates: Candidate[];
   target_model: { id: string; name: string } | null;
-  evidence: { stage: string; summary: string; sheets: string[]; findings: string[] }[];
+  evidence: { stage: string; summary: string; sheets: string[]; findings: string[];
+    data?: { assets?: { id: string; name: string; recommendation: string; reason: string }[] } }[];
   source_refs: WorkbookRef[];
   preview: HandoffPreview | null;
+  metric_series?: MetricSeries | null;
   employee_report: { report_id: string; view_id: string; url: string; label: string; title?: string; owner?: string; revision?: number } | null;
   estate_assessment?: { decision: string; reason: string } | null;
   owners: { id: string; name: string; role: string }[];

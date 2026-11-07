@@ -101,7 +101,7 @@ export function VerdictCard({ stages, catalog, busy, handoff }: Props) {
         <h2>{title}</h2>
         {reportName && (
           <p className="verdict-subject">
-            <strong>{reportName}</strong>{handoff && reportId && <> <code>{reportId}</code></>}
+            <strong>{reportName}</strong>
             {ownerText && <span className="muted"> · {ownerText}</span>}
           </p>
         )}
@@ -115,10 +115,10 @@ export function VerdictCard({ stages, catalog, busy, handoff }: Props) {
 
       {d.reason && !handoff && <p className="verdict-note">{d.reason}</p>}
 
-      {native && <div className="verdict-actions">
+      {native && !handoff && <div className="verdict-actions">
         <a className="btn" href={native.url} onClick={navigate}>Open matching employee report <Icon name="arrowRight" /></a>
       </div>}
-      {handoff && <RequestHandoff key={`${handoff.conversationId}/${handoff.runId}`} {...handoff} catalog={catalog} nativeOpenedAbove={!!native} onRecheck={onRecheck} />}
+      {handoff && <RequestHandoff key={`${handoff.conversationId}/${handoff.runId}`} {...handoff} catalog={catalog} isNative={!!native} onRecheck={onRecheck} />}
 
       {building && c && !handoff && (
         <p className="muted verdict-note">Closest existing report, which can't be reused: <strong>{c.name}</strong></p>

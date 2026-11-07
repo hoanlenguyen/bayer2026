@@ -17,13 +17,14 @@ from typing import Any, AsyncIterator
 
 from . import actions as act
 from . import catalog as cat
+from .ask_metrics import metric_series
 from .agents import AgentRun, IntentAgent, RelevanceAgent
 from .agents.gate import ConversationGateAgent
 from .agents.intent import sanitize_intent
 from .agents.relevance import EXAMPLES, retry_message
 from .decision import THRESHOLDS, Decision, data_availability, decide, rank_candidates
 from .facts import preview as facts_preview
-from .employee_report_match import native_reuse
+from .employee_report_match import native_reuse, supports_monthly_workbook
 from .classify import tags_for_intent
 from .decider import Decider
 from .vectors import VectorStore, get_embedder, similar_requests, suggest_kpis
@@ -339,6 +340,8 @@ class Pipeline:
         plan = analyse(intent)
         result = plan["result"]
         decision = await native_reuse(self.store, intent, user_turns, plan["decision"]) or plan["decision"]
+        if decision["decision"] == "reuse" and supports_monthly_workbook(user_turns):
+            decision["metric_series"] = metric_series(intent, decision)
         decision["run_id"] = conv["runs"][-1]["id"]
         missing = decision["availability"]["missing_terms"]
 

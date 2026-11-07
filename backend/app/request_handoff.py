@@ -8,11 +8,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import actions, catalog, facts
+from . import actions, catalog
+from .ask_metrics import metric_series, verified_reuse_preview
 from .briefing_routes import Progress, StoreDep, apply_progress
 from .briefings import active_owners
 from .decision import score_asset
 from .employee_report_match import matching_employee_report
+from .report_register import published_revisions
 from .store import Store
 
 router = APIRouter(prefix="/api/conversations/{conversation_id}/runs/{run_id}/handoff")
@@ -81,41 +83,6 @@ def _workbook_refs(asset: dict, model_ids: set[str], kpi_ids: set[str]) -> list[
                 refs.append({"sheet": sheet, "row": index, "id": r[key],
                              "detail": " · ".join(f"{f}: {r[f]}" for f in fields if r.get(f) is not None)})
     return refs
-
-
-def _reuse_preview(intent: dict, decision: dict, asset: dict) -> dict | None:
-    """Verify the saved, request-scoped workbook preview. A native BI visual is never inferred."""
-    saved = decision.get("preview")
-    filters = {k: v for k, v in (intent.get("filters") or {}).items() if v}
-    if (decision.get("decision") != "reuse" or not saved or not asset or not decision["candidate"].get("gates_pass")
-            or intent.get("grain") != "month" or intent.get("unmatched_terms") or intent.get("other_markets")
-            or intent.get("scope_global") or intent.get("migration") or set(filters) != {"product", "market"}
-            or len(filters["product"]) != 1 or len(filters["market"]) != 1
-            or set(intent.get("dimensions") or []) - {"product", "market", "month"}):
-        return None
-    product, market = filters["product"][0], filters["market"][0]
-    product_id = next((pid for pid, p in catalog.CATALOG["products"].items() if p["name"] == product), None)
-    region = catalog.CATALOG["markets"].get(market, {}).get("region")
-    model = catalog.model_by_id(asset["model_id"]) or {}
-    if (not product_id or not region or asset["product_scope"] not in (product, "All Pharma")
-            or asset["market_scope"] not in (market, "Global") or model.get("product_scope") not in (product, "All Pharma")
-            or model.get("region_scope") not in (region, "Global")):
-        return None
-    measures = [catalog.CATALOG["measures"].get(mid, {}) for mid in intent.get("measures", [])]
-    if not measures or any(not m.get("fact_column") or m.get("kpi_id") not in asset["kpis"] for m in measures):
-        return None
-    # Historical numbers stay attributable only if today's pack reproduces the saved values.
-    fresh = facts.preview(intent)
-    if not fresh or any(fresh[k] != saved.get(k) for k in ("month", "previous_month", "by", "columns", "rows")):
-        return None
-    periods = {saved["month"], saved["previous_month"]}
-    source_rows = [i for i, r in enumerate(catalog.SHEETS["product_market_monthly"], 2)
-                   if r["product_id"] == product_id and r["market_id"] == market and r["month"] in periods]
-    if len(source_rows) != 2:
-        return None
-    return {**saved, "source": "Product_Market_Monthly", "source_rows": source_rows,
-            "fields": [m["fact_column"] for m in measures],
-            "description": f"Workbook observations for {product} in {market}. The catalog records these KPIs on {asset['id']}."}
 
 
 def _receipt(conversation_id: str, run: dict, question: str) -> dict[str, Any]:
@@ -189,7 +156,8 @@ def _receipt(conversation_id: str, run: dict, question: str) -> dict[str, Any]:
         "action_title": action_title, "plan_steps": plan, "intent": intent, "candidate": candidate,
         "candidates": (stages.get("discovery", {}).get("data") or {}).get("candidates", []),
         "target_model": model, "rules": decision.get("rules_applied", []), "evidence": evidence, "source_refs": source_refs,
-        "preview": _reuse_preview(intent, decision, asset), "employee_report": native or matching_employee_report(intent),
+        "preview": verified_reuse_preview(intent, decision, asset), "employee_report": native or matching_employee_report(intent),
+        "metric_series": decision.get("metric_series"),
         "estate_assessment": decision.get("estate_assessment"), "change_type": decision.get("change_type"),
         "handoff_verdict": verdict, "current_review": None,
         "suggested_owner_id": target_owner, "flags": decision.get("flags", []), "replaces": decision.get("replaces", []),
@@ -212,7 +180,7 @@ def _check_current_reuse(receipt: dict) -> dict:
     return {**receipt, "handoff_verdict": "review", "action_title": f"Verify the saved reuse recommendation for {name}",
             "current_review": {"reason": reason, "scope_evidence": current.scope_evidence if current else None},
             "plan_steps": [reason, "Ask the report owner to confirm the source and coverage before arranging access."],
-            "preview": None}
+            "preview": None, "metric_series": None}
 
 
 def _actor(owners: dict) -> dict:
@@ -222,11 +190,28 @@ def _actor(owners: dict) -> dict:
     return actor
 
 
+async def _validated_receipt(store: Store, conversation_id: str, run: dict, question: str, assigned: dict | None = None) -> dict:
+    receipt = _check_current_reuse(assigned["request_snapshot"]) if assigned else _receipt(conversation_id, run, question)
+    frozen = receipt.get("metric_series")
+    if not frozen:
+        return receipt  # Never add a trend to a run or assignment that did not capture it.
+    saved = next((e.get("data") or {} for e in reversed(run["events"])
+                  if e.get("stage") == "decision" and e.get("status") == "done"), {})
+    if frozen != saved.get("metric_series") or frozen != metric_series(receipt["intent"], saved):
+        return {**receipt, "metric_series": None}
+    native = saved.get("employee_report")
+    if native:
+        current = (await published_revisions(store)).get(native["report_id"], {})
+        if native.get("revision") != current.get("revision", 0) or frozen["display_mode"] != (current.get("display_mode") or "chart"):
+            return {**receipt, "metric_series": None}
+    return receipt
+
+
 @router.get("")
 async def read_handoff(conversation_id: str, run_id: str, store: StoreDep) -> dict:
     run, question = await _saved_run(store, conversation_id, run_id)
     existing = await store.get_artifact("actions", _action_id(conversation_id, run_id))
-    receipt = _check_current_reuse(existing["request_snapshot"]) if existing else _receipt(conversation_id, run, question)
+    receipt = await _validated_receipt(store, conversation_id, run, question, existing)
     owners = active_owners()
     other = await store.list_run_actions(conversation_id, run_id)
     keys = ("_id", "title", "kind", "owner", "owner_id", "status", "due_date", "asset_id", "run_id")
@@ -256,7 +241,7 @@ async def assign(conversation_id: str, run_id: str, body: Assignment, store: Sto
         if not owner:
             raise HTTPException(422, "Select an active workbook owner.")
         actor = _actor(owners)
-        snapshot = _receipt(conversation_id, run, question)
+        snapshot = await _validated_receipt(store, conversation_id, run, question)
         candidate = snapshot["candidate"] if snapshot["verdict"] not in NO_ASSET else None
         native = snapshot["employee_report"] if snapshot["change_type"] == "employee_report_reuse" else None
         target_id = native["report_id"] if native else (candidate or {}).get("asset_id")

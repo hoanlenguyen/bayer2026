@@ -40,8 +40,12 @@ def matching_employee_report(intent: dict) -> dict | None:
     return None
 
 
+def supports_monthly_workbook(user_turns: list[str]) -> bool:
+    return not any(_SPECIAL_REQUIREMENT.search(_DECISION_TIMING.sub("", turn)) for turn in user_turns)
+
+
 async def native_reuse(store, intent: dict, user_turns: list[str], estate: dict) -> dict | None:
-    if estate["decision"] != "new_build" or any(_SPECIAL_REQUIREMENT.search(_DECISION_TIMING.sub("", turn)) for turn in user_turns):
+    if estate["decision"] != "new_build" or not supports_monthly_workbook(user_turns):
         return None
     match = matching_employee_report(intent)
     if not match:
@@ -57,7 +61,7 @@ async def native_reuse(store, intent: dict, user_turns: list[str], estate: dict)
         return None
     view = next(v for v in views if v["id"] == match["view_id"])
     report = {**match, "title": view["report"], "owner": owner["name"], "owner_id": owner["id"],
-              "revision": view["revision"], "period": period, "previous_period": previous,
+              "revision": view["revision"], "display_mode": view["display_mode"], "period": period, "previous_period": previous,
               "kpi_id": view["kpi_id"], "evidence": view["evidence"]}
     reason = (f"Open {report['title']} for {view['title'].lower()} in Nubeqa, Germany. "
               f"The employee report uses {view['kpi_id']}, has an active owner and shows monthly data through {period}.")

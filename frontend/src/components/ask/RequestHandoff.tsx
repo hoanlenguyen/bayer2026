@@ -3,6 +3,7 @@ import { handoffPath, readHandoff, type AssignedWork, type DecisionHandoff, type
 import type { CatalogMeta } from "../../api/types";
 import { navigate } from "../../lib/navigation";
 import { Icon } from "../Icon";
+import { DecisionDashboard } from "./DecisionDashboard";
 import "./request-handoff.css";
 
 const labelDate = (date: string) => new Date(date.slice(0, 10) + "T00:00:00Z").toLocaleDateString("en-GB", {
@@ -46,12 +47,15 @@ function RequestFit({ data, catalog }: { data: DecisionHandoff; catalog: Catalog
       {native && <><dt>Employee view</dt><dd>{native.label} · {native.revision ? `Published revision ${native.revision}` : "Workbook baseline"}</dd></>}
       {missing.length > 0 && <><dt>Missing from report</dt><dd>{missing.join(", ")}</dd></>}
       {!!intent.unmatched_terms?.length && <><dt>Unavailable</dt><dd>{intent.unmatched_terms.join(", ")}</dd></>}
-      {scopeConflict && scopeProof && <>
-        <dt>Report scope</dt><dd>{[scopeProof.asset_product, scopeProof.asset_market].filter(Boolean).join(" · ") || "Unrecorded"}{reference("Analytics_Assets", scopeProof.asset_id)}</dd>
-        <dt>Linked model scope</dt><dd>{[scopeProof.model_product, scopeProof.model_region].filter(Boolean).join(" · ") || "Unrecorded"}{reference("Semantic_Models", scopeProof.model_id)}</dd>
-      </>}
       {blockers.length > 0 && <><dt>Blocks reuse</dt><dd>{blockers.join(" ")}</dd></>}
     </dl>
+    {scopeConflict && scopeProof && <div className="rh-scope-pair" aria-label="Report and model scope conflict">
+      <strong>Source mismatch</strong><dl>
+        <div><dt>Report scope</dt><dd>{[scopeProof.asset_product, scopeProof.asset_market].filter(Boolean).join(" · ") || "Unrecorded"}</dd>
+          <dd>{reference("Analytics_Assets", scopeProof.asset_id)}</dd></div>
+        <div><dt>Linked model scope</dt><dd>{[scopeProof.model_product, scopeProof.model_region].filter(Boolean).join(" · ") || "Unrecorded"}</dd>
+          <dd>{reference("Semantic_Models", scopeProof.model_id)}</dd></div>
+      </dl></div>}
   </section>;
 }
 
@@ -136,8 +140,8 @@ function Assignment({ data, path, completed }: {
     Assign next step <Icon name="arrowRight" size={15}/></button>;
 }
 
-export function RequestHandoff({ conversationId, runId, catalog, nativeOpenedAbove, onRecheck }: {
-  conversationId: string; runId: string; catalog: CatalogMeta | null; nativeOpenedAbove: boolean;
+export function RequestHandoff({ conversationId, runId, catalog, isNative, onRecheck }: {
+  conversationId: string; runId: string; catalog: CatalogMeta | null; isNative: boolean;
   onRecheck: (runId: string, reason: string | null) => void;
 }) {
   const path = handoffPath(conversationId, runId);
@@ -160,17 +164,21 @@ export function RequestHandoff({ conversationId, runId, catalog, nativeOpenedAbo
     : "Loading the saved decision…"}</div>;
   const employee = data.employee_report;
   return <div className="rh" aria-label="Decision handoff">
+    <DecisionDashboard data={data} />
+    {employee && isNative && <div className="rh-native">
+      <a className="btn" href={employee.url} onClick={navigate}>Open matching employee report <Icon name="arrowRight" size={15}/></a></div>}
     {data.current_review && <div className="rh-recheck"><strong>Saved recommendation · Reuse</strong>
       <p>Current catalog check · {data.current_review.reason}</p></div>}
-    <RequestFit data={data} catalog={catalog} />
-    <section className="rh-next"><span className="rh-kicker">{nativeOpenedAbove ? "Optional follow-up" : "Next step"}</span><h3>{data.action_title}</h3>
+    {data.metric_series?.points.length ? <details className="rh-provenance"><summary>How the report fits your request</summary>
+      <RequestFit data={data} catalog={catalog} /></details> : <RequestFit data={data} catalog={catalog} />}
+    <section className="rh-next"><span className="rh-kicker">{isNative ? "Optional follow-up" : "Next step"}</span><h3>{data.action_title}</h3>
       {data.plan_steps[0] && <p>{data.plan_steps[0]}</p>}
       {data.plan_steps.length > 1 && <details className="rh-provenance"><summary>Work to check ({data.plan_steps.length - 1})</summary>
         <ol className="rh-plan">{data.plan_steps.slice(1).map((step, i) => <li key={i}>{step}</li>)}</ol></details>}
       {data.target_model?.id && (data.verdict === "new_build" || data.verdict === "migrate") &&
         <button className="rh-link" type="button" onClick={() => window.dispatchEvent(new CustomEvent("open-entity", { detail: data.target_model!.id }))}>
           Inspect shared model · {data.target_model.name || data.target_model.id}</button>}
-      {employee && !nativeOpenedAbove && <div className="rh-native"><p className="rh-sub">Separate employee workbook report · {employee.label} <code>{employee.report_id}</code></p>
+      {employee && !isNative && <div className="rh-native"><p className="rh-sub">Separate employee workbook report · {employee.label} <code>{employee.report_id}</code></p>
         <a className="btn" href={employee.url} onClick={navigate}>Open matching employee report <Icon name="arrowRight" size={15}/></a></div>}
       {data.preview && <><button type="button" className={data.verdict === "reuse" && !employee ? "btn" : "btn-outline"} aria-expanded={showPreview}
         onClick={() => setShowPreview(open => !open)}>{showPreview ? "Hide workbook preview" : "View workbook preview"}</button>

@@ -108,21 +108,10 @@
 .bf-report-value{display:flex;align-items:center;gap:14px;padding:8px 0 12px;border-bottom:1px solid var(--line)}
 .bf-report-value strong{font-size:clamp(29px,3.4vw,40px);font-weight:550;letter-spacing:-.045em;line-height:1.15}
 .bf-report-value span{font-weight:500}.bf-report-value small{display:block;font-weight:400;color:var(--bf-muted)}
-.bf-monthly{min-width:0}.bf-trend{margin:12px 0 2px}
-.bf-trend svg{display:block;width:100%;height:auto}
-.bf-trend svg text{font:500 12px var(--font-sans);fill:var(--bf-muted)}
-.bf-trend svg polyline{fill:none;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
-.bf-series-line{stroke:var(--accent);stroke-width:2.25}
-.bf-forecast-line{stroke:var(--bf-muted);stroke-width:1.6;stroke-dasharray:4 4}
-.bf-axis-line{stroke:var(--line);stroke-width:1}
-.bf-actual-point,.bf-forecast-point{stroke:var(--accent);stroke-width:1.7;vector-effect:non-scaling-stroke}
-.bf-actual-point{fill:var(--accent)}.bf-forecast-point{fill:var(--bg)}
-.bf-trend figcaption{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;font-size:12px;color:var(--bf-muted)}
-.bf-trend figcaption span{display:inline-flex;align-items:center;gap:5px}
-.bf-key-dot{display:inline-block;width:8px;height:8px;border:1.5px solid var(--accent);border-radius:50%;background:var(--accent)}
-.bf-key-dot.bf-hollow{background:var(--bg)}.bf-key-line{width:18px;border-top:2px dashed var(--bf-muted)}
+.bf-monthly{min-width:0}
 .bf-history-table{width:100%;margin-top:8px;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
 .bf-history-table th,.bf-history-table td{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
-@media(max-width:480px){.bf-trend svg text{font-size:15px}.bf-history-table{font-size:11px}.bf-history-table th,.bf-history-table td{padding:5px 3px}}
+@media(max-width:480px){.bf-history-table{font-size:11px}.bf-history-table th,.bf-history-table td{padding:5px 3px}}
 .bf-dialog:has(.bf-report-detail){max-height:96dvh}
 .bf-report-detail{gap:10px}
+.bf-team-pulse{margin:0 0 24px}

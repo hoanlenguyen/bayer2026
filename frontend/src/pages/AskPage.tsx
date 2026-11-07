@@ -148,8 +148,12 @@ export function AskPage() {
   }, []);
 
   useEffect(() => {
-    // Works in both layouts: the list scrolls on desktop, the page scrolls on narrow screens.
-    listRef.current?.lastElementChild?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    const last = listRef.current?.lastElementChild;
+    if (!last) return;
+    // Open a finished dashboard at its headline. Keep following messages while the request runs.
+    const result = !busy && last.classList.contains("verdict");
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    last.scrollIntoView({ block: result ? "start" : "nearest", behavior: result || reducedMotion ? "instant" : "smooth" });
   }, [messages, busy, stages]);
 
   const handleEvent = useCallback((e: PipelineEvent) => {
