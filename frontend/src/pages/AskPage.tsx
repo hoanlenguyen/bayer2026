@@ -5,6 +5,7 @@ import { FlowPanel, RUNNING_COPY } from "../components/ask/FlowPanel";
 import { TriageStrip } from "../components/ask/TriageStrip";
 import { VerdictCard } from "../components/ask/VerdictCard";
 import { Icon } from "../components/Icon";
+import { addUserMessage, applyEvent, beginQuestion, continueQuestion, findSavedAnswer, finishQuestion, getHistoryEntry, moveToTop, OPEN_ENTRY_EVENT, restartLatestQuestion, takePendingEntry, type QuestionEntry } from "../lib/history";
 
 interface ChatMessage {
   id: number;
@@ -83,6 +84,31 @@ export function AskPage() {
   const [error, setError] = useState<string | null>(null);
   const nextId = useRef(1);
   const listRef = useRef<HTMLDivElement>(null);
+  const entryId = useRef<string | null>(null); // the saved History entry for what is on screen
+  const [savedAt, setSavedAt] = useState<string | null>(null); // set while showing a saved answer rather than a new one
+
+  const showSaved = useCallback((entry: QuestionEntry) => {
+    entryId.current = entry.id;
+    setMessages(entry.result.messages.map((m) => ({ ...m, id: nextId.current++ })));
+    setStages(entry.result.stages);
+    setDecision(entry.result.decision);
+    setError(entry.result.error);
+    setConvId(entry.request.conversation_id);
+    setConvState(entry.status === "needs_answer" ? "clarifying" : entry.status === "awaiting_approval" ? "awaiting_approval" : "idle");
+    setSavedAt(entry.status === "needs_answer" ? null : entry.updated_at); // a follow-up question isn't an answer yet
+  }, []);
+
+  useEffect(() => {
+    // A question picked from History. While an answer is streaming it waits, so the two don't mix.
+    if (busy) return;
+    const open = () => {
+      const entry = takePendingEntry();
+      if (entry) showSaved(entry);
+    };
+    open();
+    window.addEventListener(OPEN_ENTRY_EVENT, open);
+    return () => window.removeEventListener(OPEN_ENTRY_EVENT, open);
+  }, [busy, showSaved]);
 
   useEffect(() => {
     document.title = "Analytics Manager";
@@ -97,6 +123,7 @@ export function AskPage() {
   }, [messages, busy, stages]);
 
   const handleEvent = useCallback((e: PipelineEvent) => {
+    if (entryId.current) applyEvent(entryId.current, e);
     switch (e.type) {
       case "conversation":
         setConvId(e.id);
@@ -120,33 +147,71 @@ export function AskPage() {
   const run = useCallback(async (path: string, body: unknown) => {
     setBusy(true);
     setError(null);
+    setSavedAt(null);
+    const entry = entryId.current;
     try {
       await streamPost(path, body, handleEvent);
       setOffline(false);
+      if (entry) finishQuestion(entry);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
       setOffline(true);
+      if (entry) finishQuestion(entry, message);
     } finally {
       setBusy(false);
     }
   }, [handleEvent]);
 
-  const send = useCallback((text: string, presetId?: string) => {
+  const send = useCallback((text: string, presetId?: string, isSuggestion = false) => {
+    // Asked before, even with a follow-up open: show the saved answer at once, with no call to the backend or the model.
+    // A suggestion chip is always a reply to the follow-up, and a question can't be answered by itself.
+    const saved = isSuggestion ? undefined : findSavedAnswer(text);
+    if (saved && saved.id !== entryId.current) {
+      moveToTop(saved.id);
+      showSaved(saved);
+      return;
+    }
+    if (convState === "clarifying" && entryId.current) {
+      addUserMessage(entryId.current, text); // an answer to a follow-up question continues the same entry
+    } else {
+      if (saved) { // the question already on screen, asked again
+        moveToTop(saved.id);
+        showSaved(saved);
+        return;
+      }
+      // Typed inside an open entry: it continues that entry. Only a fresh start makes a new one.
+      if (entryId.current && getHistoryEntry(entryId.current)) continueQuestion(entryId.current, text);
+      else entryId.current = beginQuestion(text, presetId ?? null);
+    }
     if (convState !== "clarifying") {
       setStages({});
       setDecision(null);
     }
     setMessages((m) => [...m, { id: nextId.current++, role: "user", content: text }]);
     void run("/api/chat", { conversation_id: convId, message: text, preset_id: presetId ?? null });
-  }, [convId, convState, run]);
+  }, [convId, convState, run, showSaved]);
+
+  /** Asks the latest question again, replacing its saved answer in the same entry. */
+  const refresh = () => {
+    const restarted = entryId.current ? restartLatestQuestion(entryId.current) : null;
+    if (!restarted) return;
+    setStages({}); setDecision(null); setConvState("idle");
+    setMessages(restarted.messages.map((m) => ({ ...m, id: nextId.current++ })));
+    void run("/api/chat", { conversation_id: convId, message: restarted.text, preset_id: restarted.presetId });
+  };
 
   const approve = (approved: boolean) => {
     const approver = stages.approval?.data?.approver ?? "Report owner";
-    setMessages((m) => [...m, { id: nextId.current++, role: "user", content: approved ? `Approved as ${approver}` : "Rejected" }]);
+    const said = approved ? `Approved as ${approver}` : "Rejected";
+    if (entryId.current) addUserMessage(entryId.current, said);
+    setMessages((m) => [...m, { id: nextId.current++, role: "user", content: said }]);
     void run("/api/approve", { conversation_id: convId, approved, approver });
   };
 
   const newChat = () => {
+    entryId.current = null;
+    setSavedAt(null);
     setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null);
   };
 
@@ -185,7 +250,11 @@ export function AskPage() {
       <section className="chat" aria-label="Conversation">
         <div className="pane-head">
           <h1>Ask</h1>
-          <button type="button" className="btn-outline" onClick={newChat} disabled={busy}><Icon name="plus" />New question</button>
+          {savedAt && <p className="saved-note">Saved answer from {new Date(savedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</p>}
+          <div className="pane-actions">
+            {savedAt && <button type="button" className="btn-outline" onClick={refresh}>Get a fresh answer</button>}
+            <button type="button" className="btn-outline" onClick={newChat} disabled={busy}><Icon name="plus" />New question</button>
+          </div>
         </div>
         {offlineBanner}
         <div className="messages" ref={listRef} aria-live="polite" aria-busy={busy}>
@@ -194,7 +263,7 @@ export function AskPage() {
               <p><RichText text={m.content} /></p>
               {m.id === lastId && !busy && m.suggestions && m.suggestions.length > 0 && (
                 <div className="chips">
-                  {m.suggestions.map((s) => <button key={s} type="button" onClick={() => send(s)}>{s}</button>)}
+                  {m.suggestions.map((s) => <button key={s} type="button" onClick={() => send(s, undefined, true)}>{s}</button>)}
                 </div>
               )}
             </div>

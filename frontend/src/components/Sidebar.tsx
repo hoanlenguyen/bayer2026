@@ -1,4 +1,5 @@
 import type { MouseEvent } from "react";
+import { moveToTop, openHistoryEntry, useHistoryEntries, type QuestionEntry } from "../lib/history";
 import { Icon } from "./Icon";
 
 export type Page = "ask" | "explorer" | "cala-graph";
@@ -14,6 +15,38 @@ function navigate(e: MouseEvent<HTMLAnchorElement>) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
+/** Reopens a question's saved answer on the Ask page. */
+function openEntry(entry: QuestionEntry, page: Page) {
+  moveToTop(entry.id);
+  openHistoryEntry(entry.id);
+  if (page !== "ask") {
+    history.pushState(null, "", "/#ask");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }
+}
+
+function HistoryList({ page }: { page: Page }) {
+  const entries = useHistoryEntries();
+  return (
+    <section className="side-history" aria-labelledby="side-history-title">
+      <h2 id="side-history-title">History</h2>
+      {entries.length > 0 ? (
+        <ul>
+          {entries.map((entry) => (
+            <li key={entry.id}>
+              <button type="button" title={entry.request.text} onClick={() => openEntry(entry, page)}>
+                <span className="side-history-text">{entry.request.text}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>Your questions will show here.</p>
+      )}
+    </section>
+  );
+}
+
 export function Sidebar({ page }: { page: Page }) {
   return (
     <header className="sidebar">
@@ -26,6 +59,7 @@ export function Sidebar({ page }: { page: Page }) {
         <a href="/#explorer" onClick={navigate} aria-label="Estate Explorer" aria-current={page === "explorer" ? "page" : undefined}><Icon name="estate" /><span><span className="nav-extra">Estate </span>Explorer</span></a>
         <a href="/cala-graph" onClick={navigate} aria-label="Knowledge Graph" aria-current={page === "cala-graph" ? "page" : undefined}><Icon name="graph" /><span><span className="nav-extra">Knowledge </span>Graph</span></a>
       </nav>
+      <HistoryList page={page} />
       <p className="sample-note" title="All data in this app is fictional sample data">
         <span className="sample-tag">Sample data</span>
         <span className="sample-text">Synthetic pharma data.</span>
