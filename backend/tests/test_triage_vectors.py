@@ -225,3 +225,12 @@ def test_base_url_without_protocol_is_ignored():
     assert _base_url("api.openai.com/v1") is None
     assert _base_url('""') is None and _base_url("  ") is None
     assert _base_url("https://my-resource.openai.azure.com/openai/v1") == "https://my-resource.openai.azure.com/openai/v1"
+
+
+def test_llm_client_ignores_bad_base_url_in_environment(monkeypatch):
+    from app import llm as llm_mod
+    monkeypatch.setenv("OPENAI_BASE_URL", "api.openai.com/v1")   # what the SDK would otherwise pick up
+    monkeypatch.setattr(llm_mod, "settings", SimpleNamespace(openai_api_key="sk-test", openai_base_url=None, llm_provider="openai",
+                                                             model_reasoning="r", model_fast="f"))
+    client = llm_mod.LLM(provider="openai").client
+    assert str(client.base_url).startswith("https://api.openai.com/v1")

@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from .settings import settings
+from .settings import DEFAULT_OPENAI_BASE_URL, settings
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +65,10 @@ class LLM:
         if self.provider == "openai" and self.client is None:
             from openai import AsyncOpenAI
 
-            self.client = AsyncOpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url)
+            # Always pass a base URL: with None, the SDK would re-read OPENAI_BASE_URL from the environment
+            # (which .env loading fills), bypassing the validation in settings.
+            self.client = AsyncOpenAI(api_key=settings.openai_api_key,
+                                      base_url=settings.openai_base_url or DEFAULT_OPENAI_BASE_URL)
 
     @property
     def enabled(self) -> bool:

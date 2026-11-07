@@ -12,6 +12,9 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BACKEND_DIR / ".env")
 
 
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+
+
 def _base_url(value: str | None) -> str | None:
     """OPENAI_BASE_URL must be a full URL. A value without http(s):// breaks every request with "Connection error",
     so ignore it (use OpenAI's default endpoint) and say why."""
