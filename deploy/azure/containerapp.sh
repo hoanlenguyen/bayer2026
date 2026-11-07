@@ -6,6 +6,7 @@
 #   bash containerapp.sh update   after a new image was pushed: start a new revision with the latest image
 #   bash containerapp.sh url      print the backend address (BACKEND_URL for the Cloudflare Worker)
 #   bash containerapp.sh logs     follow the backend's console output
+#   bash containerapp.sh jev      add or replace the TypeSafe key (Jev) on an existing app
 #
 # Secrets are read from the keyboard, never written to a file.
 set -euo pipefail
@@ -29,6 +30,7 @@ case "${1:-}" in
     read -rsp "GitHub token with read:packages (for the private image): " GH_TOKEN; echo
     read -rsp "OPENAI_API_KEY (empty = offline mock mode): " OPENAI_API_KEY; echo
     read -rsp "MONGODB_URI (empty = in-memory store): " MONGODB_URI; echo
+    read -rsp "TYPESAFE_API_KEY for Jev (empty = Jev off, GPT and rules decide): " TYPESAFE_API_KEY; echo
 
     az group create -n "$RG" -l "$LOCATION" -o none
     # No Log Analytics workspace: avoids its charges. Live logs still work with `bash containerapp.sh logs`.
@@ -37,6 +39,11 @@ case "${1:-}" in
     secrets=(); envs=(LLM_PROVIDER=auto EMBEDDINGS=auto STAGE_DELAY=0.35 MONGODB_DB=analytics_manager)
     if [ -n "$OPENAI_API_KEY" ]; then secrets+=("openai-api-key=$OPENAI_API_KEY"); envs+=("OPENAI_API_KEY=secretref:openai-api-key"); fi
     if [ -n "$MONGODB_URI" ]; then secrets+=("mongodb-uri=$MONGODB_URI"); envs+=("MONGODB_URI=secretref:mongodb-uri"); fi
+    # Jev runs the simulator's conversation phase whenever the key is set. Ask-flow phases need JEV_PHASES
+    # (relevance,kpis,urgency), set later only after scripts/eval_classification.py passes for them.
+    if [ -n "$TYPESAFE_API_KEY" ]; then
+      secrets+=("typesafe-api-key=$TYPESAFE_API_KEY"); envs+=("TYPESAFE_API_KEY=secretref:typesafe-api-key" "JEV_MODEL=jev-1.14.0")
+    fi
     secret_args=()
     if [ "${#secrets[@]}" -gt 0 ]; then secret_args=(--secrets "${secrets[@]}"); fi
 
@@ -55,7 +62,16 @@ case "${1:-}" in
     az containerapp update -n "$APP" -g "$RG" --image "$IMAGE" --revision-suffix "r$(date +%m%d%H%M)" -o none
     echo "Updated: $(url)"
     ;;
+  jev)
+    read -rsp "TYPESAFE_API_KEY: " TYPESAFE_API_KEY; echo
+    [ -n "$TYPESAFE_API_KEY" ] || { echo "No key entered, nothing changed."; exit 1; }
+    az containerapp secret set -n "$APP" -g "$RG" --secrets "typesafe-api-key=$TYPESAFE_API_KEY" -o none
+    # Changing env vars starts a new revision, so the backend restarts and reads the key.
+    az containerapp update -n "$APP" -g "$RG" -o none \
+      --set-env-vars TYPESAFE_API_KEY=secretref:typesafe-api-key JEV_MODEL=jev-1.14.0
+    echo "Jev key set. Check: $(url)/api/health should show \"jev\": true"
+    ;;
   url)  url ;;
   logs) az containerapp logs show -n "$APP" -g "$RG" --follow --format text ;;
-  *)    echo "usage: bash containerapp.sh create|update|url|logs"; exit 1 ;;
+  *)    echo "usage: bash containerapp.sh create|update|jev|url|logs"; exit 1 ;;
 esac

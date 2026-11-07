@@ -70,7 +70,8 @@ the password.
 bash deploy/azure/containerapp.sh create
 ```
 
-It asks for the GitHub username, the token from step 2, `OPENAI_API_KEY` and `MONGODB_URI` (typing is hidden). It creates the resource
+It asks for the GitHub username, the token from step 2, `OPENAI_API_KEY`, `MONGODB_URI` and, optionally, `TYPESAFE_API_KEY` for Jev
+(typing is hidden; leave a prompt empty to skip it). It creates the resource
 group `analytics-manager-rg` in France Central, a Container Apps environment without paid logging, and the app, then prints the
 backend address, for example `https://analytics-manager-api.<id>.francecentral.azurecontainerapps.io`.
 
@@ -122,6 +123,7 @@ cd ~/bayer2026 && bash deploy/azure/containerapp.sh update
 |---|---|
 | Backend address | `bash deploy/azure/containerapp.sh url` |
 | Live backend logs | `bash deploy/azure/containerapp.sh logs` |
+| Turn Jev on (add or replace the TypeSafe key) | `bash deploy/azure/containerapp.sh jev` |
 | Frontend logs | `npx wrangler tail -c wrangler.free.jsonc` in `deploy/cloudflare` |
 | Delete everything on Azure | `az group delete -n analytics-manager-rg` |
 
