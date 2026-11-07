@@ -1,0 +1,48 @@
+name: Deploy live
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-live
+  cancel-in-progress: false
+
+jobs:
+  credentials:
+    name: Check production branch and credentials
+    runs-on: ubuntu-latest
+    env:
+      HAS_AZURE: ${{ secrets.AZURE_CREDENTIALS != '' }}
+      HAS_CLOUDFLARE_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+      HAS_CLOUDFLARE_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+    steps:
+      - name: Check one-time setup
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::Choose main to deploy production."; exit 1; }
+          missing=()
+          [ "$HAS_AZURE" = true ] || missing+=(AZURE_CREDENTIALS)
+          [ "$HAS_CLOUDFLARE_TOKEN" = true ] || missing+=(CLOUDFLARE_API_TOKEN)
+          [ "$HAS_CLOUDFLARE_ACCOUNT" = true ] || missing+=(CLOUDFLARE_ACCOUNT_ID)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing repository Actions secrets: ${missing[*]}. Complete the one-time setup in docs/DEPLOY_FREE.md."
+            echo "### Deployment blocked: missing ${missing[*]}" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+  backend:
+    name: Deploy Azure and verify its API
+    needs: credentials
+    uses: ./.github/workflows/backend-image.yml
+    secrets: inherit
+
+  frontend:
+    name: Deploy Cloudflare and verify live briefings
+    needs: backend
+    uses: ./.github/workflows/frontend-deploy.yml
+    secrets: inherit
