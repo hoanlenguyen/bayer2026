@@ -10,6 +10,8 @@ An AI workspace for a pharma manufacturing plant. Before anything is built it ch
 - `docs/PROPOSAL.md`: earlier concept write-up
 - Build plan (published page): https://claude.ai/artifact/NWgjoee8m5ZYAYoBkDmYCC
 
+For the team briefing, employee reports, and BI register, see the [review walkthrough](docs/BRIEFINGS_REVIEW.md).
+
 ## Quick start
 
 ```bash

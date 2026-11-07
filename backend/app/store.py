@@ -22,7 +22,7 @@ from .settings import settings
 
 log = logging.getLogger(__name__)
 
-ARTIFACTS = ("intents", "evidence", "specs", "agent_runs", "actions")
+ARTIFACTS = ("intents", "evidence", "specs", "agent_runs", "actions", "briefing_selections")
 # Deleted along with a conversation. Actions stay: a person accepted them, and they outlive the chat that proposed them.
 CONVERSATION_ARTIFACTS = ("intents", "evidence", "specs", "agent_runs")
 CATALOG_MAPS = ("measures", "dimensions", "models", "owners", "workspaces", "products", "markets")
@@ -60,6 +60,21 @@ class MemoryStore:
     # pipeline artifacts
     async def save_artifact(self, kind: str, doc: dict[str, Any]) -> None:
         self.artifacts[kind][doc["_id"]] = copy.deepcopy(doc)
+
+    async def insert_action_once(self, action: dict[str, Any]) -> dict[str, Any]:
+        saved = self.artifacts["actions"].setdefault(action["_id"], copy.deepcopy(action))
+        return copy.deepcopy(saved)
+
+    async def replace_briefing_action(self, action: dict[str, Any], prior_history: list) -> bool:
+        current = self.artifacts["actions"].get(action["_id"])
+        if not current or current["history"] != prior_history:
+            return False
+        self.artifacts["actions"][action["_id"]] = copy.deepcopy(action)
+        return True
+
+    async def list_briefing_actions(self, team: str, limit: int) -> list[dict[str, Any]]:
+        items = [a for a in self.artifacts["actions"].values() if a.get("briefing_snapshot", {}).get("team") == team]
+        return copy.deepcopy(sorted(items, key=lambda a: (a["created_at"], a["_id"]), reverse=True)[:limit])
 
     async def update_artifact(self, kind: str, doc_id: str, fields: dict[str, Any]) -> None:
         if doc_id in self.artifacts[kind]:
@@ -152,6 +167,20 @@ class MongoStore:
     # pipeline artifacts
     async def save_artifact(self, kind: str, doc: dict[str, Any]) -> None:
         await self.db[kind].replace_one({"_id": doc["_id"]}, doc, upsert=True)
+
+    async def insert_action_once(self, action: dict[str, Any]) -> dict[str, Any]:
+        from pymongo import ReturnDocument
+
+        return await self.db["actions"].find_one_and_update(
+            {"_id": action["_id"]}, {"$setOnInsert": action}, upsert=True, return_document=ReturnDocument.AFTER)
+
+    async def replace_briefing_action(self, action: dict[str, Any], prior_history: list) -> bool:
+        result = await self.db["actions"].replace_one({"_id": action["_id"], "history": prior_history}, action)
+        return bool(result.matched_count)
+
+    async def list_briefing_actions(self, team: str, limit: int) -> list[dict[str, Any]]:
+        cursor = self.db["actions"].find({"briefing_snapshot.team": team}).sort([("created_at", -1), ("_id", -1)])
+        return [a async for a in cursor.limit(limit)]
 
     async def update_artifact(self, kind: str, doc_id: str, fields: dict[str, Any]) -> None:
         await self.db[kind].update_one({"_id": doc_id}, {"$set": fields})

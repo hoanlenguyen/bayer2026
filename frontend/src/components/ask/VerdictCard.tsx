@@ -2,6 +2,7 @@ import type { Candidate, CatalogMeta, StageEvent, StageId } from "../../api/type
 import { Icon } from "../Icon";
 import { RUNNING_COPY } from "./FlowPanel";
 import { RecommendationChip } from "./RecommendationChip";
+import { navigate } from "../../lib/navigation";
 
 interface Props {
   stages: Partial<Record<StageId, StageEvent>>;
@@ -149,6 +150,7 @@ export function VerdictCard({ stages, catalog, busy }: Props) {
           <button type="button" className="btn" onClick={() => openEntity(reportId)}>
             View in Estate Explorer<Icon name="arrowRight" />
           </button>
+          <a className="btn btn-outline" href={`/briefings?report=${encodeURIComponent(reportId)}`} onClick={navigate}>Open BI register record</a>
         </div>
       )}
     </article>
