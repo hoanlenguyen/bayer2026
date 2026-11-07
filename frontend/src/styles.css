@@ -648,7 +648,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .flow-tags { margin-top: 6px; }
 .flow-tags .triage-tag { font-size: 11px; padding: 2px 8px; }
 
-/* Landing page (/index): one screen, no sidebar */
+/* Landing page (/introduction): one screen, no sidebar */
 .app[hidden] { display: none; }
 .landing { height: 100dvh; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 16px; padding: 24px var(--pad-x) 10px; box-sizing: border-box; background: var(--bg); color: var(--fg); }
 .landing-logo { display: block; height: 130px; width: auto; margin: 0 0 40px -8px; } /* the image has a little space on its left */

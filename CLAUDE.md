@@ -85,6 +85,7 @@ frontend/  React + TypeScript + Vite
              loaded from GET /api/graph (live plant catalog, same governance scoring as the Ask flow)
   /cala-graph  Knowledge graph: full-screen 3D canvas (path route, "Knowledge Graph" in the sidebar), loaded from
              GET /api/graph and grouped by domain (workspace) using the catalog's own links
+  /introduction  Landing page, no sidebar (logo, the problems AnalytIQ solves, live knowledge graph); /index redirects here
   /simulator   Conversation simulation (see Rules above)
   /bi-estate   BI Portfolio: the BI department head's tracker of every reporting asset (see BI Portfolio below);
              /bi-estate/<id> details (?tab=governance&finding=<code>), /bi-estate/compare/<a>/<b> comparison and owner review,

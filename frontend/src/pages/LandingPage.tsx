@@ -17,7 +17,7 @@ const PROBLEMS: { title: string; text: string; solution: string }[] = [
     solution: "Every recommendation shows its scores, the rules applied and the evidence, so each decision can be traced." },
 ];
 
-/** One-screen landing page at /index: text on the left, the live knowledge graph on the right. No sidebar. */
+/** One-screen landing page at /introduction: text on the left, the live knowledge graph on the right. No sidebar. */
 export function LandingPage() {
   const [graph, setGraph] = useState<GraphPayload | null>(null);
   const [failed, setFailed] = useState(false);

@@ -15,7 +15,11 @@ const WorkbookViewPage = lazy(() => import("./pages/SavedDashboardPage").then(({
 type Route = { page: Page; ids: string[] };
 const routeFromLocation = (): Route => {
   const path = window.location.pathname.replace(/\/+$/, "");
-  if (path === "/index") return { page: "landing", ids: [] };
+  if (path === "/introduction") return { page: "landing", ids: [] };
+  if (path === "/index") {  // the earlier address: keep old links working, show the new one
+    history.replaceState(history.state, "", "/introduction" + window.location.search);
+    return { page: "landing", ids: [] };
+  }
   const dashboard = /^\/dashboards\/([\w-]+)$/.exec(path);
   if (dashboard) return { page: "dashboard", ids: [dashboard[1]] };
   const workbook = /^\/workbook-view\/([\w-]+)\/([\w-]+)$/.exec(path);
