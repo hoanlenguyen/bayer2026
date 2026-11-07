@@ -1,0 +1,5 @@
+.pulse-picks{display:flex;align-items:center;flex-wrap:wrap;gap:5px}
+.pulse-picks button{appearance:none;margin:0;border:1px solid #507579;border-radius:999px;padding:5px 11px;background:transparent;color:#dbedeb;font:500 12px/1.35 var(--font-sans);cursor:pointer;text-align:left}
+.pulse-picks button:hover{background:#24494b}
+.pulse-picks button[aria-pressed=true]{background:#c9f3e5;border-color:#c9f3e5;color:#103a37}
+.pulse-picks button:focus-visible{outline:2px solid #fff;outline-offset:2px}

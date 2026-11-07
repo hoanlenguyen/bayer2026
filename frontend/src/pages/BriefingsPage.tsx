@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { briefingRequest, completeAction, type Briefing, type FollowUp, type Team, type ViewId } from "../api/briefings";
 import { Icon } from "../components/Icon";
+import { PulseDashboard } from "../components/PulseDashboard";
 import { MonthlyHistory } from "./BriefingHistory";
 import { amount, comparison, month } from "../lib/briefingFormat";
 import { ReportCard, SnapshotEvidence, WorkbookEvidence } from "./BriefingReports";
@@ -38,9 +39,9 @@ function Modal({ title, meeting, busy, onClose, children }: {
   </dialog>;
 }
 
-function TeamBriefing({ team, onRegister }: { team: Team; onRegister: (reportId: string) => void }) {
+function TeamBriefing({ team, initialView, onRegister }: { team: Team; initialView?: ViewId; onRegister: (reportId: string) => void }) {
   const [data, setData] = useState<Briefing | null>(null);
-  const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [overlay, setOverlay] = useState<Overlay | null>(() => initialView ? { kind: "report", viewId: initialView } : null);
   const [loadError, setLoadError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [error, setError] = useState("");
@@ -100,6 +101,10 @@ function TeamBriefing({ team, onRegister }: { team: Team; onRegister: (reportId:
 
   const scope = `${brief.product} in ${brief.market}`;
   const meeting = overlay?.kind === "meeting";
+  const trends = pinned.flatMap(view => view.display_mode === "chart" && view.history?.points.length
+    ? [{ id: view.id, title: view.title, unit: view.unit, points: view.history.points }] : []);
+  const pulse = trends.length > 0 && <PulseDashboard scope={scope} source="Product_Market_Monthly"
+    preferred={team === "supply" ? "otif" : "sales"} metrics={trends} compact={meeting} />;
   const cards = (wall: boolean) => <div className={`bf-grid bf-grid-${pinned.length}`}>{pinned.map((view, index) =>
     <ReportCard key={view.id} periods={brief} view={view} index={index} onOpen={wall ? undefined : () => open({ kind: "report", viewId: view.id })} />)}</div>;
   const heading = <div className="bf-intro">
@@ -115,6 +120,7 @@ function TeamBriefing({ team, onRegister }: { team: Team; onRegister: (reportId:
     <div className="bf-intro-row">{heading}<button type="button" className="bf-btn" onClick={() => open({ kind: "meeting" })}>
       <Icon name="panel" size={15} /> Meeting mode</button></div>
     {notice && <p role="status" className="bf-notice"><Icon name="check" size={15} /> {notice}</p>}
+    {!meeting && pulse && <div className="bf-team-pulse">{pulse}</div>}
     <div className="bf-section-head"><div><h2>Reports in this briefing</h2>
       <p>{pinned.length} pinned {pinned.length === 1 ? "view" : "views"} · Compared with {month(brief.previous_period)}</p></div>
       <button type="button" className="bf-btn" onClick={() => { setSelected([...brief.selected_view_ids]); open({ kind: "choose" }); }}>Choose reports</button></div>
@@ -144,7 +150,7 @@ function TeamBriefing({ team, onRegister }: { team: Team; onRegister: (reportId:
       {error && <p className="bf-error" role="alert">{error} <button type="button" className="bf-text-btn" onClick={() => {
         setOverlay(null); setData(null); setAttempt(n => n + 1);
       }}>Reload briefing</button></p>}
-      {meeting && <div className="bf-wall">{heading}{cards(true)}
+      {meeting && <div className="bf-wall">{heading}{pulse}{cards(true)}
         <div className="bf-wall-agenda"><span className="bf-kicker">{meetingAction ? "Open follow-up" : "Meeting agenda"}</span><h2>{meetingAction?.title ?? brief.suggested_action}</h2>
         <p>{meetingAction ? `${meetingAction.owner} · Due ${meetingAction.due_date} · ${meetingAction.status.replaceAll("_", " ")}` : "Proposed for discussion"}</p>
         {activeActions.length > 1 && <p>{activeActions.length - 1} more open {activeActions.length === 2 ? "follow-up" : "follow-ups"} for {teamLabel[team]}</p>}</div>
@@ -161,12 +167,13 @@ function TeamBriefing({ team, onRegister }: { team: Team; onRegister: (reportId:
           {busy ? "Saving…" : "Save selection"}</button></div>
       </>}
       {overlay.kind === "report" && activeView && <div className="bf-report-detail">
-        <p className="bf-kicker">Employee report · {activeView.report_id} · {activeView.revision ? `Revision ${activeView.revision}` : "Workbook baseline"}</p>
         <p className="bf-dialog-copy">{scope} · {month(brief.period)} · Synthetic workbook</p>
-        <div className="bf-report-value"><strong>{amount(activeView.current, activeView.unit)}</strong>
-          <span>{activeView.title}<small>{comparison(activeView, brief.previous_period)}</small></span></div>
+        {(activeView.display_mode === "table" || !activeView.history?.points.length) && <div className="bf-report-value"><strong>{amount(activeView.current, activeView.unit)}</strong>
+          <span>{activeView.title}<small>{comparison(activeView, brief.previous_period)}</small></span></div>}
         <MonthlyHistory view={activeView} />
-        <h3>Source and filters</h3><WorkbookEvidence evidence={activeView.evidence} />
+        <details className="bf-disclosure"><summary>Source and filters</summary>
+          <p className="bf-origin">Employee report · {activeView.report_id} · {activeView.revision ? `Revision ${activeView.revision}` : "Workbook baseline"}</p>
+          <WorkbookEvidence evidence={activeView.evidence} /></details>
         <div className="bf-dialog-foot"><button type="button" className="bf-text-btn" onClick={() => onRegister(activeView.report_id)}>View in BI register</button>
           <button type="button" className="bf-btn bf-primary" onClick={() => open(current
             ? { kind: "action", action: current }
@@ -201,19 +208,24 @@ function TeamBriefing({ team, onRegister }: { team: Team; onRegister: (reportId:
 }
 
 export function BriefingsPage() {
-  const [team, setTeam] = useState<Team>("commercial");
+  const [initialView, setInitialView] = useState<ViewId | undefined>(() => {
+    const id = new URLSearchParams(window.location.search).get("view");
+    return id === "sales" || id === "shipments" || id === "otif" ? id : undefined;
+  });
+  const [team, setTeam] = useState<Team>(initialView === "otif" ? "supply" : "commercial");
   const [reportId, setReportId] = useState(() => new URLSearchParams(window.location.search).get("report") || undefined);
   const [register, setRegister] = useState(Boolean(reportId));
   return <main className="bf-page">
     <nav className="bf-tabs" aria-label="Briefings workspace">
       <button type="button" aria-current={!register ? "page" : undefined} onClick={() => setRegister(false)}>Team briefings</button>
-      <button type="button" aria-current={register ? "page" : undefined} onClick={() => { setReportId(undefined); setRegister(true); }}>BI report register</button>
+      <button type="button" aria-current={register ? "page" : undefined} onClick={() => { setInitialView(undefined); setReportId(undefined); setRegister(true); }}>BI report register</button>
     </nav>
     {register ? <ReportRegister initialReportId={reportId} /> : <div className="bf-body">
       <div className="bf-toolbar"><div className="bf-teams" role="group" aria-label="Briefing team">{(["commercial", "supply"] as const).map(t =>
-        <button type="button" key={t} aria-pressed={team === t} onClick={() => setTeam(t)}>{teamLabel[t]}</button>)}</div>
+        <button type="button" key={t} aria-pressed={team === t} onClick={() => { setInitialView(undefined); setTeam(t); }}>{teamLabel[t]}</button>)}</div>
         <span className="bf-sample">Synthetic workbook</span></div>
-      <TeamBriefing key={team} team={team} onRegister={id => { setReportId(id); setRegister(true); }} />
+      <TeamBriefing key={team} team={team} initialView={initialView}
+        onRegister={id => { setInitialView(undefined); setReportId(id); setRegister(true); }} />
     </div>}
   </main>;
 }

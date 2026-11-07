@@ -15,6 +15,7 @@ from .fakes import ScriptedJev, ScriptedOpenAI
 from .helpers import sse
 
 EYLEA = "How are Eylea net sales and digital engagement developing in Japan?"
+LYNKUET = "Show monthly inventory coverage and OTIF for Lynkuet in Spain."
 SUPPLY = "We need a monthly supply-risk dashboard by medicine and country."
 
 
@@ -98,7 +99,7 @@ async def test_off_topic_and_business_talk_never_search(monkeypatch):
 
 
 async def test_reuse_says_where_and_who():
-    evs = await events(pipeline([probs(0.95)]), EYLEA)
+    evs = await events(pipeline([probs(0.95)]), LYNKUET)
     assert [e["type"] for e in evs] == ["gate", "searching", "reply", "done"]
     reply = by_type(evs, "reply")
     asset = cat.asset_by_id(reply["report"]["id"])
@@ -108,7 +109,7 @@ async def test_reuse_says_where_and_who():
 
 
 async def test_repair_is_never_called_ready():
-    evs = await events(pipeline([probs(0.95)]), "Show Xarelto on-time-in-full and market access coverage for Mexico.")
+    evs = await events(pipeline([probs(0.95)]), "Show the digital engagement index for Hyrnuo in Italy.")
     reply = by_type(evs, "reply")
     assert reply["decision"] == "repair"
     assert "Repair it" in reply["text"] and "already exists" not in reply["text"]
@@ -136,7 +137,7 @@ async def test_vague_request_keeps_quiet_until_details_arrive():
     history.append({"speaker": "B", "text": "Sounds good", "label": "off_topic"})
     # business talk completes it: checked although Jev did not call it a request
     reply = by_type(await events(p, "Eylea net sales and digital engagement in Japan", history, "B"), "reply")
-    assert reply["decision"] == "reuse"
+    assert reply["decision"] == "review"
     assert p.decider.client.requests[2]["state"]["pending_request"] == vague
 
 
@@ -188,7 +189,7 @@ def test_thread_keeps_the_newest_words():
 async def test_request_across_two_sentences():
     history = [{"speaker": "A", "text": "Eylea net sales and digital engagement in Japan look strong", "label": "business_talk"}]
     reply = by_type(await events(pipeline([probs(0.95)]), "Can we get a dashboard for that?", history, "B"), "reply")
-    assert reply["decision"] == "reuse"
+    assert reply["decision"] == "review"
 
 
 # ---------------------------------------------------------------- safety
@@ -229,7 +230,7 @@ def test_api_streams_a_turn_and_rejects_bad_input():
 
 
 async def test_answer_carries_the_same_evidence_as_ask():
-    reply = by_type(await events(pipeline([probs(0.95)]), EYLEA), "reply")
+    reply = by_type(await events(pipeline([probs(0.95)]), LYNKUET), "reply")
     stages = {s["stage"]: s for s in reply["stages"]}
     assert list(stages)[:7] == ["intent", "kpis", "discovery", "lineage", "governance", "migration", "decision"]
     assert stages["decision"]["data"]["decision"] == "reuse" and stages["decision"]["data"]["candidate"]

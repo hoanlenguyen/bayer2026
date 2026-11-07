@@ -101,7 +101,7 @@ def rule_verdict(text: str, answering: bool = False, pending: str | None = None)
             return "accept", "Gives a time frame"
         return "not_enough", "Does not say when it is needed"
     has_scope = bool(match_filters(text) or other_markets(text))
-    if pending == "scope":
+    if pending in {"scope", "dashboard_scope"}:
         if has_scope or _WHOLE_SCOPE.search(text):
             return "accept", "Names the products or markets"
         return "not_enough", "Does not name products or markets in the catalog"
@@ -111,6 +111,8 @@ def rule_verdict(text: str, answering: bool = False, pending: str | None = None)
         return "accept", "Names a product or market"
     if _is_gibberish(words):
         return "meaningless", "Looks like random letters"
+    if pending == "dashboard_measures" and len(words) <= 12 and not re.search(r"\b(?:maybe|unsure|don['’]?t know|not sure)\b", text, re.I):
+        return "accept", "Names a measure for the dashboard catalogue check"
     if answering:
         return "not_enough", "Does not answer the question"
     return "off_topic", "No business words found"
@@ -137,6 +139,8 @@ class RelevanceAgent(Agent):
         # Certain either way, so no model call: a suggestion we offered, or a message with no words at all.
         if _is_suggestion(ctx["text"], ctx.get("suggestions") or []):
             step, output = Step("rule", "Picked one of the suggestions", "accept"), {"verdict": "accept", "reason": "Picked a suggestion"}
+        elif ctx.get("pending") == "dashboard_period" and re.search(r"\b(?:20\d{2}|q[1-4]|months?|january|february|march|april|may|june|july|august|september|october|november|december)\b", ctx["text"], re.I):
+            step, output = Step("rule", "Check the reporting period", "validate against workbook months"), {"verdict": "accept", "reason": "Gives a reporting period"}
         elif not _words(ctx["text"]):
             step, output = Step("rule", "Message has no words", "meaningless"), {"verdict": "meaningless", "reason": "No words in the message"}
         else:

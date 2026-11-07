@@ -7,20 +7,26 @@ import { SimulatorPage } from "./pages/SimulatorPage";
 
 const BriefingsPage = lazy(() => import("./pages/BriefingsPage").then(({ BriefingsPage }) => ({ default: BriefingsPage })));
 
-const pageFromLocation = (): Page => {
+const SavedDashboardPage = lazy(() => import("./pages/SavedDashboardPage").then(({ SavedDashboardPage }) => ({ default: SavedDashboardPage })));
+const WorkbookViewPage = lazy(() => import("./pages/SavedDashboardPage").then(({ WorkbookViewPage }) => ({ default: WorkbookViewPage })));
+
+type Route = { page: Page; ids: string[] };
+const routeFromLocation = (): Route => {
   const path = window.location.pathname.replace(/\/+$/, "");
-  if (path === "/cala-graph") return "cala-graph";
-  if (path === "/simulator") return "simulator";
-  if (path === "/briefings") return "briefings";
-  return window.location.hash.startsWith("#explorer") ? "explorer" : "ask";
+  const dashboard = /^\/dashboards\/([\w-]+)$/.exec(path);
+  if (dashboard) return { page: "dashboard", ids: [dashboard[1]] };
+  const workbook = /^\/workbook-view\/([\w-]+)\/([\w-]+)$/.exec(path);
+  if (workbook) return { page: "workbook", ids: [workbook[1], workbook[2]] };
+  if (path === "/cala-graph" || path === "/simulator" || path === "/briefings") return { page: path.slice(1) as Page, ids: [] };
+  return { page: window.location.hash.startsWith("#explorer") ? "explorer" : "ask", ids: [] };
 };
 
 export default function App() {
-  const [page, setPage] = useState<Page>(pageFromLocation);
+  const [{ page, ids }, setRoute] = useState<Route>(routeFromLocation);
   const [focusRequest, setFocusRequest] = useState<string | null>(null);
 
   useEffect(() => {
-    const onNavigate = () => setPage(pageFromLocation());
+    const onNavigate = () => setRoute(routeFromLocation());
     // Other pages can ask to open an entity: window.dispatchEvent(new CustomEvent("open-entity", { detail: id }))
     const onOpen = (e: Event) => {
       setFocusRequest((e as CustomEvent<string>).detail);
@@ -42,7 +48,6 @@ export default function App() {
     if (page === "simulator") document.title = "Conversation simulation · Analytics Manager";
     if (page === "briefings") document.title = "Team briefings · Analytics Manager";
   }, [page]);
-  console.log('clg')
   return (
     <div className={`app app-${page}`}>
       <Sidebar page={page} />
@@ -52,6 +57,10 @@ export default function App() {
         <div hidden={page !== "simulator"}><SimulatorPage /></div>
         {page === "explorer" && <ExplorerPage focusRequest={focusRequest} />}
         {page === "cala-graph" && <CalaGraphPage />}
+        {page === "dashboard" && <Suspense fallback={<main aria-busy="true">Opening saved dashboard…</main>}>
+          <SavedDashboardPage key={ids[0]} id={ids[0]}/></Suspense>}
+        {page === "workbook" && <Suspense fallback={<main aria-busy="true">Opening verified workbook view…</main>}>
+          <WorkbookViewPage key={ids.join("/")} conversationId={ids[0]} runId={ids[1]}/></Suspense>}
         {page === "briefings" && <Suspense fallback={<main className="page" aria-busy="true">Loading team briefings…</main>}><BriefingsPage /></Suspense>}
       </div>
     </div>

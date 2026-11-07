@@ -174,9 +174,10 @@ class LLM:
 
 
 EXPLAIN_SYSTEM = """You explain an analytics recommendation to a non-technical employee in 2-3 short sentences.
-The recommendation is one of reuse, consolidation, migration, retirement, human review or new build. Name the report in **bold**.
-This system only recommends: it builds, changes and retires nothing, so never say a report was drafted or will be built
-by you, and never ask for approval. Say what the team could do next. Plain language, no jargon, no dashes as punctuation."""
+Name a matching report in **bold** when present. This step assesses the imported catalogue. For an eligible new build,
+Ask lets the employee review their brief and use Build dashboard to open a saved workbook dashboard. If a matching one
+already exists, it can be reopened. Keep supplied scope or data gaps visible. A recommendation alone has not performed
+the action. Describe owner review for repair, migration or retirement. Use plain language."""
 
 
 async def explain(llm: LLM, payload: dict[str, Any]) -> str:

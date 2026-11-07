@@ -3,8 +3,8 @@
 Flow: parse the request (intent agent) → resolve KPIs → find analytics → trace lineage → check trust → Tableau
         → recommend: reuse, consolidation, migration, retirement or new build, with its evidence
 
-The system only recommends. It builds, changes and retires nothing, and no approval step exists: people act on the
-recommendation themselves. Agents propose; Python verifies and decides. Every stage emits ``stage`` events
+The assessment records a recommendation. The dashboard builder can then use the reviewed brief to create a
+workbook-backed view. Agents propose and Python verifies. Every stage emits ``stage`` events
 (running / waiting / done) with a payload for the UI, and every agent run, intent and recommendation is saved for audit.
 """
 from __future__ import annotations
@@ -17,12 +17,14 @@ from typing import Any, AsyncIterator
 
 from . import actions as act
 from . import catalog as cat
+from .ask_metrics import metric_series
 from .agents import AgentRun, IntentAgent, RelevanceAgent
 from .agents.gate import ConversationGateAgent
 from .agents.intent import sanitize_intent
 from .agents.relevance import EXAMPLES, retry_message
 from .decision import THRESHOLDS, Decision, data_availability, decide, rank_candidates
 from .facts import preview as facts_preview
+from .employee_report_match import native_reuse, supports_monthly_workbook
 from .classify import tags_for_intent
 from .decider import Decider
 from .vectors import VectorStore, get_embedder, similar_requests, suggest_kpis
@@ -41,7 +43,7 @@ STAGES = {
     "migration": "Handle Tableau to Power BI",
     "decision": "Recommend what to do",
     "actions": "Suggest follow-up work",
-    "deliver": "Open the existing report",
+    "deliver": "Show the matched catalogue record",
 }
 
 Event = dict[str, Any]
@@ -305,7 +307,7 @@ class Pipeline:
                 conv["asked"] += 1
                 conv["state"] = "clarifying"
                 tri = await self._triage(conv, None)
-                yield self._stage(conv, "intent", "waiting", f"Question {conv['asked']} of up to 2",
+                yield self._stage(conv, "intent", "waiting", f"Clarifying question {conv['asked']}",
                                   {**public(intent), "triage": tri, "agent": agent_run.trace(),
                                    **({"classification": classification(intent)} if intent["measures"] else {})})
                 yield self._say(conv, result["question"], kind="question", suggestions=result.get("suggestions", []))
@@ -326,17 +328,21 @@ class Pipeline:
                                                                  "classification": classification(intent), "agent": agent_run.trace()})
             await self._pause()
 
-            async for ev in self._plan(conv):
+            async for ev in self._plan(conv, [m["content"] for m in transcript if m["role"] == "user"]):
                 yield ev
         finally:
             if conv["runs"]:  # a chat that only ever held rejected messages stays out of the history
                 await self._save(conv)
 
     # ------------------------------------------------------------ the analysis steps → recommendation
-    async def _plan(self, conv: dict[str, Any]) -> AsyncIterator[Event]:
+    async def _plan(self, conv: dict[str, Any], user_turns: list[str]) -> AsyncIterator[Event]:
         intent = conv["intent"]
         plan = analyse(intent)
-        result, tags, decision = plan["result"], plan["tags"], plan["decision"]
+        result = plan["result"]
+        decision = await native_reuse(self.store, intent, user_turns, plan["decision"]) or plan["decision"]
+        if decision["decision"] == "reuse" and supports_monthly_workbook(user_turns):
+            decision["metric_series"] = metric_series(intent, decision)
+        decision["run_id"] = conv["runs"][-1]["id"]
         missing = decision["availability"]["missing_terms"]
 
         # ---- 2 to 6: KPI_Catalog, Analytics_Assets, Semantic_Models, Governance_Signals, Migration_Backlog
@@ -351,12 +357,16 @@ class Pipeline:
         # Intent is clear and a recommendation is made: the request is triaged.
         decision["triage"] = await self._triage(conv, "triaged")
         conv["plan"] = {"decision": decision}
-        await self._artifact(conv, "evidence", {"recommendation": tags["recommendation"]})
-        yield self._stage(conv, "decision", "done", tags["recommendation"]["label"], decision)
-        with usage_scope() as used:
-            explanation = await explain(self.llm, {"decision": decision, "intent": public(intent),
-                                                   "missing_text": ("Missing: " + ", ".join(missing) + ".") if missing else ""})
-        self._count_tokens(conv, used)
+        await self._artifact(conv, "evidence", {"recommendation": decision["recommendation"]})
+        yield self._stage(conv, "decision", "done", decision["recommendation"]["label"], decision)
+        employee = decision.get("employee_report")
+        if employee:
+            explanation = decision["reason"]
+        else:
+            with usage_scope() as used:
+                explanation = await explain(self.llm, {"decision": decision, "intent": public(intent),
+                                                       "missing_text": ("Missing: " + ", ".join(missing) + ".") if missing else ""})
+            self._count_tokens(conv, used)
         await self._pause()
 
         # ---- Follow-up actions (proposed by Python, accepted by a person)
@@ -369,9 +379,12 @@ class Pipeline:
                           {"proposals": proposals})
 
         conv["state"] = "idle"
-        if result.decision == Decision.REUSE:
+        if employee:
+            yield self._stage(conv, "deliver", "done", f"Employee report available: {employee['title']}", {"employee_report": employee})
+            yield self._say(conv, explanation, kind="result", decision="reuse", asset_id=employee["report_id"])
+        elif result.decision == Decision.REUSE:
             c = result.candidate
-            yield self._stage(conv, "deliver", "done", f"Opened '{c.name}'",
+            yield self._stage(conv, "deliver", "done", f"Matched catalogue report '{c.name}'",
                               {"asset": cat.asset_by_id(c.asset_id), "filters": intent.get("filters", {}),
                                "preview": decision.get("preview")})
             yield self._say(conv, explanation, kind="result", decision="reuse", asset_id=c.asset_id)

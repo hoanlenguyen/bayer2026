@@ -85,8 +85,11 @@ def tags_for_intent(intent: dict[str, Any], matched_by: dict[str, dict[str, Any]
 
     domains = Counter(C["measures"][m]["domain"] for m in governed)
     model = availability.get("best_model")
-    if result.target_model_id and (not model or model["id"] != result.target_model_id):
-        target = cat.model_by_id(result.target_model_id)
+    target_id = result.target_model_id
+    if not target_id and result.candidate and result.decision.value in {"reuse", "repair", "consolidate", "retire", "review"}:
+        target_id = result.candidate.scope_evidence.get("model_id")
+    if target_id and (not model or model["id"] != target_id):
+        target = cat.model_by_id(target_id)
         if target:
             model = {"id": target["id"], "name": target["name"], "workspace": target["workspace"], "platform": target["platform"],
                      "endorsement": target["endorsement"], "refresh_status": target["refresh_status"],

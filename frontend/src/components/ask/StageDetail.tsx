@@ -261,7 +261,7 @@ export function StageDetail({ stage, data, catalog, technical }: Props) {
     case "actions":
       return (
         <div className="detail-stack">
-          <p className="muted">Suggestions only. Nothing is assigned, because this screen has no action tracker yet.</p>
+          <p className="muted">Suggested work for a person to review.</p>
           {(data.proposals ?? []).map((p: ActionProposal) => (
             <div key={p.key} className="cand">
               <div className="cand-head"><strong>{p.title}</strong></div>
@@ -272,6 +272,12 @@ export function StageDetail({ stage, data, catalog, technical }: Props) {
       );
 
     case "deliver": {
+      const employee = data.employee_report;
+      if (employee) return <KV rows={[
+        ["Employee report", employee.title], ["Scope", "Nubeqa · Germany · Monthly"],
+        ["KPI definition", employee.kpi_id], ["Owner", employee.owner],
+        ["Latest source period", employee.period],
+      ]} />;
       const a = data.asset;
       return (
         <KV rows={[

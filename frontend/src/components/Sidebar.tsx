@@ -3,7 +3,7 @@ import { openConversation, removeConversation, useAnswerInProgress, useConversat
 import { navigate } from "../lib/navigation";
 import { Icon } from "./Icon";
 
-export type Page = "ask" | "explorer" | "cala-graph" | "simulator" | "briefings";
+export type Page = "ask" | "explorer" | "cala-graph" | "simulator" | "briefings" | "dashboard" | "workbook";
 
 function HistoryList({ page }: { page: Page }) {
   const conversations = useConversations();

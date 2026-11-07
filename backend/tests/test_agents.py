@@ -15,6 +15,12 @@ def _catalog():
     cat.reset_catalog()
 
 
+@pytest.fixture
+def verified_xarelto_model():
+    # Isolate how the legacy repair agents behave after the upstream scope has been confirmed.
+    cat.model_by_id("SM-016").update(product_scope="Xarelto", region_scope="Latin America")
+
+
 def offline() -> LLM:
     return LLM(provider="mock")
 
@@ -63,7 +69,7 @@ async def test_agent_falls_back_to_rules_when_model_fails():
     assert run.mode == "rules" and run.fallback_reason and "on_time_in_full" in run.output["intent"]["measures"]
 
 
-async def test_evidence_rules_records_tools_and_proofs():
+async def test_evidence_rules_records_tools_and_proofs(verified_xarelto_model):
     intent, d = plan("scn_repair_xarelto_mx")
     run = await EvidenceAgent(offline()).run({"intent": intent, "decision": d, "availability": d["availability"]})
     tools = [s.name.split("(")[0] for s in run.steps if s.kind == "tool"]
@@ -101,7 +107,7 @@ async def test_spec_rules_thin_report_is_valid():
     assert {m["kpi_id"] for m in spec["measures"]} == {"KPI-001", "KPI-034", "KPI-039"}
 
 
-async def test_spec_repair_has_no_pages():
+async def test_spec_repair_has_no_pages(verified_xarelto_model):
     spec = (await SpecAgent(offline()).run(await _ctx("scn_repair_xarelto_mx"))).output
     assert spec["pages"] == [] and spec["base_asset_id"] == "AST-0217" and spec["validation"]["passed"]
 

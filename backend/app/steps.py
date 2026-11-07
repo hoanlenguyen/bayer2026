@@ -81,18 +81,21 @@ def find_analytics(candidates: list[AssetScore]) -> dict[str, Any]:
         return {"id": c.asset_id, "name": c.name, "role": role, "platform": c.platform, "similarity": c.coverage,
                 "views_90d": c.views_90d, "users_90d": asset.get("users_90d", 0), "freshness": c.freshness, "governance": c.governance}
 
-    reuse = [c for c in in_scope if c.gates_pass and c.coverage >= t["reuse_coverage"] and c.freshness >= t["reuse_freshness"]
-             and c.governance >= t["reuse_governance"]]
+    reuse = [c for c in in_scope if c.reusable]
+    review = [c for c in in_scope if c.scope_evidence.get("conflict") and not c.measures_missing
+              and c.coverage >= t["reuse_coverage"]]
     taken = {c.asset_id for c in reuse}
-    consolidate = [c for c in in_scope if c.asset_id not in taken and c.coverage >= t["consolidate_min_coverage"]]
-    rows = [row(c, "reuse") for c in reuse[:MAX_LISTED]] + [row(c, "consolidate") for c in consolidate[:MAX_LISTED]]
+    consolidate = [c for c in in_scope if c.asset_id not in taken and not c.scope_evidence.get("conflict")
+                   and c.coverage >= t["consolidate_min_coverage"]]
+    rows = ([row(c, "reuse") for c in reuse[:MAX_LISTED]] + [row(c, "scope review") for c in review[:MAX_LISTED]]
+            + [row(c, "consolidate") for c in consolidate[:MAX_LISTED]])
     findings = [f"{r['role'].capitalize()}: {r['name']} ({round(r['similarity'] * 100)}% match, {r['views_90d']:,} views, "
                 f"{r['users_90d']:,} users in 90 days)" for r in rows]
-    summary = (f"{_plural(len(reuse), 'reuse candidate')}, {_plural(len(consolidate), 'consolidate candidate')} "
+    summary = (f"{_plural(len(reuse), 'reuse candidate')}, {_plural(len(review), 'scope review')}, {_plural(len(consolidate), 'consolidate candidate')} "
                f"out of {_plural(len(candidates), 'report')} using these KPIs")
     return _step(3, ["Analytics_Assets", "Asset_Usage"], "Find existing analytics", ["similarity", "adoption", "freshness"],
                  "reuse / consolidate candidates", summary, findings,
-                 {"reports_using_kpis": len(candidates), "in_scope": len(in_scope), "reuse_count": len(reuse),
+                 {"reports_using_kpis": len(candidates), "in_scope": len(in_scope), "reuse_count": len(reuse), "scope_review_count": len(review),
                   "consolidate_count": len(consolidate), "candidates": rows})
 
 
@@ -120,7 +123,7 @@ def trace_lineage(model_id: str | None) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- 5
-def check_trust(report: dict[str, Any] | None, model_id: str | None) -> dict[str, Any]:
+def check_trust(report: dict[str, Any] | None, model_id: str | None, candidate: AssetScore | None = None) -> dict[str, Any]:
     model = cat.model_by_id(model_id) if model_id else None
     sheets = ["Governance_Signals", "Data_Quality"]
     looked_at = ["owner", "certification", "sensitivity", "refresh", "quality"]
@@ -136,6 +139,23 @@ def check_trust(report: dict[str, Any] | None, model_id: str | None) -> dict[str
     signals = [s for s in subject.get("signals", []) if s.get("status") == "open"]
     issues = subject.get("dq_issues", [])
     risks, actions = [], []
+    sources = []
+    if candidate:
+        # Cite workbook row positions by stable IDs, including when reports have similar titles.
+        ev = candidate.scope_evidence
+        for sheet, key, record_id, fields in (
+            ("Analytics_Assets", "asset_id", candidate.asset_id, ("model_id", "product_scope", "market_scope")),
+            ("Semantic_Models", "model_id", ev.get("model_id"), ("product_scope", "region_scope")),
+        ):
+            for n, row in enumerate(cat.SHEETS[sheet.lower()], start=2):
+                if row[key] == record_id:
+                    sources.append({"sheet": sheet, "row": n, "record_id": record_id,
+                                    "fields": {f: row[f] for f in fields}})
+                    break
+        if ev.get("conflict"):
+            risks.append(ev["reason"])
+            actions.append("Verify the report's model binding and the data coverage for the requested scope")
+        sheets += [s["sheet"] for s in sources]
     if not owner_ok:
         risks.append(f"Owner is {subject.get('owner') or 'missing'} ({subject.get('owner_status')})")
         actions.append("Assign an active owner")
@@ -162,13 +182,15 @@ def check_trust(report: dict[str, Any] | None, model_id: str | None) -> dict[str
     findings = [f"Checked: {name}", f"Owner: {subject.get('owner') or 'none'} ({subject.get('owner_status')})",
                 f"Certification: {subject.get('endorsement') or 'none'}", f"Sensitivity: {sensitivity}",
                 f"Refresh: {refresh or 'not recorded'}", f"Quality: {_plural(len(issues), 'issue')}, {_plural(len(signals), 'open signal')}"]
+    findings += [f"{s['sheet']} row {s['row']} ({s['record_id']}) · " +
+                 ", ".join(f"{k}={v}" for k, v in s["fields"].items()) for s in sources]
     findings += [f"Risk: {r}" for r in risks] + [f"Action: {a}" for a in actions]
     return _step(5, sheets, "Check trust and ownership", looked_at, "risk / repair actions",
                  f"{name}: {_plural(len(risks), 'risk')}, {_plural(len(actions), 'repair action')}", findings,
                  {"subject": {"id": subject["id"], "name": name, "kind": "report" if is_report else "semantic model"},
                   "owner": subject.get("owner"), "owner_status": subject.get("owner_status"), "certification": subject.get("endorsement"),
                   "sensitivity": sensitivity, "refresh": refresh, "open_signals": len(signals), "quality_issues": len(issues),
-                  "risks": risks, "repair_actions": actions})
+                  "risks": risks, "repair_actions": actions, "scope_sources": sources})
 
 
 # ---------------------------------------------------------------- 6
@@ -242,4 +264,4 @@ def analysis_steps(intent: dict[str, Any], tags: dict[str, Any], candidates: lis
     model_id = (tags.get("semantic_model") or {}).get("id")
     governed = [k["id"] for k in tags["governed_kpis"]]
     return [parse_request(intent, tags), resolve_kpis(governed), find_analytics(candidates), trace_lineage(model_id),
-            check_trust(report, model_id), handle_migration(intent, report)]
+            check_trust(report, model_id, result.candidate), handle_migration(intent, report)]

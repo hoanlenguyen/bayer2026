@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FollowUp, Snapshot } from "../api/briefings";
 import { SnapshotEvidence } from "./BriefingReports";
+import type { DecisionHandoff } from "../api/handoff";
 import "./report-register.css";
 
 type Person = { id: string; name: string; status: string; evidence: string };
@@ -21,6 +22,7 @@ type Audit = {
 type LinkedAction = Pick<FollowUp, "_id" | "title" | "owner" | "status" | "created_by" | "history"> & {
   owner_id?: string; created_by_id?: string; due_date?: string; created_at: string;
   briefing_snapshot?: Snapshot; sample?: boolean;
+  request_snapshot?: Pick<DecisionHandoff, "question" | "verdict" | "run_id" | "source_refs">;
 };
 type Detail = Entry & { evidence: Record<string, string>; history: Audit[]; linked_actions: LinkedAction[] };
 type Register = { reports: Entry[]; people: Person[]; store: string };
@@ -197,6 +199,11 @@ function ReportDetail({ report: r, people, store, onSave, onReload }: { report: 
           <p>{a.sample ? "Sample action · " : ""}Assigned to {a.owner}{a.owner_id ? ` (${a.owner_id})` : ""}{a.due_date ? ` · Due ${a.due_date}` : ""}</p>
           <p>Created by {a.created_by}{a.created_by_id ? ` (${a.created_by_id})` : ""} · {timestamp(a.created_at)}</p>
           {a.briefing_snapshot && <SnapshotEvidence snapshot={a.briefing_snapshot} />}
+          {a.request_snapshot && <details><summary>Original Ask decision</summary>
+            <p>{a.request_snapshot.question}</p><p>{pretty(a.request_snapshot.verdict)} · Run {a.request_snapshot.run_id}</p>
+            <ul>{a.request_snapshot.source_refs.map(ref =>
+              <li key={`${ref.sheet}-${ref.row}`}>{ref.sheet} row {ref.row} · {ref.detail}</li>)}</ul>
+          </details>}
           <details><summary>Action history</summary><ol>{a.history.map((e, i) => <li key={i}>{e.by} · {timestamp(e.at)} · {pretty(e.change)}{e.to ? ` → ${pretty(e.to)}` : ""}{e.note ? ` · ${e.note}` : ""}</li>)}</ol></details>
         </details>)}</> : <p className="rr-caption">No follow-ups are linked to this report.</p>}
     </section>

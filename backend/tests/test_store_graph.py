@@ -48,6 +48,13 @@ async def test_catalog_init_from_mongo_seeds_samples():
     assert cat.asset_by_id("AST-0217")["owner_status"] == "inactive"
     assert await store.count_artifacts("actions") == 4
 
+    # A deployment over a previously seeded estate uses the new built-in demo without resetting assets.
+    await store.db["presets"].delete_one({"id": "scn_reuse_lynkuet_es"})
+    await store.upsert_asset({**cat.asset_by_id("AST-0079"), "views_90d": 77})
+    await cat.init(store)
+    assert cat.preset_by_id("scn_reuse_lynkuet_es")["scenario"] == "reuse"
+    assert cat.asset_by_id("AST-0079")["views_90d"] == 77 and await store.count_artifacts("actions") == 4
+
 
 def test_graph():
     g = build_graph()

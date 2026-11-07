@@ -76,12 +76,16 @@ async def update_follow_up(team: briefings.Team, action_id: str, req: Progress, 
     current = await store.get_artifact("actions", action_id)
     if not current or current.get("briefing_snapshot", {}).get("team") != team:
         raise HTTPException(404, "This team has no such briefing action.")
+    return await apply_progress(current, req, current["briefing_snapshot"]["actor"], store)
+
+
+async def apply_progress(current: dict[str, Any], req: Progress, actor: dict[str, Any], store: Store) -> dict[str, Any]:
+    """Apply an audited owner-work transition, preserving exact retries and rejecting conflicting edits."""
     fields = req.model_dump(exclude_none=True)
     for field, status in (("outcome", "done"), ("blocker", "blocked"), ("verification", "verified")):
         if field in fields and req.status != status:
             raise HTTPException(422, f"Supply {field} only with the {status} transition.")
     if current["status"] != req.status:
-        actor = current["briefing_snapshot"]["actor"]
         try:
             updated = actions.apply_update(current, fields, actor["name"])
         except ValueError as exc:
@@ -91,7 +95,7 @@ async def update_follow_up(team: briefings.Team, action_id: str, req: Progress, 
             updated["verify"]["checked_by_id"] = actor["id"]
         if await store.replace_briefing_action(updated, current["history"]):
             return actions.view(updated)
-        current = await store.get_artifact("actions", action_id)
+        current = await store.get_artifact("actions", current["_id"])
 
     # An identical retry can return the committed result. A conflicting writer must reload.
     if current:

@@ -43,11 +43,13 @@ def reset_catalog() -> None:
 async def init(store: Any) -> str:
     """Load the catalog from the store, seeding it from the workbook first if empty."""
     sheets, catalog = _seed()
-    await store.seed_datapack(sheets, catalog, seed_presets())
+    presets = seed_presets()
+    await store.seed_datapack(sheets, catalog, presets)
     loaded = await store.load_catalog()
     CATALOG.clear()
     CATALOG.update(loaded or copy.deepcopy(catalog))
-    PRESETS[:] = await store.load_presets() or seed_presets()
+    # These built-in requests ship with the application, including when the estate is already seeded.
+    PRESETS[:] = presets
     SHEETS.clear()
     SHEETS.update(sheets)
     if await store.count_artifacts("actions") == 0:
