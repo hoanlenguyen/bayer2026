@@ -4,14 +4,19 @@
 #   Deploy live calls this workflow on main → also deploy the image to Azure
 #
 # Image: ghcr.io/<owner>/bayer2026-backend:latest and :<commit sha>
-# Deploy needs the repository secret AZURE_CREDENTIALS (docs/DEPLOY_FREE.md, "Automatic deploys").
+# Deploy needs the repository secrets AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID from
+# `bash deploy/azure/containerapp.sh github`: a managed identity GitHub signs in as with OIDC, no password.
 # A production deployment fails clearly if the credential is missing.
 name: Backend image
 
 on:
   workflow_call:
     secrets:
-      AZURE_CREDENTIALS:
+      AZURE_CLIENT_ID:
+        required: false
+      AZURE_TENANT_ID:
+        required: false
+      AZURE_SUBSCRIPTION_ID:
         required: false
   workflow_dispatch:
   push:
@@ -87,20 +92,25 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      id-token: write   # OIDC sign-in to Azure (managed identity)
+      contents: read
     env:
-      HAS_AZURE: ${{ secrets.AZURE_CREDENTIALS != '' }}
+      HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' }}
     steps:
       - name: Require the Azure deployment credential
         if: env.HAS_AZURE != 'true'
         run: |
-          echo "::error::Add AZURE_CREDENTIALS in repository Settings > Secrets and variables > Actions. See docs/DEPLOY_FREE.md."
-          echo "### Deployment blocked: AZURE_CREDENTIALS is missing" >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::Add AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID (from bash deploy/azure/containerapp.sh github) in repository Settings > Secrets and variables > Actions. See docs/DEPLOY_FREE.md."
+          echo "### Deployment blocked: the Azure sign-in IDs are missing" >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
       - uses: azure/login@v2
         if: env.HAS_AZURE == 'true'
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy this commit's image to the Container App
         if: env.HAS_AZURE == 'true'

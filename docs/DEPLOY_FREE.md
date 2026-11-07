@@ -33,7 +33,8 @@ live `/briefings` and its API return 200. The final job summary gives the verifi
 A successful Git push only starts the release; a green **Deploy live** run confirms deployment.
 If nothing new was pushed, use **Run workflow → main** there to retry a release.
 
-**One-time requirement:** the repository needs `AZURE_CREDENTIALS`, `CLOUDFLARE_API_TOKEN`, and `CLOUDFLARE_ACCOUNT_ID`.
+**One-time requirement:** the repository needs `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `CLOUDFLARE_API_TOKEN`,
+and `CLOUDFLARE_ACCOUNT_ID`.
 The account owner adds these in [Settings → Secrets and variables → Actions](https://github.com/hoanlenguyen/bayer2026/settings/secrets/actions).
 See [Automatic deploys](#automatic-deploys-on-push-to-main) below for how to obtain each value. Keep the values out of chat and Git.
 Once configured, collaborators with GitHub write access can publish without signing into Azure or Cloudflare on their own machines.
@@ -156,16 +157,16 @@ Missing credentials fail the production workflow with the exact missing secret n
 
 **One-time setup** (GitHub → **Settings → Secrets and variables → Actions → New repository secret**):
 
-1. `AZURE_CREDENTIALS`: in Azure Cloud Shell, run
+1. `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`: in Azure Cloud Shell (Bash), run
 
    ```bash
-   cd ~/bayer2026 && git pull && bash deploy/azure/containerapp.sh github
+   cd ~/bayer2026 && git pull origin main && bash deploy/azure/containerapp.sh github
    ```
 
-   It creates a service principal that may change only the `analytics-manager-rg` resource group and prints a JSON block.
-   Paste the whole JSON as the secret value, then run `clear` in Cloud Shell. It contains a password: never paste it anywhere else.
-   If your school's Azure directory does not allow creating it ("Insufficient privileges"), keep updating the backend by hand
-   (below); the frontend automation works regardless.
+   It creates a managed identity `bayer2026-github-deploy` in `analytics-manager-rg`, lets it change only that resource group,
+   and trusts GitHub Actions runs on this repository's `main` branch to sign in as it (OpenID Connect). It prints the three IDs to
+   add as secrets. They are IDs, not passwords: each run gets a short-lived token. This works with school accounts that may not
+   register applications ("Insufficient privileges"), because a managed identity is a normal resource in your own resource group.
 2. `CLOUDFLARE_API_TOKEN`: Cloudflare dashboard → **My Profile → API Tokens → Create Token → "Edit Cloudflare Workers"** template.
 3. `CLOUDFLARE_ACCOUNT_ID`: Cloudflare dashboard → **Workers & Pages** → Account ID on the right.
 
