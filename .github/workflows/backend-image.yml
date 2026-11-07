@@ -6,11 +6,17 @@
 # Image: ghcr.io/<owner>/bayer2026-backend:latest and :<commit sha>
 # Deploy needs the repository secrets AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID from
 # `bash deploy/azure/containerapp.sh github`: a managed identity GitHub signs in as with OIDC, no password.
-# A production deployment fails clearly if the credential is missing.
+# Deploy live passes deploy: false while those secrets are missing: the image is still built, and Deploy live
+# shows the manual deploy commands for the commit instead.
 name: Backend image
 
 on:
   workflow_call:
+    inputs:
+      deploy:
+        description: Deploy the built image to Azure (false = build only)
+        type: boolean
+        default: true
     secrets:
       AZURE_CLIENT_ID:
         required: false
@@ -89,7 +95,7 @@ jobs:
 
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.deploy != false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

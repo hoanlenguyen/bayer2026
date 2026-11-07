@@ -89,3 +89,19 @@ if [ -n "$actions_url" ]; then
   printf 'GitHub Actions: %s/actions\n' "${actions_url%.git}"
 fi
 printf 'Deployment has not been verified. Check the Deploy live workflow and its live URL.\n'
+
+# Until the GitHub secrets for automatic deploys exist, releases are manual. Remind every time.
+image="ghcr.io/hoanlenguyen/bayer2026-backend:$publish_head"
+cat <<EOF
+
+REMINDER: deploy backend and frontend by hand (unless Deploy live shows "Backend deployed" and "Live briefings").
+Wait until Actions > Deploy live has built the image for ${publish_head:0:7}, then:
+
+  1. Backend (Azure Cloud Shell or Git Bash, not PowerShell):
+       IMAGE=$image bash deploy/azure/containerapp.sh update
+       bash deploy/azure/containerapp.sh image     # active revision: this image, 100, Healthy
+
+  2. Frontend (this machine, Node.js 22):
+       cd deploy/cloudflare && npm run deploy:free
+
+EOF

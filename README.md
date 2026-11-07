@@ -46,8 +46,7 @@ Build plan (published page): https://claude.ai/artifact/NWgjoee8m5ZYAYoBkDmYCC
 
 ## Working on the code
 
-`main` is the production branch: every push to `main` starts **Actions → Deploy live**, which tests, deploys the backend to Azure,
-checks it, then deploys the frontend to Cloudflare and checks the live pages. Start from the latest `main`, commit, then publish:
+`main` is the production branch. Start from the latest `main`, commit, then publish:
 
 ```bash
 git switch main && git pull --ff-only origin main
@@ -58,8 +57,18 @@ git live
 ```
 
 `git live` (`deploy/push-live.sh`) publishes your commits to `main` without force-pushing; install it once with
-`git config alias.live '!bash deploy/push-live.sh'`. Until the one-time GitHub secrets are added, Deploy live stops at its
-credential check and releases are manual. Both are described in [docs/DEPLOY_FREE.md](docs/DEPLOY_FREE.md).
+`git config alias.live '!bash deploy/push-live.sh'`.
+
+**After every push to `main`, deploy by hand: backend first, then frontend.** A push alone does not change the live site. Each push
+starts **Actions → Deploy live**, which runs the tests and builds the backend image, then ends with a yellow **Remind to deploy by
+hand** job whose summary has the exact commands for that commit (`git live` prints them too):
+
+1. Backend, in Azure Cloud Shell or Git Bash (not PowerShell):
+   `IMAGE=ghcr.io/hoanlenguyen/bayer2026-backend:<commit sha> bash deploy/azure/containerapp.sh update`,
+   then `bash deploy/azure/containerapp.sh image` (the active revision shows that image, traffic 100, Healthy).
+2. Frontend, on your machine: `cd deploy/cloudflare && npm run deploy:free`.
+
+Automatic deploys can be switched on later with five GitHub secrets; see [docs/DEPLOY_FREE.md](docs/DEPLOY_FREE.md).
 
 Never commit keys or `node_modules`. Keys live in `backend/.env` (git-ignored); `backend/.env.example` lists the names.
 

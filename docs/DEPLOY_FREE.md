@@ -153,7 +153,9 @@ After a one-time setup, every push to `main` starts **Deploy live**. It checks a
 **Frontend deploy** to run `npm run deploy:free` and verify the live `/briefings` page and proxied API.
 
 Pushes to `version-2` and `version-4` only test and build the backend image; they never deploy.
-Missing credentials fail the production workflow with the exact missing secret names; deployment is never silently skipped.
+While any of these secrets is missing, Deploy live still tests and builds the backend image, deploys nothing, and ends with a
+yellow **Remind to deploy by hand** job: its summary gives the exact backend and frontend commands for that commit. `git live`
+prints the same reminder after it pushes.
 
 **One-time setup** (GitHub → **Settings → Secrets and variables → Actions → New repository secret**):
 

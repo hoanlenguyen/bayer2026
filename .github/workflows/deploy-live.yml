@@ -18,12 +18,15 @@ jobs:
   credentials:
     name: Check production branch and credentials
     runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
     env:
       HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' }}
       HAS_CLOUDFLARE_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
       HAS_CLOUDFLARE_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
     steps:
       - name: Check one-time setup
+        id: check
         run: |
           [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::Choose main to deploy production."; exit 1; }
           missing=()
@@ -31,19 +34,63 @@ jobs:
           [ "$HAS_CLOUDFLARE_TOKEN" = true ] || missing+=(CLOUDFLARE_API_TOKEN)
           [ "$HAS_CLOUDFLARE_ACCOUNT" = true ] || missing+=(CLOUDFLARE_ACCOUNT_ID)
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::error::Missing repository Actions secrets: ${missing[*]}. Complete the one-time setup in docs/DEPLOY_FREE.md."
-            echo "### Deployment blocked: missing ${missing[*]}" >> "$GITHUB_STEP_SUMMARY"
-            exit 1
+            # Not set up for automatic deploys: build and test only, then remind to deploy by hand (job "reminder").
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Automatic deploy is not set up (missing ${missing[*]}). The backend image is built; deploy by hand, see the run summary."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
 
   backend:
     name: Deploy Azure and verify its API
     needs: credentials
     uses: ./.github/workflows/backend-image.yml
+    with:
+      deploy: ${{ needs.credentials.outputs.ready == 'true' }}
     secrets: inherit
 
   frontend:
     name: Deploy Cloudflare and verify live briefings
-    needs: backend
+    needs: [credentials, backend]
+    if: needs.credentials.outputs.ready == 'true'
     uses: ./.github/workflows/frontend-deploy.yml
     secrets: inherit
+
+  reminder:
+    name: Remind to deploy by hand
+    needs: [credentials, backend]
+    if: needs.credentials.outputs.ready != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write the manual deploy steps for this commit
+        env:
+          SHA: ${{ github.sha }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          image="ghcr.io/${OWNER,,}/bayer2026-backend:$SHA"
+          echo "::warning::Not deployed yet. Deploy commit ${SHA:0:7} by hand: backend first, then frontend. Steps are in the run summary."
+          {
+            echo "## Deploy this commit by hand"
+            echo
+            echo "Tests passed and the backend image is built: \`$image\`."
+            echo "Automatic deploy is not set up, so the live site still runs the previous release. Deploy the **backend first**, then the frontend."
+            echo
+            echo "**1. Backend** (Azure Cloud Shell or Git Bash, not PowerShell):"
+            echo
+            echo '```bash'
+            echo "cd ~/bayer2026 && git pull origin main"
+            echo "IMAGE=$image bash deploy/azure/containerapp.sh update"
+            echo "bash deploy/azure/containerapp.sh image"
+            echo '```'
+            echo
+            echo "The active revision must show this image, traffic 100, Healthy. From PowerShell, wrap it: \`bash -c \"IMAGE=$image bash deploy/azure/containerapp.sh update\"\`."
+            echo
+            echo "**2. Frontend** (your machine, Node.js 22):"
+            echo
+            echo '```bash'
+            echo "git pull origin main"
+            echo "cd deploy/cloudflare && npm run deploy:free"
+            echo '```'
+            echo
+            echo "Then open https://analytics-manager.lenguyenhanhoan.workers.dev/briefings and https://analytics-manager.lenguyenhanhoan.workers.dev/api/dashboards."
+          } >> "$GITHUB_STEP_SUMMARY"
