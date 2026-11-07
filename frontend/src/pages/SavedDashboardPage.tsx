@@ -3,9 +3,10 @@ import { handoffPath, readHandoff, type DecisionHandoff } from "../api/handoff";
 import type { DashboardObservation, SavedDashboard, SourceRecord } from "../api/dashboardBuilder";
 import { PulseDashboard } from "../components/PulseDashboard";
 import { MarketComparison } from "../components/MarketComparison";
-import { ReceiptDetails, ReceiptFacts } from "../components/ask/BuildHandoff";
+import { periodText, ReceiptDetails, ReceiptFacts } from "../components/ask/BuildHandoff";
 import { bi } from "../api/biEstate";
 import { inSession, openConversation } from "../lib/conversations";
+import { takePrefetched } from "../lib/dashboardPrefetch";
 import { navigate } from "../lib/navigation";
 import "./saved-dashboard.css";
 
@@ -26,7 +27,9 @@ function useRecord<T>(path: string) {
   useEffect(() => {
     let active = true;
     setError("");
-    readHandoff<T>(path).then(value => { if (active) setRecord(value); }).catch(e => { if (active) setError(e.message); });
+    // The first read may already be under way from the build hand-off; a retry always reads again.
+    const read = (attempt === 0 && takePrefetched<T>(path)) || readHandoff<T>(path);
+    read.then(value => { if (active) setRecord(value); }).catch(e => { if (active) setError(e.message); });
     return () => { active = false; };
   }, [path, attempt]);
   return { record, error, retry: () => setAttempt(n => n + 1) };
@@ -121,6 +124,18 @@ function SourceLookup({ records }: { records: SourceRecord[] }) {
   </section>;
 }
 
+/** The saved receipt, short: what this dashboard rests on. The exact rows stay in "Dashboard brief and sources". */
+function EvidenceSummary({ receipt, label }: { receipt: NonNullable<SavedDashboard["receipt"]>; label: string }) {
+  return <section className="sd-evidence" aria-label={label}>
+    <p className="sd-evidence-label">{label}</p>
+    <ul>
+      <li>Source: {receipt.source} (synthetic workbook), {periodText(receipt)}</li>
+      <li>Governed measures: {receipt.measures.map(m => `${m.name}${m.kpi_id ? ` (${m.kpi_id})` : ""}`).join(", ")}</li>
+      <li>{receipt.observations} source rows: {receipt.actual_like} actual-like and {receipt.forecast_like} forecast-like</li>
+    </ul>
+  </section>;
+}
+
 function SourceNotes({ children }: { children: ReactNode }) {
   return <details className="sd-sources"><summary>Dashboard brief and sources</summary><div>{children}</div></details>;
 }
@@ -153,6 +168,8 @@ function useRecordOpen(assetId: string, rendered: boolean) {
 
 export function SavedDashboardPage({ id }: { id: string }) {
   const { record, error, retry } = useRecord<SavedDashboard>(`/api/dashboards/${encodeURIComponent(id)}`);
+  // Arrived from this tab's build hand-off (read before the header clears the flag), or from an ordinary or shared link.
+  const [fromBuild] = useState(() => !!(history.state as { focusHeading?: boolean } | null)?.focusHeading);
   useRecordOpen(id, record !== null);
   if (!record) return <Status error={error} retry={retry}/>;
   const { period, scope } = record;
@@ -162,6 +179,7 @@ export function SavedDashboardPage({ id }: { id: string }) {
     <PageHeader name={record.title} description={record.decision_goal} kind="Saved dashboard" conversationId={record.conversation_id}/>
     <div className="sd-meta"><span>{places}</span><span>{periodName(period.start)} – {periodName(period.end)}</span>
       <span>{record.columns.length} governed {record.columns.length === 1 ? "KPI" : "KPIs"}</span></div>
+    {record.receipt && <EvidenceSummary receipt={record.receipt} label={fromBuild ? "Built from the approved brief" : "Dashboard evidence"} />}
     {record.presentation === "market_comparison" && record.groups.length > 1
       ? <><MarketComparison record={record} />
           <details className="sd-sources"><summary>All values and workbook rows</summary><div>

@@ -50,13 +50,26 @@ BY_ID = {e["id"]: e for e in EXAMPLES}
 SOURCE_SHEET = "product_market_monthly"
 
 
-def periods() -> list[dict[str, Any]]:
-    """The two period choices, resolved from the workbook's own months (independent of today's date)."""
-    months = workbook_months()
-    if len(months) < 6:
+def covered_months(example: dict[str, Any]) -> list[str]:
+    """Workbook months where both countries have a finite value for both KPIs of this example."""
+    C = catalog.CATALOG
+    fields = [C["measures"][m]["fact_column"] for m in example["measures"] if m in C["measures"]]
+    rows = {(r["product_id"], r["market_id"], r["month"][:7]): r for r in catalog.SHEETS.get(SOURCE_SHEET, [])}
+    def complete(month: str) -> bool:
+        return all((row := rows.get((example["product"], m, month))) is not None and all(
+            type(row.get(f)) in (int, float) and math.isfinite(row[f]) for f in fields) for m in example["markets"])
+    return [m for m in workbook_months() if complete(m)]
+
+
+def periods(example: dict[str, Any]) -> list[dict[str, Any]]:
+    """The two period choices for this comparison, from the months it fully covers (independent of today's date).
+    Empty when coverage has a gap or is too short for two distinct windows."""
+    months = covered_months(example)
+    every = workbook_months()
+    if len(months) < 7 or months != every[every.index(months[0]):every.index(months[0]) + len(months)]:
         return []
-    return [{"id": "all", "label": "All available workbook months", "start": months[0], "end": months[-1], "months": months},
-            {"id": "last6", "label": "Last 6 workbook months", "start": months[-6], "end": months[-1], "months": months[-6:]}]
+    return [{"id": "all", "label": "All available workbook months", "start": months[0], "end": months[-1], "count": len(months)},
+            {"id": "last6", "label": "Last 6 workbook months", "start": months[-6], "end": months[-1], "count": 6}]
 
 
 def _month_label(m: str) -> str:
@@ -65,7 +78,7 @@ def _month_label(m: str) -> str:
 
 
 def period_text(p: dict[str, Any]) -> str:
-    return f"{_month_label(p['start'])} to {_month_label(p['end'])}, {len(p['months'])} months"
+    return f"{_month_label(p['start'])} to {_month_label(p['end'])}, {p['count']} months"
 
 
 def verify(example: dict[str, Any]) -> str | None:
@@ -78,19 +91,8 @@ def verify(example: dict[str, Any]) -> str | None:
         return "a KPI is not certified or has no workbook field"
     if {f for _, _, f in example["purposes"]} != set(example["measures"]):
         return "the purpose choices must focus each KPI once"
-    choices = periods()
-    if len(choices) != 2 or choices[0]["months"] == choices[1]["months"]:
-        return "the workbook does not hold two distinct periods"
-    rows = {(r["product_id"], r["market_id"], r["month"][:7]): r for r in catalog.SHEETS.get(SOURCE_SHEET, [])}
-    for market in example["markets"]:
-        for month in choices[0]["months"]:  # the full window contains the shorter one
-            row = rows.get((example["product"], market, month))
-            if not row:
-                return f"no workbook row for {example['product']} {market} {month}"
-            for m in measures:
-                v = row.get(m["fact_column"])
-                if type(v) not in (int, float) or not math.isfinite(v):
-                    return f"no finite {m['fact_column']} for {market} {month}"
+    if not periods(example):
+        return "the workbook does not cover two distinct, gap-free periods for both countries and both KPIs"
     return None
 
 
@@ -112,8 +114,24 @@ def purpose_options(example: dict[str, Any]) -> list[dict[str, str]]:
     return [{"id": oid, "label": label} for oid, label, _ in example["purposes"]]
 
 
-def period_options() -> list[dict[str, str]]:
-    return [{"id": p["id"], "label": p["label"], "detail": period_text(p)} for p in periods()]
+def period_options(example: dict[str, Any]) -> list[dict[str, Any]]:
+    """The offered period choices with their exact dates. Stored on the run when shown, so the answer uses these dates."""
+    return [{"id": p["id"], "label": p["label"], "detail": period_text(p), "start": p["start"], "end": p["end"], "count": p["count"]}
+            for p in periods(example)]
+
+
+def still_covered(example: dict[str, Any], window: dict[str, Any]) -> bool:
+    """True if every month of an offered window is still fully covered in the current workbook."""
+    months = covered_months(example)
+    return window["start"] in months and window["end"] in months and \
+        months.index(window["end"]) - months.index(window["start"]) + 1 == window["count"]
+
+
+def scope_facts(example: dict[str, Any]) -> dict[str, Any]:
+    """The verified comparison scope, as the next question shows it."""
+    C = catalog.CATALOG
+    return {"product": C["products"][example["product"]]["name"], "markets": [C["markets"][m]["name"] for m in example["markets"]],
+            "measures": [C["measures"][m]["name"] for m in example["measures"]]}
 
 
 def choose(options: list[dict[str, str]], choice_id: str | None, text: str) -> dict[str, str] | None:
@@ -124,18 +142,17 @@ def choose(options: list[dict[str, str]], choice_id: str | None, text: str) -> d
     return next((o for o in options if o["label"].casefold() == folded), None)
 
 
-def intent_for(example: dict[str, Any], purpose_id: str, period_id: str) -> dict[str, Any]:
-    """The complete, deterministic intent for an answered example."""
+def intent_for(example: dict[str, Any], purpose_id: str, window: dict[str, Any]) -> dict[str, Any]:
+    """The complete, deterministic intent for an answered example, with the exact dates that were offered."""
     C = catalog.CATALOG
     _, purpose, lead = next(p for p in example["purposes"] if p[0] == purpose_id)
-    window = next(p for p in periods() if p["id"] == period_id)
     product = C["products"][example["product"]]["name"]
     return {
         "question": example["text"], "measures": list(example["measures"]), "dimensions": ["month", "market"], "grain": "month",
         "filters": {"product": [product], "market": list(example["markets"])}, "unmatched_terms": [], "decision": purpose,
         "scope_global": False, "migration": None,
         "dashboard_brief": {"decision": purpose, "period": {"start": window["start"], "end": window["end"]}, "breakdown": "market",
-                            "guided": {"id": example["id"], "purpose": purpose_id, "period": period_id, "lead_measure": lead,
+                            "guided": {"id": example["id"], "purpose": purpose_id, "period": window["id"], "lead_measure": lead,
                                        "presentation": PRESENTATION}},
         "urgency": {"value": "normal", "source": "default", "evidence": None},
     }
@@ -144,9 +161,10 @@ def intent_for(example: dict[str, Any], purpose_id: str, period_id: str) -> dict
 def public() -> dict[str, Any]:
     C = catalog.CATALOG
     return {
-        "purpose_question": PURPOSE_QUESTION, "period_question": PERIOD_QUESTION, "periods": period_options(),
+        "purpose_question": PURPOSE_QUESTION, "period_question": PERIOD_QUESTION,
         "examples": [{"id": e["id"], "placement": e["placement"], "text": e["text"],
                       "product": C["products"][e["product"]]["name"], "markets": [C["markets"][m]["name"] for m in e["markets"]],
-                      "measures": [C["measures"][m]["name"] for m in e["measures"]], "purposes": purpose_options(e)}
+                      "measures": [C["measures"][m]["name"] for m in e["measures"]], "purposes": purpose_options(e),
+                      "periods": period_options(e)}
                      for e in available()],
     }

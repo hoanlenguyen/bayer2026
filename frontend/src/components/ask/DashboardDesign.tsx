@@ -4,6 +4,7 @@ import { readHandoff } from "../../api/handoff";
 import { navigate } from "../../lib/navigation";
 import { Icon } from "../Icon";
 import { BuildHandoff, type BuildSession } from "./BuildHandoff";
+import { ASK_OVERVIEW_MS } from "../../lib/overview";
 import "./dashboard-design.css";
 
 function Brief({ state }: { state: DesignState }) {
@@ -111,9 +112,9 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
       window.dispatchEvent(new Event("dashboards-changed"));
       if (!live()) return;
       setState(result);
-      // Another build saved it first: stop the new-build workflow and show the ordinary existing-dashboard link.
-      if (result.reused && !result.guided) { setSession(null); return; }
-      update({ kind: "saved", dashboardId: result.dashboard_id!, exactReuse: !!result.exact_reuse });
+      // Another build saved it first: same overview with match wording, then the ordinary saved link (no automatic opening).
+      const concurrent = !!result.reused && !result.guided;
+      update({ kind: "saved", dashboardId: result.dashboard_id!, matched: concurrent || !!result.exact_reuse, autoOpen: !concurrent });
     };
     const reconcile = async (why: string) => {
       try {
@@ -121,10 +122,10 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
         if (built(latest)) { succeed(latest); return; }  // a valid recovery read counts like the original answer
         const unchanged = latest.status === "ready" && latest.version === reviewed.version && latest.review_token === reviewed.review_token;
         update(unchanged
-          ? { kind: "failed", message: `${why} The save could not be confirmed. Your reviewed brief is unchanged.`, recovery: "retry" }
-          : { kind: "failed", message: `${why} The save could not be confirmed, and the brief has changed since you approved it.`, recovery: "reload" });
+          ? { kind: "failed", message: `${why} The save could not be confirmed. Your reviewed brief is unchanged.`, recovery: "retry", uncertain: true }
+          : { kind: "failed", message: `${why} The save could not be confirmed, and the brief has changed since you approved it.`, recovery: "reload", uncertain: true });
       } catch {
-        update({ kind: "failed", message: `${why} The save could not be confirmed, and the brief could not be checked.`, recovery: "reload" });
+        update({ kind: "failed", message: `${why} The save could not be confirmed, and the brief could not be checked.`, recovery: "reload", uncertain: true });
       }
     };
     try {
@@ -143,20 +144,41 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
       }
       const data = await response.json().catch(() => ({}));
       const detail = typeof data.detail === "string" ? data.detail : "";
-      if (response.status === 409) { update({ kind: "failed", message: detail || "The brief changed. Review it again.", recovery: "review" }); return; }
+      if (response.status === 409) { update({ kind: "failed", message: detail || "The brief changed. Review it again.", recovery: "review", uncertain: false }); return; }
       if (response.status >= 500) { await reconcile(`The server reported an error (${response.status}).`); return; }
-      update({ kind: "failed", message: detail || `The build was refused (${response.status}).`, recovery: "reload" });
+      update({ kind: "failed", message: detail || `The build was refused (${response.status}).`, recovery: "reload", uncertain: false });
     } finally {
       submitting.current = false;
     }
   }
 
-  async function send(part: "answers", body: object) {
+  /** A design answer: the versioned POST starts at once; its result is revealed when it returned and the overview passed. */
+  const [answering, setAnswering] = useState<{ id: number; label: string; result?: DesignState; overviewDone: boolean } | null>(null);
+  const answerIds = useRef(0);
+  async function send(part: "answers", body: object, label: string) {
+    if (answering) return;
+    const id = ++answerIds.current;
+    setAnswering({ id, label, overviewDone: false });
     setPending(true); setError("");
-    try { setState(await readHandoff<DesignState>(path + "/" + part, "POST", body)); }
-    catch (e) { setError(e instanceof Error ? e.message : "Could not save the dashboard design."); }
-    finally { setPending(false); }
+    const timer = window.setTimeout(() => setAnswering(a => a && a.id === id ? { ...a, overviewDone: true } : a), ASK_OVERVIEW_MS);
+    try {
+      const result = await readHandoff<DesignState>(path + "/" + part, "POST", body);
+      if (mounted.current) setAnswering(a => a && a.id === id ? { ...a, result } : a);
+    } catch (e) {
+      window.clearTimeout(timer);  // errors show at once
+      if (mounted.current) { setAnswering(null); setError(e instanceof Error ? e.message : "Could not save the dashboard design."); }
+    } finally { if (mounted.current) setPending(false); }
   }
+  useEffect(() => {
+    if (answering?.result && answering.overviewDone) { setState(answering.result); setAnswering(null); }
+  }, [answering]);
+  const answerLabel = (value: BuildAnswer): string => {
+    const q = state?.question;
+    if (typeof value === "string") return q?.options.find(o => o.value === value)?.label ?? value;
+    if (Array.isArray(value)) return value.map(v => q?.options.find(o => o.value === v)?.label ?? v).join(", ");
+    return `${value.start} to ${value.end}`;
+  };
+
   const refresh = () => setAttempt(previous => previous + 1);
   // A changed or unconfirmed brief must be loaded afresh: the old version and token are gone until it arrives.
   const reloadBrief = () => { setSession(null); setState(null); setOpen(true); refresh(); };
@@ -186,8 +208,12 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
       {state.guided && <p className="db-caption">Nothing is saved until you choose Build dashboard. To change the product, countries or KPIs, choose New question.</p>}
       <button type="button" className="btn" disabled={pending} onClick={() => void buildNow(state)}>
         Build dashboard<Icon name="arrowRight" size={15}/></button></> :
+      answering ? <div className="proc" aria-live="off">
+        {answering.result ? <><p className="proc-label">Your selection</p><p className="proc-fact">{answering.label}</p></>
+          : <p className="proc-status"><span className="spinner" aria-hidden="true" />Checking your dashboard details…</p>}
+      </div> :
       state.question && <><DesignQuestion key={state.question.key} state={state} pending={pending}
-        submit={value => void send("answers", { version: state.version, key: state.question!.key, value })}/>
+        submit={value => void send("answers", { version: state.version, key: state.question!.key, value }, answerLabel(value))}/>
         {state.summary.length > 0 && <details className="db-progress"><summary>What’s in the brief so far</summary><Brief state={state}/></details>}</>}
     {state.status === "ready" && state.storage_mode === "memory" && <p className="db-caption">Demo storage · The saved dashboard will be available until the server restarts.</p>}
     {error && <div className="db-error" role="alert"><p>{error}</p><button type="button" className="db-text-link" onClick={refresh}>Reload saved design</button></div>}

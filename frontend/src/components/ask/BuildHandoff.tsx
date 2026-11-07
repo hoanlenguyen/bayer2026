@@ -1,19 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { dashboardUrl, type BuildReceipt, type DesignState } from "../../api/dashboardBuilder";
 import { getCurrentConversation, useCurrentConversation } from "../../lib/conversations";
+import { prefetchDashboard } from "../../lib/dashboardPrefetch";
+import { BUILD_OVERVIEW_MS } from "../../lib/overview";
 
 /* "Preparing your dashboard": the hand-off from an approved brief to the saved dashboard, shown as the four steps the
    build actually performs. Truth and timing are separate. Steps 1 to 3 describe work established during review (the
    receipt). Step 4 changes to "Dashboard saved" only after the server confirms the save. The reading window decides
    only when a confirmed dashboard may open by itself: at max(confirmed save, approval + window). */
 
-export const READING_WINDOW_MS = 4500;
+export const READING_WINDOW_MS = BUILD_OVERVIEW_MS;
 
 export type BuildPhase =
   | { kind: "saving" }
-  | { kind: "saved"; dashboardId: string; exactReuse?: boolean }
-  /** recovery: "review" after a 409, "retry" when the same reviewed brief can be sent again, "reload" when it must be checked first */
-  | { kind: "failed"; message: string; recovery: "review" | "retry" | "reload" };
+  /** matched: the save resolved to an identical saved dashboard. autoOpen false: offer the ordinary link instead of opening. */
+  | { kind: "saved"; dashboardId: string; matched: boolean; autoOpen: boolean }
+  /** uncertain: the outcome could not be established. recovery: "review" after a 409, "retry" with the same brief, "reload" first */
+  | { kind: "failed"; message: string; recovery: "review" | "retry" | "reload"; uncertain: boolean };
 
 export interface BuildSession { id: number; startedAt: number; phase: BuildPhase; brief: DesignState }
 
@@ -67,28 +70,31 @@ export function openDashboard(id: string) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-interface Step { title: string; lines: string[] }
+interface Row { title: string; lines: string[] }
 
-/** The four steps, from what review established (the receipt) or, without one, from the reviewed summary. */
-function steps(brief: DesignState): Step[] {
+/** The four rows: three from the reviewed brief (the receipt), and the saved result, which only the server confirms. */
+function rows(brief: DesignState, phase: BuildPhase): Row[] {
   const r = brief.receipt;
+  const saved = phase.kind === "saved" ? (phase.matched ? ["Matched an identical dashboard saved earlier. This request now points to it."]
+    : ["Saved for this request."]) : phase.kind === "saving" ? ["Waiting for the server to confirm the save."]
+    : [phase.uncertain ? "The save could not be confirmed." : "Not saved."];
   if (!r) return [
-    { title: "Confirm the reviewed brief", lines: brief.summary.length ? brief.summary : ["The brief you approved, unchanged."] },
-    { title: "Match the workbook evidence", lines: ["The synthetic workbook rows matched during review are checked again."] },
-    { title: "Prepare the dashboard view", lines: ["The approved measures are laid out as monthly figures with their source rows."] },
-    { title: "Save and open the dashboard", lines: [] },
+    { title: "Approved scope and period", lines: brief.summary.length ? brief.summary.slice(0, 3) : ["The brief you approved, unchanged."] },
+    { title: "Workbook coverage and source rows", lines: ["The synthetic workbook rows matched during review are checked again."] },
+    { title: "Governed measures and view", lines: ["The approved measures, as monthly figures with their source rows."] },
+    { title: "Saved result", lines: saved },
   ];
-  const evidence = [`From the review: ${plural(r.months, "month")} of figures in ${r.source ?? "the workbook"}`
+  const scope = [[scopeText(r), periodText(r)].filter(Boolean).join(" · ")];
+  if (r.decision_goal) scope.unshift(`Purpose: ${r.decision_goal}`);
+  if (r.omitted_measures.length) scope.push(`Left out, as you agreed: ${omitted(r)}.`);
+  const coverage = [`${plural(r.months, "month")} of figures in ${r.source ?? "the workbook"}`
     + (r.observations !== r.months ? `, from ${plural(r.observations, "source row")}` : "") + "."];
-  if (r.observations) evidence.push(`${r.actual_like} actual-like and ${r.forecast_like} forecast-like synthetic records.`);
-  const brief1 = [[scopeText(r), periodText(r)].filter(Boolean).join(" · ")];
-  if (r.decision_goal) brief1.unshift(`Purpose: ${r.decision_goal}`);
-  if (r.omitted_measures.length) brief1.push(`Left out, as you agreed: ${omitted(r)}.`);
+  if (r.observations) coverage.push(`${r.actual_like} actual-like and ${r.forecast_like} forecast-like synthetic records.`);
   return [
-    { title: "Confirm the reviewed brief", lines: brief1 },
-    { title: "Match the workbook evidence", lines: evidence },
-    { title: "Prepare the dashboard view", lines: [measureText(r), r.arrangement] },
-    { title: "Save and open the dashboard", lines: [] },
+    { title: "Approved scope and period", lines: scope },
+    { title: "Workbook coverage and source rows", lines: coverage },
+    { title: "Governed measures and view", lines: [measureText(r), r.arrangement] },
+    { title: "Saved result", lines: saved },
   ];
 }
 
@@ -99,7 +105,6 @@ export function BuildHandoff({ session, conversationId, onRetry, onReviewUpdated
 }) {
   const { phase, brief, startedAt } = session;
   const [windowOver, setWindowOver] = useState(() => performance.now() - startedAt >= READING_WINDOW_MS);
-  const [highlight, setHighlight] = useState(0);
   const [autoOpen, setAutoOpen] = useState(true);  // permission to take over the screen, separate from the window
   const opened = useRef(false);
   const finished = useRef(false);
@@ -109,22 +114,19 @@ export function BuildHandoff({ session, conversationId, onRetry, onReviewUpdated
 
   const finish = () => { if (!finished.current) { finished.current = true; onFinished(); } };
 
-  // On approval: focus the workflow heading (only in a visible Ask) and keep the panel in view inside Ask's scroll area.
+  // On approval: bring the heading into view inside Ask's pane (only in a visible Ask), and warm the destination's code.
   useEffect(() => {
+    void import("../../pages/SavedDashboardPage");
     if (!stillHere(conversationId)) return;
     heading.current?.focus({ preventScroll: true });
     panel.current?.scrollIntoView({ block: "nearest" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // The reading window and a gentle highlight through the four steps. Timers only move emphasis; they never save or open.
+  // The overview: one window from approval. It only decides when a confirmed dashboard may open; it never saves or completes anything.
   useEffect(() => {
-    const elapsed = performance.now() - startedAt;
-    const each = READING_WINDOW_MS / 4;
-    const timers = [1, 2, 3].map(i => window.setTimeout(() => setHighlight(h => Math.max(h, i)), Math.max(0, i * each - elapsed)));
-    timers.push(window.setTimeout(() => setWindowOver(true), Math.max(0, READING_WINDOW_MS - elapsed)));
-    setHighlight(Math.min(3, Math.floor(elapsed / each)));
-    return () => timers.forEach(t => window.clearTimeout(t));
+    const timer = window.setTimeout(() => setWindowOver(true), Math.max(0, READING_WINDOW_MS - (performance.now() - startedAt)));
+    return () => window.clearTimeout(timer);
   }, [startedAt]);
 
   // Leaving Ask, Back, opening an entity, hiding the tab or switching conversation: this attempt never takes over later.
@@ -145,11 +147,14 @@ export function BuildHandoff({ session, conversationId, onRetry, onReviewUpdated
   }, [autoOpen]);
   useEffect(() => { if (current !== conversationId && !opened.current) setAutoOpen(false); }, [current, conversationId]);
 
-  // Open exactly once, when the save is confirmed and the window has passed, if this attempt still owns the screen.
+  // Start the destination's one canonical read as soon as the server confirmed the dashboard ID.
   const saved = phase.kind === "saved" ? phase : null;
+  useEffect(() => { if (saved) prefetchDashboard(saved.dashboardId); }, [saved?.dashboardId]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Open exactly once, when the save is confirmed and the window has passed, if this attempt still owns the screen.
   useEffect(() => {
     if (!saved || !windowOver || opened.current) return;
-    if (autoOpen && stillHere(conversationId)) {
+    if (autoOpen && saved.autoOpen && stillHere(conversationId)) {
       opened.current = true;
       finish();
       openDashboard(saved.dashboardId);
@@ -161,40 +166,38 @@ export function BuildHandoff({ session, conversationId, onRetry, onReviewUpdated
   }, [saved?.dashboardId, windowOver, autoOpen]);
   useEffect(() => { if (phase.kind === "failed") finish(); }, [phase.kind]);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const list = steps(brief);
-  const status = phase.kind === "saving" ? (windowOver ? "Still preparing your dashboard…" : "Saving your dashboard…")
-    : phase.kind === "saved" ? (phase.exactReuse ? "Dashboard saved. It matches an identical dashboard saved earlier, so that saved version opens."
-      : autoOpen && !windowOver ? "Dashboard saved." : autoOpen ? "Dashboard saved. Opening it now." : "Dashboard saved.")
-    : "The dashboard was not saved.";
-  const active = phase.kind === "saving" ? highlight : phase.kind === "saved" ? (windowOver ? 3 : highlight) : 3;
+  const status = phase.kind === "saving" ? "Checking and saving your dashboard…"
+    : phase.kind === "saved" ? (phase.matched ? "Matched a saved dashboard" : "Dashboard ready")
+    : phase.uncertain ? "Save could not be confirmed" : "The dashboard was not saved";
+  const showLink = saved && windowOver && !opened.current && (!autoOpen || !saved.autoOpen);
 
   // A double click on Build would otherwise select a word in this panel, which replaces the button.
   return <section ref={panel} className={`bw bw-${phase.kind}`} aria-labelledby={`bw-${session.id}`}
     onMouseDown={e => { if (e.detail > 1) e.preventDefault(); }}>
-    <h3 id={`bw-${session.id}`} ref={heading} tabIndex={-1}>Preparing your dashboard</h3>
-    <p className="bw-lede">Here’s how your reviewed brief becomes a dashboard.</p>
-    <ol className="bw-steps">{list.map((s, i) => {
+    <h3 id={`bw-${session.id}`} ref={heading} tabIndex={-1}>How your dashboard is prepared</h3>
+    <p className="bw-status">{phase.kind === "saving" && <span className="bh-spinner" aria-hidden="true" />}<strong>{status}</strong></p>
+    {saved && <p className="bw-lede">Take a moment to review what went into it.</p>}
+    {phase.kind === "failed" && <div className="db-error" role="alert">
+      <p>{phase.message}</p>
+      {phase.recovery === "review" ? <button type="button" className="btn-outline" onClick={onReviewUpdated}>Review updated brief</button>
+        : phase.recovery === "retry" ? <button type="button" className="btn-outline" onClick={onRetry}>Try building again</button>
+        : <button type="button" className="btn-outline" onClick={onReload}>Reload the brief</button>}
+    </div>}
+    {showLink && <a className="btn" href={dashboardUrl(saved.dashboardId)}
+      onClick={e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); opened.current = true; openDashboard(saved.dashboardId); }}>
+      Open saved dashboard</a>}
+    <p className="db-label">From your reviewed brief</p>
+    <ol className="bw-steps">{rows(brief, phase).map((row, i) => {
       const last = i === 3;
-      const state = last ? phase.kind : "described";
-      return <li key={s.title} className={`bw-step${i === active ? " bw-active" : ""}${last ? ` bw-final bw-${state}` : ""}`}>
+      return <li key={row.title} className={`bw-step${last ? ` bw-final bw-${phase.kind}` : ""}`}>
         <span className="bw-num" aria-hidden="true">{i + 1}</span>
         <div className="bw-body">
-          <p className="bw-title"><span className="sr-only">Step {i + 1}: </span>{s.title}</p>
-          {s.lines.map((l, j) => <p key={j} className="bw-line">{l}</p>)}
-          {last && <p className="bw-status">{phase.kind === "saving" && <span className="bh-spinner" aria-hidden="true" />}{status}</p>}
-          {last && phase.kind === "failed" && <div className="db-error" role="alert">
-            <p>{phase.message}</p>
-            {phase.recovery === "review" ? <button type="button" className="btn-outline" onClick={onReviewUpdated}>Review updated brief</button>
-              : phase.recovery === "retry" ? <button type="button" className="btn-outline" onClick={onRetry}>Try building again</button>
-              : <button type="button" className="btn-outline" onClick={onReload}>Reload the brief</button>}
-          </div>}
-          {last && saved && windowOver && !opened.current && !autoOpen && <a className="btn" href={dashboardUrl(saved.dashboardId)}
-            onClick={e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); opened.current = true; openDashboard(saved.dashboardId); }}>
-            Open saved dashboard</a>}
+          <p className="bw-title">{row.title}</p>
+          {row.lines.map((l, j) => <p key={j} className="bw-line">{l}</p>)}
         </div>
       </li>;
     })}</ol>
-    {/* One short announcement per outcome, not per step. */}
-    <p className="sr-only" role="status" aria-live="polite">{phase.kind === "saved" ? "Dashboard saved." : phase.kind === "failed" ? "The dashboard was not saved." : ""}</p>
+    {/* One short announcement per outcome. */}
+    <p className="sr-only" role="status" aria-live="polite">{phase.kind === "saving" ? "" : status}</p>
   </section>;
 }

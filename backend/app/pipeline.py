@@ -9,7 +9,6 @@ workbook-backed view. Agents propose and Python verifies. Every stage emits ``st
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -31,7 +30,6 @@ from .classify import tags_for_intent
 from .decider import Decider
 from .vectors import VectorStore, get_embedder, similar_requests, suggest_kpis
 from .llm import LLM, explain, merge_usage, usage_scope, usage_total
-from .settings import settings
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -178,10 +176,6 @@ class Pipeline:
         conv["messages"].append(msg)
         return self._event(conv, "message", **msg)
 
-    async def _pause(self) -> None:
-        if settings.stage_delay:
-            await asyncio.sleep(settings.stage_delay)
-
     def _count_tokens(self, conv: dict[str, Any], calls: list[dict[str, Any]]) -> None:
         """Adds to this question's running total. A rejected message before any question has nowhere to count."""
         if conv["runs"] and calls:
@@ -294,7 +288,6 @@ class Pipeline:
             yield self._saved(self._event(conv, "user_message", content=text), conv)
             if new_run:
                 yield self._stage(conv, "intent", "running", "Intent agent is reading your request")
-                await self._pause()
 
             # ---- 1. Intent agent (/grill-me)
             transcript = [{"role": m["role"], "content": m["content"]} for m in conv["messages"][run["msg_start"]:] if not m.get("rejected")]
@@ -343,7 +336,6 @@ class Pipeline:
             tri_public = {**tri, "status": None}  # status is shown from the decision step on
             yield self._stage(conv, "intent", "done", intent_summary(intent), {**public(intent), "triage": tri_public,
                                                                  "classification": classification(intent), "agent": agent_run.trace()})
-            await self._pause()
 
             async for ev in self._plan(conv, [m["content"] for m in transcript if m["role"] == "user"]):
                 yield ev
@@ -354,15 +346,18 @@ class Pipeline:
     # ------------------------------------------------------------ guided examples (start screen)
     async def _guided(self, conv: dict[str, Any], text: str, guided_id: str | None, choice_id: str | None) -> AsyncIterator[Event]:
         """A starter chip: fixed scope from the registry, then two offered-choice questions, then the normal analysis.
-        Replies are matched to the offered options only, so no model or classifier can change the brief."""
+        Replies are matched to the offered options only, so no model or classifier can change the brief. The period
+        choices are resolved from the comparison's covered months once, stored on the run, and used as offered."""
         yield {"type": "conversation", "id": conv["_id"], "provider": self.llm.name, "store": self.store.name}
         if guided_id:
+            yield {"type": "processing", "phase": "scope"}
             ex = guided.get(guided_id)
             conv["title"] = conv["title"] or ex["text"][:70]
             conv["plan"], conv["preset_id"], conv["asked"] = None, None, 0
             conv["runs"].append({"id": uuid.uuid4().hex[:8], "started_at": now(), "events": [], "msg_start": len(conv["messages"]),
                                  "guided": {"id": ex["id"], "step": "purpose"}, "similar": None, "kpi_suggestions": []})
-            conv["intent"] = {**guided.intent_for(ex, ex["purposes"][0][0], "all"), "decision": None, "dashboard_brief": {},
+            first = guided.period_options(ex)[0]
+            conv["intent"] = {**guided.intent_for(ex, ex["purposes"][0][0], first), "decision": None, "dashboard_brief": {},
                               "_pending": "guided_purpose"}
             conv["messages"].append({"role": "user", "content": ex["text"], "ts": now(), "guided_id": ex["id"]})
             await self._save(conv)
@@ -374,8 +369,19 @@ class Pipeline:
         run = conv["runs"][-1]
         g = run["guided"]
         ex = guided.BY_ID.get(g["id"])
-        options = guided.purpose_options(ex) if g["step"] == "purpose" else guided.period_options()
-        choice = guided.choose(options, choice_id, text)
+        if g["step"] == "purpose":
+            options = guided.purpose_options(ex)
+        else:
+            # Older conversations saved no offered dates: they cannot be established, so offer the current ones afresh.
+            options = g.get("offered") or []
+        choice = guided.choose(options, choice_id, text) if options else None
+        if g["step"] == "period" and not options:
+            conv["messages"].append({"role": "user", "content": text, "ts": now(), "rejected": True})
+            yield self._event(conv, "user_message", content=text)
+            async for ev in self._guided_ask(conv, ex, "period", note="The reporting periods for this example have been checked again. "
+                                             "Please choose one of the current periods."):
+                yield ev
+            return
         if not choice:  # anything else repeats the same step; nothing about the run changes
             conv["messages"].append({"role": "user", "content": text, "ts": now(), "rejected": True})
             yield self._event(conv, "user_message", content=text)
@@ -384,17 +390,26 @@ class Pipeline:
                             choices=options, guided_step=g["step"])
             yield self._event(conv, "done", state=conv["state"])
             return
+        if g["step"] == "period" and not guided.still_covered(ex, choice):
+            conv["messages"].append({"role": "user", "content": choice["label"], "ts": now(), "rejected": True})
+            yield self._event(conv, "user_message", content=choice["label"])
+            async for ev in self._guided_ask(conv, ex, "period", note="The workbook coverage changed since these periods were offered, "
+                                             "so the dates you saw no longer hold. Please choose one of the current periods."):
+                yield ev
+            return
         conv["messages"].append({"role": "user", "content": choice["label"], "ts": now(), "choice_id": choice["id"]})
         await self._save(conv)
         yield self._saved(self._event(conv, "user_message", content=choice["label"]), conv)
         if g["step"] == "purpose":
             g.update(purpose=choice["id"], step="period")
             conv["intent"]["decision"] = choice["label"]
+            yield {"type": "processing", "phase": "periods"}
             async for ev in self._guided_ask(conv, ex, "period"):
                 yield ev
             return
-        g.update(period=choice["id"], step="done")
-        intent = guided.intent_for(ex, g["purpose"], g["period"])
+        window = {k: choice[k] for k in ("id", "start", "end", "count")}
+        g.update(period=choice["id"], window=window, step="done")
+        intent = guided.intent_for(ex, g["purpose"], window)
         intent["department"] = cat.department_for(intent["measures"])
         conv["intent"] = intent
         trace = self._guided_trace(ex, g)
@@ -404,7 +419,6 @@ class Pipeline:
         tri = await self._triage(conv, "new")
         yield self._stage(conv, "intent", "done", intent_summary(intent), {**public(intent), "triage": {**tri, "status": None},
                                                                           "classification": classification(intent), "agent": trace.trace()})
-        await self._pause()
         async for ev in self._plan(conv, [ex["text"]]):
             yield ev
 
@@ -413,26 +427,39 @@ class Pipeline:
         if g.get("purpose"):
             steps.append(Step("check", "Purpose matched an offered choice", g["purpose"]))
         if g.get("period"):
-            steps.append(Step("check", "Period matched an offered choice", g["period"]))
+            steps.append(Step("check", "Period matched the dates offered for this run", g["period"]))
         return AgentRun(agent="guided", mode="rules", model="Guided example registry", steps=steps, output=None)
 
-    async def _guided_ask(self, conv: dict[str, Any], ex: dict[str, Any], step: str) -> AsyncIterator[Event]:
+    async def _guided_ask(self, conv: dict[str, Any], ex: dict[str, Any], step: str, note: str | None = None) -> AsyncIterator[Event]:
+        g = conv["runs"][-1]["guided"]
+        if step == "period":
+            g["offered"] = guided.period_options(ex)  # bound to this run: the answer resolves against exactly these dates
+            if not g["offered"]:
+                conv["state"] = "idle"
+                yield self._say(conv, "This example's workbook coverage has a gap now, so it cannot be built as offered. "
+                                      "Choose New question to pick another example or ask your own question.", kind="result")
+                yield self._event(conv, "done", state="idle")
+                return
         conv["asked"] += 1
         conv["state"] = "clarifying"
         conv["intent"]["_pending"] = "guided_" + step
-        trace = self._guided_trace(ex, conv["runs"][-1]["guided"])
+        trace = self._guided_trace(ex, g)
         await self._audit(conv, "intent", trace)
         tri = await self._triage(conv, None)
-        yield self._stage(conv, "intent", "waiting", f"Clarifying question {conv['asked']} of 2",
+        yield self._stage(conv, "intent", "waiting", f"Clarifying question {min(conv['asked'], 2)} of 2",
                           {**public(conv["intent"]), "triage": tri, "agent": trace.trace(), "classification": classification(conv["intent"])})
-        options = guided.purpose_options(ex) if step == "purpose" else guided.period_options()
+        options = guided.purpose_options(ex) if step == "purpose" else g["offered"]
         question = guided.PURPOSE_QUESTION if step == "purpose" else guided.PERIOD_QUESTION
-        yield self._say(conv, question, kind="question", suggestions=[o["label"] for o in options], choices=options, guided_step=step)
+        if note:
+            question = f"{note} {question}"
+        yield self._say(conv, question, kind="question", suggestions=[o["label"] for o in options], choices=options, guided_step=step,
+                        facts=guided.scope_facts(ex))
         yield self._event(conv, "done", state=conv["state"])
 
     # ------------------------------------------------------------ the analysis steps → recommendation
     async def _plan(self, conv: dict[str, Any], user_turns: list[str]) -> AsyncIterator[Event]:
         intent = conv["intent"]
+        yield {"type": "processing", "phase": "catalog"}  # not stored: it marks when the grouped assessment starts
         plan = analyse(intent)
         result = plan["result"]
         decision = await native_reuse(self.store, intent, user_turns, plan["decision"]) or plan["decision"]
@@ -445,9 +472,7 @@ class Pipeline:
         for stage, _n, _running in ANALYSIS_STAGES:
             s = plan["stages"][stage]
             yield self._stage(conv, stage, "running", s["running"])
-            await self._pause()
             yield self._stage(conv, stage, "done", s["summary"], s["data"])
-            await self._pause()
 
         # ---- Recommendation (deterministic)
         # Intent is clear and a recommendation is made: the request is triaged.
@@ -463,7 +488,6 @@ class Pipeline:
                 explanation = await explain(self.llm, {"decision": decision, "intent": public(intent),
                                                        "missing_text": ("Missing: " + ", ".join(missing) + ".") if missing else ""})
             self._count_tokens(conv, used)
-        await self._pause()
 
         # ---- Follow-up actions (proposed by Python, accepted by a person)
         existing = await self.store.list_artifacts("actions", limit=500)

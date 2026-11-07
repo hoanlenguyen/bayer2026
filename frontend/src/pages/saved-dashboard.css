@@ -38,3 +38,6 @@
 .sd-row-lookup dd{margin:0;color:var(--fg)}
 .sd-header h1:focus{outline:none}
 .sd-receipt{display:grid;gap:6px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.sd-evidence{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius-sm);background:var(--surface);padding:8px 12px;display:grid;gap:4px}
+.sd-evidence-label{margin:0;font:600 10px var(--font-sans);letter-spacing:.09em;text-transform:uppercase;color:var(--kg-dot)}
+.sd-evidence ul{margin:0;padding-left:18px;font-size:13px;display:grid;gap:2px;overflow-wrap:anywhere}

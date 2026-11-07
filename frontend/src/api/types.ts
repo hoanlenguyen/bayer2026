@@ -42,11 +42,18 @@ export interface MessageEvent {
   kind?: "question" | "result" | "retry";
   suggestions?: string[];
   choices?: GuidedChoice[];
+  /** the verified scope a guided question was asked for */
+  facts?: GuidedFacts;
   decision?: DecisionType;
   ts: string;
 }
 
+/** Marks the start of real work on the server (not stored). The UI shows it as the turn's status. */
+export interface ProcessingEvent { type: "processing"; phase: "scope" | "periods" | "catalog" }
+export interface GuidedFacts { product: string; markets: string[]; measures: string[] }
+
 export type PipelineEvent =
+  | ProcessingEvent
   | { type: "conversation"; id: string; provider: string; store: string }
   /** history: present only when the server saved this accepted message (the tab adds the conversation to its History) */
   | { type: "user_message"; content: string; ts: string; history?: ConversationSummary }
@@ -100,7 +107,7 @@ export interface ConversationSummary {
 
 export interface ConversationDetail extends ConversationSummary {
   state: string;
-  messages: { role: "user" | "assistant"; content: string; kind?: "question" | "result" | "retry"; suggestions?: string[]; choices?: GuidedChoice[] }[];
+  messages: { role: "user" | "assistant"; content: string; kind?: "question" | "result" | "retry"; suggestions?: string[]; choices?: GuidedChoice[]; facts?: GuidedFacts }[];
   runs: { id: string; events: (StageEvent | { type: "user_message" | "message" | "done" })[] }[];
 }
 
@@ -165,6 +172,6 @@ export interface SimulatorMessage {
 }
 
 /** An offered answer in a guided example. The backend accepts only these, by ID. */
-export interface GuidedChoice { id: string; label: string; detail?: string }
+export interface GuidedChoice { id: string; label: string; detail?: string; start?: string; end?: string; count?: number }
 export interface GuidedExample { id: string; placement: "visible" | "more"; text: string; product: string; markets: string[]; measures: string[] }
 export interface GuidedExamples { examples: GuidedExample[]; purpose_question: string; period_question: string }

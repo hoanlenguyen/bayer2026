@@ -50,8 +50,6 @@ class Settings:
     cors_origins: list[str] = field(
         default_factory=lambda: os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
     )
-    # Small pause between pipeline stages in mock mode so the flow is visible in the UI.
-    stage_delay: float = field(default_factory=lambda: float(os.getenv("STAGE_DELAY", "0.35")))
 
     @property
     def llm_provider(self) -> str:

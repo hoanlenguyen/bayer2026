@@ -41,7 +41,7 @@ case "${1:-}" in
     # No Log Analytics workspace: avoids its charges. Live logs still work with `bash containerapp.sh logs`.
     az containerapp env create -n "$ENV_NAME" -g "$RG" -l "$LOCATION" --logs-destination none -o none
 
-    secrets=(); envs=(LLM_PROVIDER=auto EMBEDDINGS=auto STAGE_DELAY=0.35 MONGODB_DB=analytics_manager)
+    secrets=(); envs=(LLM_PROVIDER=auto EMBEDDINGS=auto MONGODB_DB=analytics_manager)
     if [ -n "$OPENAI_API_KEY" ]; then secrets+=("openai-api-key=$OPENAI_API_KEY"); envs+=("OPENAI_API_KEY=secretref:openai-api-key"); fi
     if [ -n "$MONGODB_URI" ]; then secrets+=("mongodb-uri=$MONGODB_URI"); envs+=("MONGODB_URI=secretref:mongodb-uri"); fi
     # Jev runs the simulator's conversation phase whenever the key is set. Ask-flow phases need JEV_PHASES

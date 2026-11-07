@@ -65,8 +65,10 @@ def test_registry_feeds_the_start_screen_in_order():
     assert [e["placement"] for e in listed["examples"]] == ["visible", "visible", "more", "more", "more"]
     assert [e["text"] for e in listed["examples"]] == [e["text"] for e in guided_examples.EXAMPLES]
     assert listed["purpose_question"] == "What decision will you make using this dashboard?"
-    assert [p["label"] for p in listed["periods"]] == ["All available workbook months", "Last 6 workbook months"]
-    assert [p["detail"] for p in listed["periods"]] == ["January 2026 to October 2026, 10 months", "May 2026 to October 2026, 6 months"]
+    for example in listed["examples"]:  # resolved per comparison from the months it fully covers
+        assert [p["label"] for p in example["periods"]] == ["All available workbook months", "Last 6 workbook months"]
+        assert [p["detail"] for p in example["periods"]] == ["January 2026 to October 2026, 10 months", "May 2026 to October 2026, 6 months"]
+        assert [(p["start"], p["end"], p["count"]) for p in example["periods"]] == [("2026-01", "2026-10", 10), ("2026-05", "2026-10", 6)]
     assert all(guided_examples.verify(e) is None for e in guided_examples.EXAMPLES)
 
 
@@ -83,7 +85,11 @@ def test_every_guided_path_builds_the_reviewed_comparison(example_id, purpose, p
         assert [o["id"] for o in q1[0]["choices"]] == ["a", "b"] and [o["id"] for o in q2[0]["choices"]] == ["all", "last6"]
         assert not questions(third) and decision["decision"] == "new_build"
         conv = c.get(f"/api/conversations/{cid}").json()
-        assert conv["runs"][-1]["guided"] == {"id": example_id, "step": "done", "purpose": purpose, "period": period}
+        g = conv["runs"][-1]["guided"]
+        assert {k: g[k] for k in ("id", "step", "purpose", "period")} == {"id": example_id, "step": "done", "purpose": purpose, "period": period}
+        # the run keeps the exact dates it offered, and the answer used those dates
+        assert [o["id"] for o in g["offered"]] == ["all", "last6"]
+        assert g["window"] == {k: next(o for o in g["offered"] if o["id"] == period)[k] for k in ("id", "start", "end", "count")}
         assert conv["intent"]["decision"] == label and conv["intent"]["dashboard_brief"]["guided"]["lead_measure"] == lead
 
         # review is ready, reflects this branch, and nothing is published before Build

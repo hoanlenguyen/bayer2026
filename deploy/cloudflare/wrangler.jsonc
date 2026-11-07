@@ -38,7 +38,6 @@
     "EMBEDDINGS": "auto",
     "EMBED_MODEL": "text-embedding-3-small",
     "EMBED_DIMS": "1536",
-    "MONGODB_DB": "analytics_manager",
-    "STAGE_DELAY": "0.35"
+    "MONGODB_DB": "analytics_manager"
   }
 }
