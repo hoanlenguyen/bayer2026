@@ -1,0 +1,12 @@
+# Only backend/ and materials/ are needed for the backend image.
+**/.git
+**/node_modules
+frontend/
+deploy/
+docs/
+backend/.venv
+backend/.env
+backend/output
+backend/tests
+**/__pycache__
+**/.pytest_cache

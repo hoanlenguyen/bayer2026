@@ -1,0 +1,44 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "analytics-manager",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-06",
+  "observability": { "enabled": true },
+
+  // Frontend: the Vite build, served as static assets. Unknown paths (/cala-graph) return index.html.
+  // Only /api/* runs the Worker, which forwards it to the backend container.
+  "assets": {
+    "directory": "../../frontend/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // Backend: the existing backend/Dockerfile, built from the repository root (it also needs materials/).
+  "containers": [
+    {
+      "class_name": "Backend",
+      "image": "../../backend/Dockerfile",
+      "image_build_context": "../..",
+      // 1/2 vCPU, 4 GiB: the workbook and catalog load into memory at startup.
+      "instance_type": "standard-1",
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "BACKEND", "class_name": "Backend" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Backend"] }],
+
+  // Non-secret settings, passed to the container. Keys go in with `wrangler secret put` (see docs/DEPLOY_CLOUDFLARE.md).
+  "vars": {
+    "LLM_PROVIDER": "auto",
+    "MODEL_REASONING": "gpt-6-astra",
+    "MODEL_FAST": "gpt-6-luna",
+    "EMBEDDINGS": "auto",
+    "EMBED_MODEL": "text-embedding-3-small",
+    "EMBED_DIMS": "1536",
+    "MONGODB_DB": "analytics_manager",
+    "STAGE_DELAY": "0.35"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "analytics-manager-cloudflare",
+  "private": true,
+  "description": "One Cloudflare Worker: serves the React frontend and forwards /api/* to the FastAPI backend container.",
+  "scripts": {
+    "build:frontend": "npm --prefix ../../frontend ci && npm --prefix ../../frontend run build",
+    "deploy": "npm run build:frontend && wrangler deploy",
+    "logs": "wrangler tail"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7"
+  },
+  "devDependencies": {
+    "wrangler": "4.158.0"
+  }
+}
