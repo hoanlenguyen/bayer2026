@@ -186,7 +186,7 @@ backend/   Python 3.12+, FastAPI
 ## Deployment
 Every option serves frontend and API from one address (no CORS, no `VITE_API_BASE`).
 
-**Live (free setup below):** app https://analytics-manager.lenguyenhanhoan.workers.dev (Cloudflare Worker, Free plan) → backend https://analytics-manager-api.greensea-e888302f.francecentral.azurecontainerapps.io (Azure Container App `analytics-manager-api`, resource group `analytics-manager-rg`, France Central, Azure for Students). Both run release `8545d81` (PR #4).
+**Live (free setup below):** app https://analytics-manager.lenguyenhanhoan.workers.dev (Cloudflare Worker, Free plan) → backend https://analytics-manager-api.greensea-e888302f.francecentral.azurecontainerapps.io (Azure Container App `analytics-manager-api`, resource group `analytics-manager-rg`, France Central, Azure for Students). Both run release `eece863` (deployed and checked on 7 November 2026).
 
 **Branches:** work on `main`; it is the production branch. A push to `main` does not reach the live site until it is deployed by hand (see below). `version-2`/`version-4` are older lines kept in step with `main`.
 
@@ -250,7 +250,7 @@ docker compose up --build        # http://localhost:5173
 - [x] MongoDB Atlas connected, with Atlas Vector Search for requests and KPIs
 - [x] SinceAI synthetic workbook loaded into the catalog
 - [x] Follow-up actions, team briefings, BI report register, owner hand-off, in-app dashboard builder (PR #3, PR #4)
-- [x] Live deployment: Cloudflare Worker (Free) + Azure Container Apps, release `8545d81`
+- [x] Live deployment: Cloudflare Worker (Free) + Azure Container Apps, release `eece863`
 - [x] BI Portfolio for the BI department head (`/bi-estate`), app renamed to AnalytIQ intelligence
 - [x] Evidence & governance in the BI Portfolio
 - [ ] Automatic releases: add the five GitHub secrets and fix the managed identity's role assignment (see Deployment)
