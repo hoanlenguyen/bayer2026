@@ -274,7 +274,7 @@ def assemble(req, dashboard_id, conversation_id, run_id, request):
         title = f"{scope['products'][0]} in {' and '.join(C['markets'][m]['name'] for m in req['markets'])}: " + \
                 " and ".join(c["name"] for c in lead_first)
     else:
-        title = f"{subject} — " + " and ".join(c["name"] for c in columns)
+        title = f"{subject}: " + _join([c["name"] for c in columns])
     return {"id": dashboard_id, "title": title,
             "conversation_id": conversation_id, "run_id": run_id, "request": request, "decision_goal": req["decision_goal"],
             "period": req["period"], "scope": scope, "dimensions": req["dimensions"], "columns": columns, "groups": result,
@@ -292,14 +292,42 @@ def _month_label(period: str) -> str:
     return datetime.strptime(period[:7], "%Y-%m").strftime("%B %Y")
 
 
+def charted_columns(artifact: dict) -> list[dict]:
+    """The measures a chart draws: every column except a sales forecast shown beside net sales (drawn as its comparison line)."""
+    columns = artifact.get("columns") or []
+    ids = {c["id"] for c in columns}
+    return [c for c in columns if not (c["id"] == "sales_forecast" and "net_sales" in ids)]
+
+
+def _finite(v) -> bool:
+    return type(v) in (int, float) and math.isfinite(v)
+
+
+def choose_layout(artifact: dict) -> str:
+    """The dashboard layout, from the data's shape alone (the frontend mirrors this in lib/dashboardLayout.ts):
+    table (approved table-only), empty (nothing chartable), comparison (exactly two peers over the same months),
+    pulse (one scope with two or more months), summary (one scope, one month) or overview (3+ peers or uneven coverage)."""
+    if artifact.get("display_mode") == "table":
+        return "table"
+    charted = [c["id"] for c in charted_columns(artifact)]
+    groups = [g for g in artifact.get("groups") or []
+              if any(_finite(p["values"].get(k)) for p in g["points"] for k in charted)]
+    if not groups:
+        return "empty"
+    months = [{p["period"] for p in g["points"] if any(_finite(p["values"].get(k)) for k in charted)} for g in groups]
+    if len(groups) == 2 and months[0] == months[1]:
+        return "comparison"
+    if len(groups) == 1:
+        return "pulse" if len(months[0]) >= 2 else "summary"
+    return "overview"
+
+
 def build_receipt(artifact: dict) -> dict:
     """What a dashboard holds and how it opens, computed from the assembled or saved artifact. No model, no extra reads.
 
     Shown during the hand-off from the reviewed brief to the saved dashboard, and again on the dashboard itself."""
     columns = artifact.get("columns") or []
-    ids = {c["id"] for c in columns}
-    # The saved page charts every measure except a sales forecast shown beside net sales (it draws as the comparison line).
-    charted = [c for c in columns if not (c["id"] == "sales_forecast" and "net_sales" in ids)]
+    charted = charted_columns(artifact)
     groups = artifact.get("groups") or []
     periods = sorted({p["period"] for g in groups for p in g["points"]})
     records = artifact.get("source_records") or []
@@ -308,25 +336,31 @@ def build_receipt(artifact: dict) -> dict:
     unit = lambda u: "€m" if u in ("M EUR", "EUR M") else u
     label = lambda c: f"{c['name']} ({unit(c['unit'])})" if c.get("unit") else c["name"]
     names = [label(c) for c in charted]
-    if artifact.get("presentation") == "market_comparison" and len(groups) > 1:
-        lead = next((c for c in charted if c["id"] == artifact.get("lead_measure")), charted[0] if charted else None)
+    view = choose_layout(artifact)
+    lead = next((c for c in charted if c["id"] == artifact.get("lead_measure")), None)
+    if view == "comparison":
         places = _join(artifact.get("market_order") or [g["label"] for g in groups])
-        ordered = [lead] + [c for c in charted if c is not lead] if lead else charted
-        layout = (f"{len(ordered)} monthly trend panels, one per KPI ({_join([label(c) for c in ordered])}), each comparing {places}. "
-                  f"{lead['name'] if lead else 'The lead KPI'} leads, with a latest-month comparison of both countries. "
-                  "Select a month to see both countries' values and their workbook rows. The table below lists every figure.")
-    elif len(periods) == 1:
-        layout = f"{_join(names)} for {_month_label(periods[0])}"
-        layout = ("Switch between " if len(names) > 1 else "") + layout + "."
-    elif len(names) > 1:
-        layout = f"Switch between {_join(names)} in a monthly trend."
+        ordered = ([lead] + [c for c in charted if c is not lead]) if lead else charted
+        if len(periods) == 1:
+            layout = f"Summary cards for {places} in {_month_label(periods[0])}: {_join([label(c) for c in ordered])}."
+        else:
+            shown = "two at a time, with a KPI selector" if len(ordered) > 2 else "one panel per KPI"
+            layout = f"Monthly trend panels ({shown}: {_join([label(c) for c in ordered])}), each comparing {places}."
+        if lead:
+            layout += f" {lead['name']} leads, with a latest-month comparison of both."
+        layout += " Select a month to see both values and their workbook rows; every value is also listed under All values and workbook rows."
+    elif view == "table":
+        layout = "A table of the approved monthly values with their workbook rows."
+    elif view == "empty":
+        layout = "No chartable values were saved for this scope; the table shows what was."
+    elif view == "summary":
+        layout = ("Switch between " if len(names) > 1 else "") + f"{_join(names)} for {_month_label(periods[0])}. The table below lists the figures and their workbook rows."
     else:
-        layout = f"A monthly trend of {names[0]}." if names else "A monthly table."
-    comparison = artifact.get("presentation") == "market_comparison" and len(groups) > 1
-    if len(groups) > 1 and not comparison:
-        layout += f" Choose one of {len(groups)} groups ({_join([g['label'] for g in groups][:4])}{', …' if len(groups) > 4 else ''}) to see its figures."
-    if not comparison:  # the comparison sentence already says where the figures and rows are
-        layout += " The table below lists the figures and their workbook rows."
+        trend = f"Switch between {_join(names)} in a monthly trend" if len(names) > 1 else f"A monthly trend of {names[0]}"
+        layout = trend + " in the Monthly Pulse panel."
+        if view == "overview":
+            layout += f" Choose one of {len(groups)} groups ({_join([g['label'] for g in groups][:4])}{', …' if len(groups) > 4 else ''}) to see its figures."
+        layout += " The figures and their workbook rows are listed under the chart."
     scope = artifact.get("scope") or {}
     return {
         "products": scope.get("products", []), "markets": scope.get("markets", []), "period": artifact.get("period"),
@@ -336,6 +370,6 @@ def build_receipt(artifact: dict) -> dict:
         "observations": len(records), "rows": {"first": rows[0], "last": rows[-1]} if rows else None,
         "actual_like": actual, "forecast_like": len(records) - actual, "source": artifact.get("source"),
         "omitted_measures": artifact.get("omitted_measures") or [], "arrangement": layout,
-        "lead_measure": artifact.get("lead_measure"), "presentation": artifact.get("presentation"),
+        "lead_measure": artifact.get("lead_measure"), "presentation": artifact.get("presentation"), "layout": view,
         "decision_goal": artifact.get("decision_goal"),
     }

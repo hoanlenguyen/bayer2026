@@ -186,4 +186,28 @@ def test_build_receipt_wording_follows_months_measures_and_groups():
     grouped_intent = {**intent, "measures": ["net_sales", "units_shipped", "on_time_in_full"]}
     per, _, _ = resolve(grouped_intent, "new_build", {"rates": "separate"}, "")
     grouped = build_receipt(assemble(per, "y", "c", "r", ""))
-    assert grouped["groups"] == 2 and "Choose one of 2 groups" in grouped["arrangement"]
+    # Two peers over the same months: the comparison layout, whether or not a guided example built it.
+    assert grouped["groups"] == 2 and grouped["layout"] == "comparison" and "Summary cards for" in grouped["arrangement"]
+
+
+def _artifact(groups: dict, columns=("units_shipped",), **extra) -> dict:
+    cols = [{"id": c, "name": c, "unit": "units"} for c in columns]
+    return {"columns": cols, "groups": [{"label": k, "points": [{"period": m, "values": {c: v for c in columns}} for m, v in pts]}
+                                        for k, pts in groups.items()], **extra}
+
+
+def test_choose_layout_follows_the_data_shape():
+    from app.dashboard_builder import build_receipt, choose_layout
+    a = [("2026-05", 1), ("2026-06", 2)]
+    assert choose_layout(_artifact({"FR": a, "DE": a})) == "comparison"
+    assert choose_layout(_artifact({"FR": a})) == "pulse"
+    assert choose_layout(_artifact({"FR": a[:1]})) == "summary"
+    assert choose_layout(_artifact({"FR": a, "DE": a[:1]})) == "overview"           # uneven coverage
+    assert choose_layout(_artifact({"FR": a, "DE": a, "IT": a})) == "overview"      # three peers
+    assert choose_layout(_artifact({"FR": [("2026-05", None)]})) == "empty"
+    assert choose_layout(_artifact({"FR": a}, display_mode="table")) == "table"
+    three = build_receipt(_artifact({"FR": a, "DE": a}, columns=("net_sales", "units_shipped", "on_time_in_full"), lead_measure="units_shipped"))
+    assert three["layout"] == "comparison" and "two at a time, with a KPI selector" in three["arrangement"]
+    assert "units_shipped leads" in three["arrangement"]
+    plain = build_receipt(_artifact({"FR": a, "DE": a}))
+    assert "leads" not in plain["arrangement"] and "one panel per KPI" in plain["arrangement"]

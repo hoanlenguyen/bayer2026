@@ -8,7 +8,7 @@ export interface BuildReceipt {
   charted_measures: number; groups: number; group_labels: string[];
   months: number; first_month: string | null; last_month: string | null;
   observations: number; rows: { first: number; last: number } | null;
-  actual_like: number; forecast_like: number; source: string | null; omitted_measures: string[]; arrangement: string; lead_measure?: string | null; presentation?: string | null; decision_goal?: string | null;
+  actual_like: number; forecast_like: number; source: string | null; omitted_measures: string[]; arrangement: string; lead_measure?: string | null; presentation?: string | null; layout?: string | null; decision_goal?: string | null;
 }
 
 export interface DesignState {
@@ -67,6 +67,7 @@ export interface SavedDashboard {
   market_order?: string[];
   guided?: { id: string; purpose: string; period: string };
   created_by?: { name: string; source?: string };
+  display_mode?: string;
 }
 
 export function builderPath(conversationId: string, runId: string) {

@@ -2,7 +2,8 @@ import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } f
 import { handoffPath, readHandoff, type DecisionHandoff } from "../api/handoff";
 import type { DashboardObservation, SavedDashboard, SourceRecord } from "../api/dashboardBuilder";
 import { PulseDashboard } from "../components/PulseDashboard";
-import { MarketComparison } from "../components/MarketComparison";
+import { displayUnit, formatValue, MarketComparison } from "../components/MarketComparison";
+import { chartedColumns, chooseLayout } from "../lib/dashboardLayout";
 import { periodText, ReceiptDetails, ReceiptFacts } from "../components/ask/BuildHandoff";
 import { bi } from "../api/biEstate";
 import { inSession, openConversation } from "../lib/conversations";
@@ -71,15 +72,19 @@ function PageHeader({ name, kind, description, conversationId }: { name: string;
   </header>;
 }
 
-function DashboardData({ groups, columns, source, tableOnly = false, scope }: { groups: Group[]; columns: Column[]; source: string; tableOnly?: boolean; scope?: string }) {
-  const [groupIndex, setGroupIndex] = useState(0);
+function DashboardData({ groups, columns, source, tableOnly = false, scope, group: chosen, onGroup }: {
+  groups: Group[]; columns: Column[]; source: string; tableOnly?: boolean; scope?: string; group?: number; onGroup?: (i: number) => void;
+}) {
+  const [ownGroup, setOwnGroup] = useState(0);
+  const groupIndex = chosen ?? ownGroup;
+  const setGroupIndex = onGroup ?? setOwnGroup;
   const [months, setMonths] = useState(0);
   const group = groups[groupIndex] ?? groups[0];
   const id = useId();
   if (!group) return <p role="status">No workbook observations were saved for this scope.</p>;
   const groupLabel = group.label === "Selected scope" && scope ? scope : group.label;
   const points = months ? group.points.slice(-months) : group.points;
-  const metrics = columns.filter(col => col.id !== "sales_forecast" || !columns.some(c => c.id === "net_sales")).map(col => ({
+  const metrics = chartedColumns(columns).map(col => ({
     id: col.id, title: col.name, unit: col.unit,
     points: points.filter(point => Number.isFinite(point.values[col.id])).map(point => ({
       period: point.period, value: point.values[col.id],
@@ -99,14 +104,42 @@ function DashboardData({ groups, columns, source, tableOnly = false, scope }: { 
       </div>
     </div>
     {!tableOnly && <PulseDashboard metrics={metrics} scope={groupLabel} source={source}/>}
+    <TableDisclosure open={tableOnly || !metrics.some(m => m.points.length > 1)} count={points.length}>
     <div className="sd-table-region" role="region" aria-label="Monthly values and workbook rows" tabIndex={0}>
       <table><caption>Values and source rows · {source}</caption><thead><tr><th scope="col">Month</th>
         {columns.map(c => <th scope="col" key={c.id}>{c.name} <small>{c.unit}</small></th>)}<th scope="col">Record type</th><th scope="col">Sheet rows</th>
       </tr></thead><tbody>{points.map(point => <tr key={point.period}><th scope="row">{periodName(point.period)}</th>
-        {columns.map(c => <td key={c.id}>{Number.isFinite(point.values[c.id]) ? point.values[c.id].toLocaleString("en-GB", { maximumFractionDigits: 4 }) : "—"}</td>)}
+        {columns.map(c => <td key={c.id}>{Number.isFinite(point.values[c.id]) ? point.values[c.id].toLocaleString("en-GB", { maximumFractionDigits: 4 }) : "No value"}</td>)}
         <td>{recordKinds(point.value_types)}</td><td>{point.source_rows.length > 4
           ? <details><summary>{point.source_rows.length} rows</summary>{point.source_rows.join(", ")}</details> : point.source_rows.join(", ")}</td>
       </tr>)}</tbody></table>
+    </div>
+    </TableDisclosure>
+  </section>;
+}
+
+/** A chart already gives the overview, so the long table waits behind a disclosure; with no chart it is the view itself. */
+function TableDisclosure({ open, count, children }: { open: boolean; count: number; children: ReactNode }) {
+  if (open) return <>{children}</>;
+  return <details className="sd-table-more"><summary>Values and workbook rows ({count} {count === 1 ? "month" : "months"})</summary>{children}</details>;
+}
+
+/** Three or more peers, or peers over different months: one latest value per peer and KPI, then one peer's trend at a time. */
+function PeerOverview({ groups, columns, chosen, onChoose }: { groups: Group[]; columns: Column[]; chosen: number; onChoose: (i: number) => void }) {
+  const id = useId();
+  const charted = chartedColumns(columns);
+  const latest = (g: Group, col: Column) => [...g.points].reverse().find(p => Number.isFinite(p.values[col.id]));
+  const lastMonth = groups.flatMap(g => g.points.map(p => p.period)).sort().pop();
+  return <section className="sd-overview" aria-labelledby={id}>
+    <div className="sd-section-head"><div><h2 id={id}>Overview</h2>
+      <p>{lastMonth ? `${periodName(lastMonth)} value` : "Latest value"} for each of {groups.length} groups. A value from an earlier month shows its month. Choose a group to see its trend below.</p></div></div>
+    <div className="sd-table-region" role="region" aria-label="Latest values by group" tabIndex={0}>
+      <table><thead><tr><th scope="col">Group</th>{charted.map(c => <th scope="col" key={c.id}>{c.name} <small>({displayUnit(c.unit)})</small></th>)}<th scope="col"><span className="sr-only">Trend</span></th></tr></thead>
+        <tbody>{groups.map((g, i) => <tr key={g.label} aria-current={i === chosen ? "true" : undefined}><th scope="row">{g.label}</th>
+          {charted.map(c => { const p = latest(g, c);
+            return <td key={c.id}>{p ? formatValue(p.values[c.id], c.unit) : "No value"}{p && p.period !== lastMonth && <small> ({periodName(p.period)})</small>}</td>; })}
+          <td><button type="button" className="sd-show" aria-pressed={i === chosen} onClick={() => onChoose(i)}>{i === chosen ? "Shown below" : "Show trend"}</button></td>
+        </tr>)}</tbody></table>
     </div>
   </section>;
 }
@@ -166,6 +199,19 @@ function useRecordOpen(assetId: string, rendered: boolean) {
   }, [assetId, rendered]);
 }
 
+/** One layout rule for every saved dashboard, old or new (lib/dashboardLayout.ts, mirrored by the build receipt). */
+function Analytics({ record, places }: { record: SavedDashboard; places: string }) {
+  const [group, setGroup] = useState(0);
+  const layout = chooseLayout(record);
+  const data = <DashboardData groups={record.groups} columns={record.columns} source={record.source} scope={places} tableOnly={layout === "table"}
+    group={group} onGroup={setGroup}/>;
+  if (layout === "comparison") return <><MarketComparison record={record} />
+    <details className="sd-sources"><summary>All values and workbook rows</summary><div>
+      <DashboardData groups={record.groups} columns={record.columns} source={record.source} scope={places} tableOnly/></div></details></>;
+  if (layout === "overview") return <><PeerOverview groups={record.groups} columns={record.columns} chosen={group} onChoose={setGroup}/>{data}</>;
+  return data;
+}
+
 export function SavedDashboardPage({ id }: { id: string }) {
   const { record, error, retry } = useRecord<SavedDashboard>(`/api/dashboards/${encodeURIComponent(id)}`);
   // Arrived from this tab's build hand-off (read before the header clears the flag), or from an ordinary or shared link.
@@ -175,16 +221,14 @@ export function SavedDashboardPage({ id }: { id: string }) {
   const { period, scope } = record;
   const scopedNames = (values: string[], label: string) => values.length > 3 ? `${values.length} ${label}` : values.join(", ");
   const places = [scopedNames(scope.products, "products"), scopedNames(scope.markets, "markets")].filter(Boolean).join(" · ");
+  // A scope summed across several products or markets is labelled as combined wherever its one series is shown.
+  const combined = record.groups.length === 1 && record.groups[0].label === "Selected scope" && (scope.products.length > 1 || scope.markets.length > 1);
   return <main className="sd-page">
     <PageHeader name={record.title} description={record.decision_goal} kind="Saved dashboard" conversationId={record.conversation_id}/>
     <div className="sd-meta"><span>{places}</span><span>{periodName(period.start)} – {periodName(period.end)}</span>
       <span>{record.columns.length} governed {record.columns.length === 1 ? "KPI" : "KPIs"}</span></div>
     {record.receipt && <EvidenceSummary receipt={record.receipt} label={fromBuild ? "Built from the approved brief" : "Dashboard evidence"} />}
-    {record.presentation === "market_comparison" && record.groups.length > 1
-      ? <><MarketComparison record={record} />
-          <details className="sd-sources"><summary>All values and workbook rows</summary><div>
-            <DashboardData groups={record.groups} columns={record.columns} source={record.source} scope={places} tableOnly/></div></details></>
-      : <DashboardData groups={record.groups} columns={record.columns} source={record.source} scope={places}/>}
+    <Analytics record={record} places={combined ? `${places}, combined` : places}/>
     <SourceNotes>{record.receipt && <section className="sd-receipt" aria-label="What this dashboard holds">
         <p><strong>Built from the approved brief</strong></p><ReceiptFacts receipt={record.receipt} saved/><ReceiptDetails receipt={record.receipt}/>
         {record.created_by && <p>Built by {record.created_by.name}</p>}</section>}

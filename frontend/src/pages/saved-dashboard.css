@@ -41,3 +41,10 @@
 .sd-evidence{border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius-sm);background:var(--surface);padding:8px 12px;display:grid;gap:4px}
 .sd-evidence-label{margin:0;font:600 10px var(--font-sans);letter-spacing:.09em;text-transform:uppercase;color:var(--kg-dot)}
 .sd-evidence ul{margin:0;padding-left:18px;font-size:13px;display:grid;gap:2px;overflow-wrap:anywhere}
+.sd-table-more{display:grid;gap:8px}.sd-table-more>summary{cursor:pointer;font-weight:500;font-size:13px;padding:6px 0}
+.sd-overview{display:grid;gap:10px;min-width:0}.sd-overview table{border-collapse:collapse;width:100%;font-size:14px}
+.sd-overview th,.sd-overview td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;vertical-align:middle}
+.sd-overview thead th{font-size:13px;font-weight:500;color:var(--muted)}.sd-overview tbody tr:last-child>*{border-bottom:0}.sd-overview td small{color:var(--muted)}
+.sd-overview tr[aria-current="true"] th{font-weight:600}
+.sd-show{min-height:32px;padding:4px 10px;border:1px solid var(--line-strong);border-radius:999px;background:var(--surface);cursor:pointer;font:inherit;font-size:13px;white-space:nowrap}
+.sd-show[aria-pressed="true"]{background:var(--navy);border-color:var(--navy);color:var(--on-navy)}

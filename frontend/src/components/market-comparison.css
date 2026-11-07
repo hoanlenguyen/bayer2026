@@ -1,4 +1,4 @@
-/* Guided example dashboards: two countries, two KPIs. Country A is solid with circles, country B dashed with squares,
+/* Comparison layout for two peers (lib/dashboardLayout.ts). Peer A is solid with circles, peer B dashed with squares,
    so colour is never the only difference. */
 .mc { display: grid; gap: 16px; min-width: 0; --mc-a: #1f65ad; --mc-b: #c2410c; }
 .mc h3 { margin: 0; font-size: 15px; }
@@ -54,3 +54,9 @@
   .mc-bar-value { text-align: left; }
   .mc-panels { grid-template-columns: 1fr; }
 }
+.mc-zero { stroke: var(--fg); stroke-width: 1; opacity: 0.45; }
+.mc-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+.mc-pick > span { color: var(--muted); margin-right: 4px; }
+.mc-pick button { min-height: 32px; padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); cursor: pointer; font: inherit; font-size: 13px; }
+.mc-pick button[aria-pressed="true"] { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
+@media (max-width: 560px) { .mc-axis { font-size: 20px; } }
