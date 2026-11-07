@@ -6,6 +6,7 @@
   --ok: #2f7a45; --ok-soft: #e6f1e6; --warn: #8f5a00; --warn-soft: #fcefd6; --bad: #c0353f; --bad-soft: #fde8e9;
   --kg-dot: #6b6360; --kg-line: rgb(107 99 96 / 0.22); --kg-line-far: rgb(107 99 96 / 0.07); --kg-line-hover: rgb(107 99 96 / 0.7);
   --kg-dot-hover: rgb(238 90 100 / 0.6); --kg-dot-linked: rgb(240 178 62 / 0.9); --kg-tip-bg: rgb(60 56 53 / 0.88); --on-node: #ffffff;
+  --navy: #232f3f; --on-navy: #ffffff;
   --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   --radius-sm: 8px; --radius: 12px; --radius-lg: 24px;
@@ -53,7 +54,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 /* Ask and Explorer match the knowledge graph: page background everywhere, dark text. Borders separate cards. */
 .app-main:not(:has(.kg-page)) { --surface: var(--bg); --muted: var(--fg); }
 /* Hints and switched-off controls keep the warm grey, so they still read as inactive. */
-.tabs button[aria-selected="false"], .seg button[aria-pressed="false"], .dept-filter button[aria-pressed="false"],
+.tabs button[aria-selected="false"], .seg button[aria-pressed="false"],
 .type-chip-btn[aria-pressed="false"] .n { color: var(--kg-dot); }
 .sidebar { position: sticky; top: 0; height: 100dvh; display: flex; flex-direction: column; background: var(--surface); }
 .brand { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 16px; flex: none; border-bottom: 1px solid var(--line);
@@ -85,7 +86,14 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .chat > .banner { margin: 12px var(--pad-x) 0; }
 
 /* ===================== Ask: start ===================== */
-.ask-empty { max-width: 800px; margin: 0 auto; display: grid; gap: 16px; padding: clamp(32px, 10vh, 96px) 24px 32px; }
+/* Equal rows above and below keep the message box at the exact middle of the screen. */
+.ask-empty { max-width: 800px; min-height: 100dvh; margin: 0 auto; display: grid; grid-template-rows: 1fr auto 1fr; grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 32px 24px; }
+.ask-empty-above { display: grid; gap: 16px; align-content: end; }
+.ask-empty-below { display: grid; gap: 16px; align-content: start; }
+/* Too little room to centre: stack from the top so the chips stay on screen. */
+@media (max-width: 768px), (max-height: 660px) {
+  .ask-empty { grid-template-rows: auto auto auto; align-content: start; }
+}
 .ask-empty h1 { margin: 0; font-size: 24px; line-height: 1.25; font-weight: 600; letter-spacing: -0.015em; }
 
 .composer { display: flex; align-items: flex-end; gap: 8px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); padding: 8px; }
@@ -96,20 +104,11 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .send:hover { background: var(--accent-hover); }
 .send:disabled { opacity: 0.3; cursor: default; background: var(--accent); }
 
-.starters { display: grid; gap: 12px; margin-top: 16px; }
-.starters-head { display: grid; gap: 8px; }
-.starters-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
-.dept-filter { display: flex; flex-wrap: wrap; gap: 6px; }
-.dept-filter button { height: 32px; padding: 0 12px; border: 1px solid var(--line); background: var(--surface); border-radius: 99px; cursor: pointer; font-size: 13px; color: var(--muted); }
-.dept-filter button:hover { color: var(--fg); background: var(--button-hover); }
-.dept-filter button[aria-pressed="true"] { background: var(--selected); border-color: transparent; color: var(--fg); font-weight: 500; }
-.preset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.preset { text-align: left; display: flex; flex-direction: column; gap: 4px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); cursor: pointer; min-width: 0; }
-.preset:hover { background: var(--selected); }
-.preset:disabled { opacity: 0.6; cursor: default; }
-.preset-title { font-weight: 600; }
-.preset-prompt { color: var(--muted); font-size: 13px; }
-.preset-dept { color: var(--muted); font-size: 12px; margin-top: auto; padding-top: 8px; }
+/* One chip per line. Long questions wrap inside the chip on narrow screens. */
+.starter-chips { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.starter-chips button { min-height: 36px; padding: 6px 14px; border: 1px solid var(--line-strong); background: var(--surface); border-radius: 18px; cursor: pointer; font-size: 13px; text-align: left; }
+.starter-chips button:hover:not(:disabled) { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
+.starter-chips button:disabled { opacity: 0.6; cursor: default; }
 .fineprint { color: var(--muted); font-size: 12px; margin: 0; }
 
 /* ===================== Ask: conversation ===================== */
@@ -126,7 +125,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chips button { min-height: 36px; padding: 6px 12px; border: 1px solid var(--line-strong); background: var(--surface); border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; text-align: left; }
-.chips button:hover { background: var(--button-hover); }
+.chips button:hover { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
 .chat-composer { flex: none; padding: 8px var(--pad-x) 16px; }
 .chat-composer .composer { max-width: 720px; margin: 0 auto; }
 
@@ -178,7 +177,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .switch[aria-checked="true"] .switch-track { background: var(--accent); }
 .switch[aria-checked="true"] .switch-track::after { translate: 14px 0; }
 .flow-badges { display: flex; flex-wrap: wrap; gap: 6px; }
-.badge { font: 500 11px var(--font-mono); padding: 2px 8px; border-radius: 99px; background: var(--surface-2); color: var(--muted); }
+.badge { font: 500 11px var(--font-mono); padding: 2px 8px; border-radius: 99px; background: var(--navy); color: var(--on-navy); }
 .flow-steps { list-style: none; margin: 0; padding: 0; display: grid; }
 .flow-step { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 12px; position: relative; padding-bottom: 16px; }
 .flow-step::before { content: ""; position: absolute; left: 9px; top: 24px; bottom: 2px; width: 2px; background: var(--line); }
@@ -187,7 +186,8 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .flow-icon { width: 20px; height: 20px; margin-top: 2px; border-radius: 50%; border: 2px solid var(--line-strong); background: var(--surface); display: grid; place-items: center; }
 .st-running .flow-icon { border-color: var(--accent); border-right-color: transparent; animation: spin 0.9s linear infinite; }
 .st-waiting .flow-icon { border-color: var(--warn); box-shadow: inset 0 0 0 3px var(--surface); background: var(--warn); }
-.st-done .flow-icon { border-color: transparent; background: var(--selected); color: var(--fg); }
+.st-done .flow-icon { border-color: transparent; background: var(--navy); color: var(--on-navy); }
+.st-done .flow-icon .icon { stroke-width: 3.5; }
 .st-rejected .flow-icon { border-color: transparent; background: var(--bad-soft); color: var(--bad); }
 .flow-body { min-width: 0; display: grid; gap: 2px; }
 .flow-title { display: flex; align-items: center; gap: 8px; border: 0; background: none; padding: 0; min-height: 24px; text-align: left; cursor: pointer; width: 100%; }
@@ -201,9 +201,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .flow-summary { margin: 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .flow-detail { margin-top: 8px; border-radius: var(--radius-sm); padding: 12px; background: var(--surface-2); font-size: 13px; min-width: 0; }
 .kind { font: 500 11px var(--font-mono); padding: 1px 6px; border-radius: 99px; white-space: nowrap; }
-.kind-ai { color: var(--fg); background: var(--accent-soft); }
-.kind-py, .kind-state { color: var(--muted); background: var(--surface-2); }
-.kind-human { color: var(--warn); background: var(--warn-soft); }
+.kind-ai, .kind-py, .kind-state, .kind-human { color: var(--on-navy); background: var(--navy); }
 .flow-legend { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 12px; border-top: 1px solid var(--line); }
 
 .detail-stack { display: grid; gap: 10px; min-width: 0; }
@@ -231,7 +229,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .agent-trace { border-radius: 6px; background: var(--surface); }
 .agent-trace > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 10px; cursor: pointer; list-style-position: inside; }
 .agent-name { font-weight: 600; font-size: 13px; }
-.mode-llm { color: var(--fg); }
+.mode-llm { color: var(--on-navy); }
 .agent-trace > .text-warn { margin: 0; padding: 0 10px 6px; }
 .steps { list-style: none; margin: 0; padding: 6px 10px 8px; display: grid; gap: 5px; border-top: 1px solid var(--line); }
 .steps li { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; font-size: 12px; align-items: baseline; }
@@ -474,7 +472,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
   .app-nav .icon { display: none; }
   .sample-note { margin: 0 0 0 auto; padding: 0; }
   .sample-text { display: none; }
-  .ask-empty { padding: 24px 16px 24px; }
+  .ask-empty { min-height: calc(100dvh - 57px); padding: 24px 16px; } /* 56px bar plus its 1px border */
   .page-bar { height: auto; flex-direction: column; align-items: stretch; gap: 8px; padding-block: 10px; }
   .search { flex: none; }
   .breadcrumb > :nth-child(n+2) { display: none; }
@@ -492,10 +490,6 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 @media (max-width: 560px) {
   .brand-name { display: none; }
   .nav-extra { display: none; } /* three menu items only fit a phone with short labels */
-  .preset-grid { grid-template-columns: minmax(0, 1fr); }
-  .dept-filter { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-inline: -16px; padding-inline: 16px 40px; mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent); }
-  .dept-filter::-webkit-scrollbar { display: none; }
-  .dept-filter button { flex: none; }
   .kv div, .approval-facts li, .gov-row { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .approval-actions .btn, .approval-actions .btn-outline { flex: 1 1 100%; white-space: normal; height: auto; min-height: 44px; padding-block: 8px; }
   .msg-user p { max-width: 85%; }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, streamPost } from "../api/client";
 import type { CatalogMeta, DecisionType, Health, PipelineEvent, Preset, StageEvent, StageId } from "../api/types";
 import { FlowPanel, RUNNING_COPY } from "../components/ask/FlowPanel";
@@ -14,6 +14,15 @@ interface ChatMessage {
 }
 
 type ConvState = "idle" | "clarifying" | "awaiting_approval";
+
+/** Each matches a preset's prompt in the backend, so a click also sends that preset's certified measures. */
+const STARTER_QUESTIONS = [
+  "Please create a Power BI replacement for our legacy Tableau Xarelto commercial workbook.",
+  "Please build a new report for market access coverage and reimbursement status by product.",
+  "We need a monthly supply-risk dashboard by medicine and country.",
+  "I need a new Kerendia management report for monthly performance in EMEA and North America.",
+  "Can we have a new finance dashboard for net sales, gross-to-net and budget variance by product?",
+];
 
 /** Renders **bold** segments; everything else is plain text. */
 function RichText({ text }: { text: string }) {
@@ -63,7 +72,6 @@ export function AskPage() {
   const [offline, setOffline] = useState(false);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [catalog, setCatalog] = useState<CatalogMeta | null>(null);
-  const [dept, setDept] = useState("All");
 
   const [convId, setConvId] = useState<string | null>(null);
   const [convState, setConvState] = useState<ConvState>("idle");
@@ -141,8 +149,6 @@ export function AskPage() {
     setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null);
   };
 
-  const departments = useMemo(() => ["All", ...new Set(presets.map((p) => p.department))], [presets]);
-  const shownPresets = useMemo(() => presets.filter((p) => dept === "All" || p.department === dept), [presets, dept]);
   const lastId = messages.length ? messages[messages.length - 1].id : -1;
   const runningStage = (Object.values(stages) as StageEvent[]).find((s) => s.status === "running")?.stage;
   const hasVerdict = stages.decision?.status === "done";
@@ -156,29 +162,19 @@ export function AskPage() {
   if (messages.length === 0) {
     return (
       <div className="ask-empty">
-        {offlineBanner}
-        <h1>What do you need to decide?</h1>
+        <div className="ask-empty-above">
+          {offlineBanner}
+          <h1>What do you need to decide?</h1>
+        </div>
         <Composer onSend={(t) => send(t)} disabled={busy} autoFocus placeholder="Describe the decision or the numbers you need, in your own words" />
-        <section className="starters" aria-labelledby="starters-title">
-          <div className="starters-head">
-            <h2 id="starters-title">Common questions</h2>
-            <div className="dept-filter" role="group" aria-label="Filter questions by department">
-              {departments.map((d) => (
-                <button key={d} type="button" aria-pressed={dept === d} onClick={() => setDept(d)}>{d}</button>
-              ))}
-            </div>
-          </div>
-          <div className="preset-grid">
-            {shownPresets.map((p) => (
-              <button key={p.id} type="button" className="preset" onClick={() => send(p.prompt, p.id)} disabled={busy}>
-                <span className="preset-title">{p.title}</span>
-                <span className="preset-prompt">{p.prompt}</span>
-                {dept === "All" && <span className="preset-dept">{p.department}</span>}
-              </button>
+        <div className="ask-empty-below">
+          <div className="starter-chips" role="group" aria-label="Example questions">
+            {STARTER_QUESTIONS.map((q) => (
+              <button key={q} type="button" onClick={() => send(q, presets.find((p) => p.prompt === q)?.id)} disabled={busy}>{q}</button>
             ))}
           </div>
-        </section>
-        <p className="fineprint">The AI sees catalog metadata only, never raw production data.</p>
+          <p className="fineprint">The AI sees catalog metadata only, never raw production data.</p>
+        </div>
       </div>
     );
   }

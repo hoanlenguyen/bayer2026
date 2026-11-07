@@ -68,7 +68,7 @@ Each agent has `run_llm` (OpenAI) and `run_rules` (offline, deterministic). Same
 
 ```
 frontend/  React + TypeScript + Vite
-  #ask       Ask page: chat, department presets, verdict card (scores + approval), "How this was decided" panel
+  #ask       Ask page: chat, example question chips (each sends its preset), verdict card (scores + approval), "How this was decided" panel
   #explorer  Estate Explorer: entity details + relationship graph ("molecular view"),
              loaded from GET /api/graph (live plant catalog, same governance scoring as the Ask flow)
   /cala-graph  Knowledge graph: full-screen 3D canvas (path route, "Knowledge Graph" in the sidebar), loaded from
