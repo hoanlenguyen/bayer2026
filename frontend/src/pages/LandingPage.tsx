@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import logo from "../assets/analytiq-logo.png";
 import { Icon } from "../components/Icon";
 import { KnowledgeGraph } from "../components/KnowledgeGraph";
-import { navigate } from "../components/Sidebar";
+import { navigate } from "../lib/navigation";
 import { loadEstate, type GraphPayload } from "../lib/estate";
 
 /** Each problem with the way AnalytIQ answers it. "Solution rationale" crosses out the problem and shows the answer. */

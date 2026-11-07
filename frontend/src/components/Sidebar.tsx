@@ -4,7 +4,7 @@ import { navigate } from "../lib/navigation";
 import { Icon } from "./Icon";
 import logo from "../assets/analytiq-logo.png";
 
-export type Page = "ask" | "explorer" | "cala-graph" | "simulator" | "briefings" | "dashboard" | "workbook" | "bi-estate";
+export type Page = "ask" | "explorer" | "cala-graph" | "simulator" | "briefings" | "dashboard" | "workbook" | "bi-estate" | "landing";
 
 function HistoryList({ page }: { page: Page }) {
   const conversations = useConversations();
@@ -100,7 +100,7 @@ export function Sidebar({ page }: { page: Page }) {
       <div className="sidebar-head">
         <a className="brand" href="/#ask" onClick={navigate} aria-label="AnalytIQ intelligence" title={tip("AnalytIQ intelligence")}>
           <span className="brand-mark" aria-hidden="true" />
-          <span className="brand-name">AnalytIQ intelligence</span>
+          <img className="brand-name brand-logo" src={logo} alt="" width={900} height={300} />
         </a>
         <button type="button" className="sidebar-toggle" aria-label={toggleLabel} aria-expanded={!collapsed} title={toggleLabel} onClick={() => setCollapsed((c) => !c)}>
           <Icon name="panel" />
