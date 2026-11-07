@@ -112,7 +112,7 @@ backend/   Python 3.12+, FastAPI
 
 ## Request triage and vector search (`app/triage.py`, `app/vectors.py`)
 - Business_Requests urgency/status labels are not predictable from text (all 10 texts have mixed labels; best possible 54% vs 52% majority), so no classifier.
-- Urgency: stated (grill-me "When do you need this?") / inferred (time words, quoted evidence, model claims verified) / default normal. Status: new on arrival, triaged at the decision (pipeline sets it).
+- Urgency: stated (grill-me "When do you need this?") / inferred (time words, quoted evidence, model claims verified) / default normal. Status is not shown while the request is being understood (Understand the request shows urgency only). When the intent is complete the request is created as `REQ-APP-…` with status new and added to the vector corpus (`request_vectors` in Atlas, or in memory); the decision step sets it to triaged and shows the tag. Later requests count it as a duplicate. `build_vectors` keeps these live requests and re-embeds them.
 - Vector search: duplicate and similar requests at intake, KPI suggestion chips. OpenAI embeddings or local hashed fallback; MongoDB Atlas `$vectorSearch` (`python -m app.build_vectors`) or in-memory. Endpoints `/api/requests/similar`, `/api/requests/clusters`, `/api/requests/label-check`.
 
 ## Secrets

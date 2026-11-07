@@ -1,7 +1,10 @@
 import type { StageEvent, StageId } from "../../api/types";
 
 interface Triage {
-  status: "new" | "triaged";
+  /** Not set while the request is being understood; "triaged" from the decision on. */
+  status: "new" | "triaged" | null;
+  request_id?: string | null;
+  request_store?: "atlas" | "memory" | null;
   urgency: { value: "normal" | "high" | "urgent"; source: "stated" | "inferred" | "default"; evidence: string | null };
   similar: {
     duplicates: { text: string; asked: number; request_ids: string[]; similarity: number }[];
@@ -30,17 +33,24 @@ export function currentTriage(stages: Partial<Record<StageId, StageEvent>>): Tri
   return stages.decision?.data?.triage ?? stages.intent?.data?.triage;
 }
 
-/** Status and urgency tags. `compact` drops the reason, for the flow panel. */
-export function TriageTags({ triage: t, compact = false }: { triage: Triage; compact?: boolean }) {
+/** Status and urgency tags. `only` limits which tag shows; `compact` drops the reason, for the flow panel. */
+export function TriageTags({ triage: t, compact = false, only }: { triage: Triage; compact?: boolean; only?: "status" | "urgency" }) {
+  const showStatus = !!t.status && only !== "urgency";
+  const showUrgency = only !== "status";
+  if (!showStatus && !showUrgency) return null;
   return (
     <div className="triage-tags" aria-label="Request tags">
-      <span className={`triage-tag tag-${t.status}`} title="New on arrival; triaged once the request is understood and decided">
-        {t.status === "triaged" ? "Triaged" : "New"}
-      </span>
-      <span className={`triage-tag tone-${URGENCY_TONE[t.urgency.value]}`} title={compact ? urgencySource(t.urgency) : undefined}>
-        {t.urgency.value[0].toUpperCase() + t.urgency.value.slice(1)} urgency
-        {!compact && <span className="triage-why"> · {urgencySource(t.urgency)}</span>}
-      </span>
+      {showStatus && (
+        <span className={`triage-tag tag-${t.status}`} title="Set once the request is understood and a decision is made">
+          {t.status === "triaged" ? "Triaged" : "New"}
+        </span>
+      )}
+      {showUrgency && (
+        <span className={`triage-tag tone-${URGENCY_TONE[t.urgency.value]}`} title={compact ? urgencySource(t.urgency) : undefined}>
+          {t.urgency.value[0].toUpperCase() + t.urgency.value.slice(1)} urgency
+          {!compact && <span className="triage-why"> · {urgencySource(t.urgency)}</span>}
+        </span>
+      )}
     </div>
   );
 }

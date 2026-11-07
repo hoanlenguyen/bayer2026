@@ -133,11 +133,53 @@ class VectorStore:
         self._mem: dict[str, list[tuple[dict[str, Any], list[float]]]] = {}
         self.backend: dict[str, str] = {}
         self.fallback_reason: str | None = None
+        self._live: list[dict[str, Any]] | None = None  # requests made in the app, added to the corpus as they arrive
+
+    # ------------------------------------------------------------ live requests
+    async def live_requests(self) -> list[dict[str, Any]]:
+        """Requests created in the app. Loaded once from Atlas (they survive restarts there), then kept in memory."""
+        if self._live is None:
+            self._live = []
+            if await self._atlas_ready("requests"):
+                try:
+                    cursor = self.db[COLLECTIONS["requests"]].find({"source": "live"}, {"embedding": 0})
+                    self._live = [d async for d in cursor]
+                except Exception as exc:
+                    log.warning("Could not load live requests from Atlas: %s", exc)
+        return self._live
+
+    async def add_request(self, doc: dict[str, Any]) -> str:
+        """Add a new request to the corpus so later requests find it. Returns where it was stored."""
+        doc = {"kind": "request", "source": "live", **doc}
+        live = await self.live_requests()
+        live[:] = [d for d in live if d["_id"] != doc["_id"]] + [doc]
+        vec = (await self._embed([doc["text"]]))[0]
+        if "requests" in self._mem:
+            self._mem["requests"] = [(d, v) for d, v in self._mem["requests"] if d["_id"] != doc["_id"]] + [(doc, vec)]
+        if await self._atlas_ready("requests"):
+            try:
+                await self.db[COLLECTIONS["requests"]].replace_one(
+                    {"_id": doc["_id"]}, {**doc, "embedding": vec, "embedding_model": self.embedder.model}, upsert=True)
+                return "atlas"
+            except Exception as exc:
+                log.warning("Could not write the request to Atlas: %s", exc)
+        return "memory"
+
+    async def set_request_status(self, request_id: str, status: str, **fields: Any) -> None:
+        """Update the status tag (and any other tags) of a live request, in memory and in Atlas."""
+        for d in await self.live_requests():
+            if d["_id"] == request_id:
+                d.update(status=status, **fields)
+        if await self._atlas_ready("requests"):
+            try:
+                await self.db[COLLECTIONS["requests"]].update_one({"_id": request_id}, {"$set": {"status": status, **fields}})
+            except Exception as exc:
+                log.warning("Could not update the request status in Atlas: %s", exc)
 
     async def _ensure_memory(self, corpus: str) -> None:
         if corpus in self._mem:
             return
-        docs = CORPORA[corpus]()
+        docs = CORPORA[corpus]() + (list(await self.live_requests()) if corpus == "requests" else [])
         # Embed distinct texts once (the 150 requests share 10 texts).
         texts = list(dict.fromkeys(d["text"] for d in docs))
         vecs = dict(zip(texts, await self._embed(texts))) if texts else {}
@@ -196,12 +238,13 @@ async def similar_requests(store: VectorStore, text: str, k: int = 30) -> dict[s
     """Earlier requests that ask the same thing, grouped by text, with how often each was asked."""
     hits = await store.search("requests", text, k=k)
     dup_t, sim_t = DUPLICATE_THRESHOLD[store.embedder.name], SIMILAR_THRESHOLD[store.embedder.name]
-    rows = cat.SHEETS.get("business_requests", [])
+    rows = [(r["request_id"], r["request_text"]) for r in cat.SHEETS.get("business_requests", [])]
+    rows += [(d["_id"], d["text"]) for d in await store.live_requests()]
     groups: dict[str, dict[str, Any]] = {}
     for h in hits:
         if h.doc["text"] in groups:
             continue
-        same_text = [r["request_id"] for r in rows if r["request_text"] == h.doc["text"]]
+        same_text = [rid for rid, t in rows if t == h.doc["text"]]
         groups[h.doc["text"]] = {"text": h.doc["text"], "similarity": h.score, "asked": len(same_text),
                                  "request_ids": same_text[:12],
                                  "match": "same" if h.score >= dup_t else "similar" if h.score >= sim_t else "unrelated"}
@@ -250,8 +293,11 @@ async def build_atlas_index(store: VectorStore) -> dict[str, Any]:
     report = {}
     for corpus, col_name in COLLECTIONS.items():
         store._mem.pop(corpus, None)
+        if corpus == "requests":
+            await store.live_requests()  # read them before the collection is cleared
         pairs = await store.all_vectors(corpus)
         col = store.db[col_name]
+        # Rebuild everything, live requests included (their vectors must come from the same model).
         await col.delete_many({})
         if pairs:
             await col.insert_many([{**d, "embedding": v, "embedding_model": store.embedder.model} for d, v in pairs])

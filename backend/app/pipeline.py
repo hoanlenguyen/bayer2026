@@ -13,6 +13,7 @@ intent, evidence record and spec is saved for audit.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from datetime import date, datetime, timezone
 from typing import Any, AsyncIterator
@@ -28,6 +29,8 @@ from .llm import LLM, explain
 from .pbip import render_pbip, slug
 from .settings import settings
 from .store import Store
+
+log = logging.getLogger(__name__)
 
 STAGES = {
     "intent": "Understand the request",
@@ -74,15 +77,37 @@ class Pipeline:
         # Atlas Vector Search when the store is MongoDB and the index exists; in-memory otherwise.
         self.vectors = VectorStore(get_embedder(llm), getattr(store, "db", None))
 
-    async def _triage(self, conv: dict[str, Any], status: str) -> dict[str, Any]:
-        """Triage tags for this request: urgency from the intent, status from the workflow."""
+    async def _triage(self, conv: dict[str, Any], status: str | None) -> dict[str, Any]:
+        """Triage tags for this request. Urgency comes from the intent. Status is a workflow tag set later:
+        None while the request is being understood, "new" once it is created, "triaged" at the decision."""
         run = conv["runs"][-1]
         tri = {"status": status, "urgency": conv["intent"].get("urgency") or {"value": "normal", "source": "default", "evidence": None},
-               "similar": run.get("similar")}
+               "similar": run.get("similar"), "request_id": run.get("request_id"),
+               "request_store": run.get("request_store")}
         conv["triage"] = tri
-        if run.get("intent_id"):
+        if run.get("intent_id") and status:
             await self.store.update_artifact("intents", run["intent_id"], {"status": status, "urgency": tri["urgency"]["value"]})
+        if run.get("request_id") and status:
+            try:
+                await self.vectors.set_request_status(run["request_id"], status, urgency=tri["urgency"]["value"])
+            except Exception as exc:  # retrieval upkeep must never block a request
+                log.warning("Could not update request %s in the vector store: %s", run["request_id"], exc)
         return tri
+
+    async def _register_request(self, conv: dict[str, Any], run: dict[str, Any], intent: dict[str, Any]) -> None:
+        """Add the request to the vector store, so the next person asking the same thing sees it as a duplicate."""
+        run["request_id"] = f"REQ-APP-{run['intent_id'][:6].upper()}"
+        filters = intent.get("filters") or {}
+        try:
+            run["request_store"] = await self.vectors.add_request({
+                "_id": run["request_id"], "text": run_question(conv, run), "request_date": now()[:10],
+                "product_context": ", ".join(filters.get("product", [])) or None,
+                "market_context": ", ".join(filters.get("market", [])) or None,
+                "urgency": (intent.get("urgency") or {}).get("value", "normal"), "status": "new",
+                "conversation_id": conv["_id"]})
+        except Exception as exc:
+            run["request_store"] = None
+            log.warning("Could not add request %s to the vector store: %s", run["request_id"], exc)
 
     # ------------------------------------------------------------ helpers
     def _event(self, conv: dict[str, Any], type_: str, **data: Any) -> Event:
@@ -182,7 +207,7 @@ class Pipeline:
             if result["status"] == "ask" and result.get("question"):
                 conv["asked"] += 1
                 conv["state"] = "clarifying"
-                tri = await self._triage(conv, "new")
+                tri = await self._triage(conv, None)
                 yield self._stage(conv, "intent", "waiting", f"Question {conv['asked']} of up to 2",
                                   {**public(intent), "triage": tri, "agent": agent_run.trace()})
                 yield self._say(conv, result["question"], kind="question", suggestions=result.get("suggestions", []))
@@ -196,12 +221,14 @@ class Pipeline:
             conv["intent"] = intent
             run["intent_id"] = await self._artifact(conv, "intents", public(intent), preset_id=conv["preset_id"],
                                                     status="new", urgency=(intent.get("urgency") or {}).get("value", "normal"))
+            await self._register_request(conv, run, intent)
             tri = await self._triage(conv, "new")
+            tri_public = {**tri, "status": None}  # status is shown from the decision step on
             scope = ", ".join(v for vals in (intent.get("filters") or {}).values() for v in vals) or ("global" if intent.get("scope_global") else "")
             summary = (f"{label_list(intent['measures'], 'm') or 'No governed KPIs'}"
                        f"{' by ' + label_list(intent['dimensions'], 'd') if intent['dimensions'] else ''}"
                        f"{' · ' + scope if scope else ''}{' · Tableau migration' if intent.get('migration') else ''}")
-            yield self._stage(conv, "intent", "done", summary, {**public(intent), "triage": tri, "agent": agent_run.trace()})
+            yield self._stage(conv, "intent", "done", summary, {**public(intent), "triage": tri_public, "agent": agent_run.trace()})
             await self._pause()
 
             async for ev in self._plan(conv):

@@ -89,7 +89,6 @@ export function StageDetail({ stage, data, catalog, technical }: Props) {
           ...(data.department ? [["Department", data.department] as [string, string]] : []),
           ...(data.unmatched_terms?.length ? [["Not in catalog", data.unmatched_terms.join(", ")] as [string, string]] : []),
           ...(data.triage ? [
-            ["Status", data.triage.status] as [string, string],
             ["Urgency", `${data.triage.urgency.value} (${data.triage.urgency.source}${data.triage.urgency.evidence ? `: “${data.triage.urgency.evidence}”` : ""})`] as [string, string],
             ...(data.triage.similar ? [["Earlier requests", data.triage.similar.duplicate_count
               ? `same as ${data.triage.similar.duplicate_count} in the queue`
@@ -158,6 +157,14 @@ export function StageDetail({ stage, data, catalog, technical }: Props) {
         <div className="detail-stack">
           <p>{data.reason}</p>
           <p className="rule"><span className="muted">Rule applied: </span>{data.rule}</p>
+          {data.triage?.status && (
+            <KV rows={[
+              ["Status", data.triage.status === "triaged" ? "Triaged" : "New"],
+              ...(data.triage.request_id ? [["Request", data.triage.request_id] as [string, string]] : []),
+              ...(technical && data.triage.request_store ? [["Saved for search", data.triage.request_store === "atlas"
+                ? "MongoDB Atlas (request_vectors)" : "in-memory, until the backend restarts"] as [string, string]] : []),
+            ]} />
+          )}
           {technical && (
             <details className="thresholds">
               <summary>Thresholds</summary>

@@ -146,7 +146,8 @@ export function FlowPanel({ stages, decision, health, catalog }: Props) {
                     {ev?.data && <span className={`flow-chevron${isOpen ? " open" : ""}`}><Icon name="chevron" size={14} /></span>}
                   </button>
                   {summary && <p className="flow-summary">{summary}</p>}
-                  {id === "intent" && triage && <div className="flow-tags"><TriageTags triage={triage} compact /></div>}
+                  {id === "intent" && triage && <div className="flow-tags"><TriageTags triage={triage} compact only="urgency" /></div>}
+                  {id === "decision" && status === "done" && triage?.status && <div className="flow-tags"><TriageTags triage={triage} compact only="status" /></div>}
                   {status === "pending" && <span className="sr-only">Not started</span>}
                   {isOpen && <div className="flow-detail"><StageDetail stage={id} data={ev!.data} catalog={catalog} technical={technical} /></div>}
                 </div>

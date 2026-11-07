@@ -186,7 +186,8 @@ For MongoDB Atlas, also allow the host's outgoing IP addresses under Network Acc
 **Triage tags** (`app/triage.py`), shown under the question and saved on the `intents` record:
 
 - **Urgency** (normal, high, urgent): *stated* when the user picks it (grill-me asks "When do you need this?" when nothing else is missing), *inferred* from explicit time words in the request, quoted as evidence ("before the board meeting"), or *default* (normal). A model's urgency claim is only accepted if the quoted words are really in the request.
-- **Status** (new, triaged): set by the pipeline. New when a request arrives, triaged once the intent is clear and the decision is made.
+- **Status** (new, triaged): set by the pipeline in later steps, not while the request is being understood. When the intent is complete the request is created (`REQ-APP-…`, status new) and the decision step marks it triaged. The tag appears on "Decide what to do".
+- **Live requests in the RAG corpus**: each created request is embedded and added to `request_vectors` (Atlas, when the vector index is ready; otherwise in memory until restart), with its urgency and status. The next person asking the same thing sees it as a duplicate. `python -m app.build_vectors` keeps these requests and re-embeds them with the current model.
 
 Why rules and not a classifier: in Business_Requests every one of the 10 distinct texts carries mixed labels, and product, market and date do not explain them. Even memorising each text's labels gives 54% for urgency against a 52% majority guess. `GET /api/requests/label-check` shows the numbers.
 

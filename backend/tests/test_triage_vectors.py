@@ -112,6 +112,17 @@ class FakeAtlasCollection:
     async def find_one(self, *_a, **_k):
         return self.docs[0] if self.docs else None
 
+    def find(self, query, _projection=None):
+        return _Cursor([d for d in self.docs if all(d.get(k) == v for k, v in query.items())])
+
+    async def replace_one(self, q, doc, upsert=False):
+        self.docs = [d for d in self.docs if d["_id"] != q["_id"]] + [doc]
+
+    async def update_one(self, q, update):
+        for d in self.docs:
+            if d["_id"] == q["_id"]:
+                d.update(update["$set"])
+
     async def aggregate(self, pipeline):
         if self.fail:
             raise RuntimeError("index not ready")
@@ -172,11 +183,37 @@ def test_pipeline_tags_status_urgency_and_duplicates():
     with TestClient(app) as c:
         evs = sse(c.post("/api/chat", json={"preset_id": "req_migrate_xarelto"}))
         tri = stage(evs, "intent")["data"]["triage"]
-        assert tri["status"] == "new" and tri["urgency"]["source"] == "default"
+        assert tri["status"] is None and tri["urgency"]["source"] == "default"   # status is set in later steps
         assert tri["similar"]["duplicate_count"] == 22
-        assert stage(evs, "decision")["data"]["triage"]["status"] == "triaged"
+        decided = stage(evs, "decision")["data"]["triage"]
+        assert decided["status"] == "triaged" and decided["request_id"].startswith("REQ-APP-")
         intents = c.get("/api/conversations/" + evs[0]["id"]).json()
         assert intents["triage"]["status"] == "triaged"
+        # The request is now in the RAG corpus: the same request again counts it as a duplicate.
+        again = c.get("/api/requests/similar", params={"q": TABLEAU}).json()
+        assert again["duplicate_count"] == 23
+        live = [d for d in c.app.state.pipeline.vectors._live if d["_id"] == decided["request_id"]]
+        assert live and live[0]["status"] == "triaged" and live[0]["source"] == "live"
+
+
+async def test_live_request_is_written_to_atlas_and_updated():
+    cols = {"request_vectors": FakeAtlasCollection(), "kpi_vectors": FakeAtlasCollection()}
+    store = VectorStore(LocalEmbedder(), cols)
+    await build_atlas_index(store)
+    assert await store.add_request({"_id": "REQ-APP-1", "text": "Kerendia net sales by month", "status": "new"}) == "atlas"
+    await store.set_request_status("REQ-APP-1", "triaged", urgency="high")
+    doc = next(d for d in cols["request_vectors"].docs if d["_id"] == "REQ-APP-1")
+    assert doc["status"] == "triaged" and doc["urgency"] == "high" and doc["source"] == "live" and len(doc["embedding"]) == 512
+    # A rebuild keeps live requests.
+    report = await build_atlas_index(VectorStore(LocalEmbedder(), cols))
+    assert report["request_vectors"]["documents"] == 151
+
+
+async def test_live_request_without_atlas_stays_in_memory():
+    store = VectorStore(LocalEmbedder())
+    assert await store.add_request({"_id": "REQ-APP-2", "text": TABLEAU, "status": "new"}) == "memory"
+    r = await similar_requests(store, TABLEAU)
+    assert r["duplicate_count"] == 23
 
 
 def test_grill_me_asks_when_needed_and_accepts_stated_urgency():
