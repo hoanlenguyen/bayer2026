@@ -76,6 +76,10 @@ class MemoryStore:
         items = [a for a in self.artifacts["actions"].values() if a.get("briefing_snapshot", {}).get("team") == team]
         return copy.deepcopy(sorted(items, key=lambda a: (a["created_at"], a["_id"]), reverse=True)[:limit])
 
+    async def list_run_actions(self, conversation_id: str, run_id: str) -> list[dict[str, Any]]:
+        return copy.deepcopy([a for a in self.artifacts["actions"].values()
+                              if a.get("conversation_id") == conversation_id and a.get("run_id") == run_id])
+
     async def update_artifact(self, kind: str, doc_id: str, fields: dict[str, Any]) -> None:
         if doc_id in self.artifacts[kind]:
             self.artifacts[kind][doc_id].update(copy.deepcopy(fields))
@@ -181,6 +185,9 @@ class MongoStore:
     async def list_briefing_actions(self, team: str, limit: int) -> list[dict[str, Any]]:
         cursor = self.db["actions"].find({"briefing_snapshot.team": team}).sort([("created_at", -1), ("_id", -1)])
         return [a async for a in cursor.limit(limit)]
+
+    async def list_run_actions(self, conversation_id: str, run_id: str) -> list[dict[str, Any]]:
+        return [a async for a in self.db["actions"].find({"conversation_id": conversation_id, "run_id": run_id})]
 
     async def update_artifact(self, kind: str, doc_id: str, fields: dict[str, Any]) -> None:
         await self.db[kind].update_one({"_id": doc_id}, {"$set": fields})

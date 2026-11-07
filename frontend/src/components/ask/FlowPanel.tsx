@@ -27,7 +27,15 @@ const TITLES: Record<StageId, string> = {
   migration: "Handle Tableau → Power BI",
   decision: "Recommend what to do",
   actions: "Suggest follow-up work",
-  deliver: "Open the existing report",
+  deliver: "Show the matched catalogue record",
+};
+
+const NATIVE_STEP_TITLES: Partial<Record<StageId, string>> = {
+  discovery: "Search the imported BI catalog",
+  lineage: "Trace dependencies in the imported catalog",
+  governance: "Check governance of the imported candidate",
+  migration: "Check imported Tableau reports",
+  deliver: "Open the matched employee report",
 };
 
 export const RUNNING_COPY: Record<StageId, string> = {
@@ -39,7 +47,7 @@ export const RUNNING_COPY: Record<StageId, string> = {
   migration: "Checking for Tableau reports",
   decision: "Applying the decision rules",
   actions: "Suggesting follow-up work",
-  deliver: "Opening the report",
+  deliver: "Loading catalogue details",
 };
 
 const BASE: StageId[] = ["intent", "kpis", "discovery", "lineage", "governance", "migration", "decision"];
@@ -110,7 +118,8 @@ function StepList({ stages, decision, catalog, technical }: { stages: Partial<Re
                 aria-expanded={ev?.data ? isOpen : undefined}
                 disabled={!ev?.data}
               >
-                <span className="flow-name">{TITLES[id]}</span>
+                <span className="flow-name">{stages.decision?.data?.employee_report
+                  ? (NATIVE_STEP_TITLES[id] ?? TITLES[id]) : TITLES[id]}</span>
                 {technical && <span className={`kind ${STAGE_KIND[id].cls}`}>{STAGE_KIND[id].label}</span>}
                 {ev?.data && <span className={`flow-chevron${isOpen ? " open" : ""}`}><Icon name="chevron" size={14} /></span>}
               </button>

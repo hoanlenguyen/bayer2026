@@ -38,9 +38,9 @@ function Modal({ title, meeting, busy, onClose, children }: {
   </dialog>;
 }
 
-function TeamBriefing({ team, onRegister }: { team: Team; onRegister: (reportId: string) => void }) {
+function TeamBriefing({ team, initialView, onRegister }: { team: Team; initialView?: ViewId; onRegister: (reportId: string) => void }) {
   const [data, setData] = useState<Briefing | null>(null);
-  const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [overlay, setOverlay] = useState<Overlay | null>(() => initialView ? { kind: "report", viewId: initialView } : null);
   const [loadError, setLoadError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [error, setError] = useState("");
@@ -201,19 +201,24 @@ function TeamBriefing({ team, onRegister }: { team: Team; onRegister: (reportId:
 }
 
 export function BriefingsPage() {
-  const [team, setTeam] = useState<Team>("commercial");
+  const [initialView, setInitialView] = useState<ViewId | undefined>(() => {
+    const id = new URLSearchParams(window.location.search).get("view");
+    return id === "sales" || id === "shipments" || id === "otif" ? id : undefined;
+  });
+  const [team, setTeam] = useState<Team>(initialView === "otif" ? "supply" : "commercial");
   const [reportId, setReportId] = useState(() => new URLSearchParams(window.location.search).get("report") || undefined);
   const [register, setRegister] = useState(Boolean(reportId));
   return <main className="bf-page">
     <nav className="bf-tabs" aria-label="Briefings workspace">
       <button type="button" aria-current={!register ? "page" : undefined} onClick={() => setRegister(false)}>Team briefings</button>
-      <button type="button" aria-current={register ? "page" : undefined} onClick={() => { setReportId(undefined); setRegister(true); }}>BI report register</button>
+      <button type="button" aria-current={register ? "page" : undefined} onClick={() => { setInitialView(undefined); setReportId(undefined); setRegister(true); }}>BI report register</button>
     </nav>
     {register ? <ReportRegister initialReportId={reportId} /> : <div className="bf-body">
       <div className="bf-toolbar"><div className="bf-teams" role="group" aria-label="Briefing team">{(["commercial", "supply"] as const).map(t =>
-        <button type="button" key={t} aria-pressed={team === t} onClick={() => setTeam(t)}>{teamLabel[t]}</button>)}</div>
+        <button type="button" key={t} aria-pressed={team === t} onClick={() => { setInitialView(undefined); setTeam(t); }}>{teamLabel[t]}</button>)}</div>
         <span className="bf-sample">Synthetic workbook</span></div>
-      <TeamBriefing key={team} team={team} onRegister={id => { setReportId(id); setRegister(true); }} />
+      <TeamBriefing key={team} team={team} initialView={initialView}
+        onRegister={id => { setInitialView(undefined); setReportId(id); setRegister(true); }} />
     </div>}
   </main>;
 }

@@ -105,6 +105,7 @@ class AssetScore:
     lifecycle: str
     owner: str | None = None
     owner_status: str | None = None
+    scope_evidence: dict[str, Any] = field(default_factory=dict)
     checks: list[Check] = field(default_factory=list)
     gates_failed: list[str] = field(default_factory=list)
     repairable: list[str] = field(default_factory=list)
@@ -112,6 +113,13 @@ class AssetScore:
     @property
     def gates_pass(self) -> bool:
         return not self.gates_failed
+
+    @property
+    def reusable(self) -> bool:
+        t = THRESHOLDS
+        return (self.gates_pass and not self.measures_missing and self.scope_score == 1.0
+                and self.coverage >= t["reuse_coverage"] and self.freshness >= t["reuse_freshness"]
+                and self.governance >= t["reuse_governance"])
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -133,11 +141,12 @@ class DecisionResult:
     replaces: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        rules = ["RULE-004", "RULE-008"] if self.change_type == "scope_review" else RULES_BY_DECISION[self.decision.value]
         return {
             "decision": self.decision.value, "rule": self.rule, "reason": self.reason,
             "candidate": self.candidate.to_dict() if self.candidate else None,
             "change_type": self.change_type, "flags": self.flags, "target_model_id": self.target_model_id,
-            "replaces": self.replaces, "rules_applied": RULES_BY_DECISION[self.decision.value], "thresholds": THRESHOLDS,
+            "replaces": self.replaces, "rules_applied": rules, "thresholds": THRESHOLDS,
         }
 
 
@@ -148,6 +157,41 @@ def intent_products(intent: dict[str, Any], catalog: dict[str, Any]) -> list[str
     for ta in f.get("therapeutic_area") or []:
         names += [p["name"] for p in catalog["products"].values() if p["therapeutic_area"].lower() == ta.lower()]
     return list(dict.fromkeys(names))
+
+
+def products_disagree(report_product: str, model_product: str) -> bool:
+    return report_product != model_product and "All Pharma" not in (report_product, model_product)
+
+
+def model_scope(intent: dict[str, Any], asset: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
+    """Compare the report's actual upstream model with the product and geography it would have to serve."""
+    model_id = asset.get("model_id")
+    model = catalog["models"].get(model_id) or {}
+    report_product, report_market = asset["product_scope"], asset["market_scope"]
+    model_product, model_region = model.get("product_scope"), model.get("region_scope")
+    filters = intent.get("filters") or {}
+    products = set(intent_products(intent, catalog))
+    regions = set(filters.get("region") or [])
+    for market in filters.get("market") or []:
+        region = catalog["markets"].get(market, {}).get("region")
+        if region:
+            regions.add(region)
+    market_region = catalog["markets"].get(report_market, {}).get("region")
+    needs_global = intent.get("scope_global") or "market" in intent.get("dimensions", [])
+    outside_model_region = bool(regions - {model_region}) or (not regions and needs_global)
+    reason = None
+    if not model_product or not model_region:
+        reason = f"The scope of the model linked to {asset['id']} is unrecorded."
+    elif products_disagree(report_product, model_product):
+        reason = f"Report {asset['id']} lists {report_product}, while its linked model {model_id} lists {model_product}."
+    elif report_product == "All Pharma" and model_product != "All Pharma" and products != {model_product}:
+        reason = f"Report {asset['id']} lists All Pharma, while its linked model {model_id} is scoped to {model_product}."
+    elif model_region != "Global" and market_region and market_region != model_region:
+        reason = f"Report {asset['id']} lists {report_market} ({market_region}), while its linked model {model_id} lists {model_region}."
+    elif report_market == "Global" and model_region != "Global" and outside_model_region:
+        reason = f"Report {asset['id']} lists Global, while its linked model {model_id} is scoped to {model_region}."
+    return {"asset_id": asset["id"], "asset_product": report_product, "asset_market": report_market, "model_id": model_id,
+            "model_product": model_product, "model_region": model_region, "conflict": bool(reason), "reason": reason}
 
 
 def scope_match(intent: dict[str, Any], asset: dict[str, Any], catalog: dict[str, Any]) -> tuple[float, str]:
@@ -230,11 +274,14 @@ def score_asset(intent: dict[str, Any], asset: dict[str, Any], catalog: dict[str
     cov, det = coverage(intent, asset, catalog)
     gov, checks = governance(asset, intent)
     failed, repairable = gates(asset, intent)
+    evidence = model_scope(intent, asset, catalog)
+    if evidence["conflict"]:
+        failed.append(evidence["reason"])
     return AssetScore(asset_id=asset["id"], name=asset["name"], platform=asset["platform"], coverage=cov,
                       freshness=freshness(asset), governance=gov, views_90d=asset.get("views_90d", 0),
                       lifecycle=asset.get("lifecycle", ""), owner=asset.get("owner"),
                       owner_status=asset.get("owner_status"), checks=checks, gates_failed=failed,
-                      repairable=repairable, **det)
+                      repairable=repairable, scope_evidence=evidence, **det)
 
 
 def rank_candidates(intent: dict[str, Any], catalog: dict[str, Any]) -> list[AssetScore]:
@@ -328,7 +375,7 @@ def decide(candidates: list[AssetScore], availability: dict[str, Any], intent: d
 
     in_scope = [c for c in candidates if c.scope_score >= t["min_scope"]]
     for c in in_scope:
-        if c.gates_pass and c.coverage >= t["reuse_coverage"] and c.freshness >= t["reuse_freshness"] and c.governance >= t["reuse_governance"]:
+        if c.reusable:
             return DecisionResult(
                 Decision.REUSE,
                 f"coverage {c.coverage:.2f} ≥ {t['reuse_coverage']}, freshness {c.freshness:.2f} ≥ {t['reuse_freshness']}, "
@@ -358,6 +405,16 @@ def decide(candidates: list[AssetScore], availability: dict[str, Any], intent: d
                 f"coverage {c.coverage:.2f} ≥ {t['reuse_coverage']}, {c.views_90d} views in 90 days, governance {c.governance:.2f}: repair before reuse",
                 f"'{c.name}' covers the request. Repair it ({'; '.join(fixes)}) instead of building a copy.",
                 c, change_type="maintenance", flags=_flags(candidates, c))
+
+    for c in in_scope:
+        # A metadata contradiction warrants review when the report otherwise covers the request.
+        if (c.scope_evidence.get("conflict") and not c.measures_missing and c.coverage >= t["reuse_coverage"]
+                and set(c.gates_failed) - set(c.repairable) == {c.scope_evidence["reason"]}):
+            contact = c.owner if c.owner_status == "active" else "the BI team"
+            return DecisionResult(
+                Decision.REVIEW, "Report and model scope must be reconciled before reuse (RULE-004).",
+                f"{c.scope_evidence['reason']} Ask {contact} to verify the model binding and its data coverage before using this report.",
+                c, change_type="scope_review", target_model_id=c.scope_evidence["model_id"], flags=_flags(candidates, c))
 
     n_req = max(len(intent.get("measures", [])), 1)
     for c in in_scope:
@@ -427,8 +484,7 @@ def _decide_migration(candidates: list[AssetScore], availability: dict[str, Any]
     t = THRESHOLDS
     products = set(intent_products(intent, catalog))
     legacy = [a for a in catalog["assets"] if a["platform"] == "Tableau" and a["product_scope"] in products]
-    pbi = [c for c in candidates if c.platform == "Power BI" and c.gates_pass and c.coverage >= t["reuse_coverage"]
-           and c.scope_score >= t["min_scope"] and c.governance >= t["reuse_governance"] and c.freshness >= t["reuse_freshness"]]
+    pbi = [c for c in candidates if c.platform == "Power BI" and c.reusable]
 
     def path(a: dict[str, Any]) -> str:
         return (a.get("migration") or {}).get("recommended_path_candidate") or "not in backlog"

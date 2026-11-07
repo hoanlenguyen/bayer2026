@@ -13,6 +13,18 @@ FRONTEND_PORT=5174 BACKEND_PORT=8014 docker compose -p bayer-briefing-review -f 
 
 Open [the briefing](http://localhost:5174/briefings). The footer shows the store in use. **Shared MongoDB storage** keeps selections, actions, revisions and evidence across restarts. The standard no-database setup keeps them in memory for the lifetime of the server.
 
+## Start with an employee decision
+
+Open **Ask** and try one of these questions with the same local workbook.
+
+| Employee request | What to verify |
+| --- | --- |
+| Monthly units shipped for Nubeqa in Germany. Needed today. | If prompted for the decision, enter “Decide where to act this month”. **Reuse** opens the shipment report `BR-SHIPMENTS`. It shows ten months of figures. Commercial and Supply also use this report in their briefings. |
+| Show monthly inventory coverage and OTIF for Lynkuet in Spain. | **Reuse** identifies `AST-0286`. Open **View workbook preview**. October inventory coverage is 8.9 weeks and OTIF is 98.5%. The September comparison and source rows 600–601 are visible alongside the values. |
+| Use the Eylea/Japan starter question. | **Human review** shows why immediate reuse would be unsafe. The report `AST-0079` lists Eylea in `Analytics_Assets` row 80. Its linked model `SM-040` lists Nubeqa in `Semantic_Models` row 41. |
+
+From the Eylea decision, use **Assign next step**, select an owner and set a due date. Reopen the conversation through **History**, record the outcome and inspect the assignment. The action retains the request and evidence that the owner received. For a new build or migration, assignment opens work for a BI owner. Publishing to a Power BI tenant requires a separate integration.
+
 ## Try the handover
 
 1. Switch between Commercial and Supply. Both reference the same shipment report. Commercial pairs it with sales and forecast. Supply pairs it with on-time, in-full delivery. Open **Choose reports**, pin a view for one team and reload.

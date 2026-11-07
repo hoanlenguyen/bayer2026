@@ -15,6 +15,7 @@ from . import actions as act
 from . import catalog as cat
 from .briefing_routes import router as briefing_router
 from .report_register import router as report_register_router
+from .request_handoff import router as request_handoff_router
 from .graph import build_graph
 from .decider import get_decider
 from .llm import get_llm
@@ -85,6 +86,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Agentic Analytics Manager", version="0.1.0", lifespan=lifespan)
 app.include_router(briefing_router)
 app.include_router(report_register_router)
+app.include_router(request_handoff_router)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -230,6 +232,8 @@ async def update_action(action_id: str, req: ActionUpdate) -> dict[str, Any]:
         raise HTTPException(404, "Action not found")
     if action.get("briefing_snapshot"):
         raise HTTPException(409, "Update this action from its team briefing so the named actor and evidence stay linked.")
+    if action.get("request_snapshot"):
+        raise HTTPException(409, "Update this action from the saved Ask decision so its owner and evidence stay linked.")
     try:
         updated = act.apply_update(action, req.model_dump(exclude={"by"}, exclude_none=True), req.by)
     except ValueError as exc:

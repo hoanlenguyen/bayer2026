@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from . import catalog
+from .decision import products_disagree
 from .briefing_definitions import DEFAULTS, EMPLOYEE_REPORTS, VIEWS
 
 router = APIRouter(prefix="/api/report-register")
@@ -51,8 +52,7 @@ def inventory() -> dict[str, dict]:
             evidence[f"Asset_Usage row {n}"] = (f"{u['month'][:7]} · {u['views']} views · {u['unique_users']} unique users"
                                                  f" · {u['exports']} exports · {u['subscriptions']} subscriptions")
         issues = []
-        if (r["product_scope"] != model["product_scope"]
-                and "All Pharma" not in (r["product_scope"], model["product_scope"])):
+        if products_disagree(r["product_scope"], model["product_scope"]):
             issues.append("Product scope mismatch")
         if not owner or owner["status"] != "active":
             issues.append("Ownership")
@@ -194,6 +194,10 @@ async def _record(report_id: str, store) -> dict:
         if snapshot:
             r["evidence"][f"Saved action {action['_id']}"] = (
                 f"{action['title']} · {action['owner']} · {snapshot['team']} · source version {snapshot['version']}"
+            )
+        elif decision := action.get("request_snapshot"):
+            r["evidence"][f"Saved action {action['_id']}"] = (
+                f"{action['title']} · {action['owner']} · Ask decision {decision['run_id']} · {decision['verdict']}"
             )
     return r
 

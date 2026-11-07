@@ -76,7 +76,7 @@ def evidence_stages(intent: dict[str, Any], tags: dict[str, Any], plan: dict[str
         n_biz = sum(1 for p in proposals if p["kind"] == "business")
         out.append(stage("actions", f"{n_biz} business, {len(proposals) - n_biz} maintenance suggestion(s).", {"proposals": proposals}))
     if result.decision == Decision.REUSE:
-        out.append(stage("deliver", f"Opened '{result.candidate.name}'", {"asset": cat.asset_by_id(result.candidate.asset_id),
+        out.append(stage("deliver", f"Matched catalogue report '{result.candidate.name}'", {"asset": cat.asset_by_id(result.candidate.asset_id),
                                                                          "filters": intent.get("filters", {}), "preview": decision.get("preview")}))
     return out
 
