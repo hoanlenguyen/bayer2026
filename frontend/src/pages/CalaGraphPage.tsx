@@ -8,7 +8,7 @@ export function CalaGraphPage() {
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    document.title = "Knowledge graph · Analytics Manager";
+    document.title = "Knowledge graph · AnalytIQ Intelligence";
     let current = true;
     loadEstate()
       .then((data) => { if (current) setGraph(data); })

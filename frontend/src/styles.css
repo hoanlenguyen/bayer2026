@@ -60,7 +60,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .app { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 100dvh; }
 .app-main { min-width: 0; }
 /* Ask and Explorer match the knowledge graph: page background everywhere, dark text. Borders separate cards. */
-.app-main:not(:has(.kg-page)) { --surface: var(--bg); --muted: var(--fg); }
+.app-main:not(:has(.kg-page)), .landing { --surface: var(--bg); --muted: var(--fg); }
 /* Hints and switched-off controls keep the warm grey, so they still read as inactive. */
 .tabs button[aria-selected="false"], .seg button[aria-pressed="false"],
 .type-chip-btn[aria-pressed="false"] .n { color: var(--kg-dot); }
@@ -68,6 +68,8 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .brand { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 16px; flex: none; border-bottom: 1px solid var(--line);
   color: var(--fg); text-decoration: none; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
 .brand-mark { width: 24px; height: 24px; border-radius: 7px; background: var(--accent); position: relative; flex: none; }
+.brand-logo { display: block; height: 40px; width: auto; margin-left: -4px; } /* the image has a little space on its left */
+.brand-mark { display: none; } /* the logo stands in for it; the mark returns where the logo doesn't fit */
 .brand-mark::after { content: ""; position: absolute; inset: 7px; border: 2px solid var(--accent-fg); border-radius: 50%; border-right-color: transparent; }
 .sidebar-head { display: flex; align-items: center; flex: none; height: 56px; padding-right: 12px; border-bottom: 1px solid var(--line); }
 .sidebar-head .brand { flex: 1; min-width: 0; border-bottom: 0; }
@@ -99,8 +101,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .side-history .side-history-confirm .side-history-danger { background: var(--bad); color: var(--surface); }
 .side-history .side-history-confirm .side-history-danger:hover:not(:disabled) { background: var(--bad); color: var(--surface); opacity: 0.9; }
 .side-history-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sample-note { margin: auto 0 0; padding: 16px; display: grid; gap: 6px; justify-items: start; font-size: 13px; color: var(--muted); }
-.sample-tag { font-size: 12px; font-weight: 500; color: var(--warn); background: var(--warn-soft); padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
+.sample-note { margin: auto 0 0; padding: 16px; display: grid; gap: 6px; justify-items: start; font-size: 13px; color: var(--muted); opacity: 0.5; }
 
 .pane-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 56px; padding: 0 var(--pad-x); flex: none; border-bottom: 1px solid var(--line); }
 .pane-head h1, .pane-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
@@ -185,7 +186,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .sim-verdict-needs_context { color: var(--rec-review); }
 .sim-verdict-failed { color: var(--bad); }
 .sim-answer { display: grid; gap: 8px; }
-/* Analytics Manager's own words in navy, so it never reads as one of the two people */
+/* AnalytIQ Intelligence's own words in navy, so it never reads as one of the two people */
 .sim-answer-bubble { display: grid; gap: 6px; padding: 12px 16px; border-radius: var(--radius-lg); background: var(--navy); color: var(--on-navy); }
 .sim-answer-bubble :focus-visible { outline-color: var(--on-navy); }
 .sim-answer-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
@@ -577,10 +578,9 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
   .app:has(.sidebar.collapsed) { grid-template-columns: 64px minmax(0, 1fr); }
   .collapsed .sidebar-head { flex-direction: column; height: auto; padding: 0 0 8px; }
   .collapsed .sidebar-head .brand { flex: none; width: 100%; justify-content: center; padding: 0; }
-  .collapsed .brand-name, .collapsed .app-nav a > span, .collapsed .sample-text, .collapsed .sample-extra { display: none; }
+  .collapsed .brand-mark { display: block; }
+  .collapsed .brand-name, .collapsed .app-nav a > span, .collapsed .sample-note { display: none; }
   .collapsed .app-nav a { justify-content: center; padding: 0; }
-  .collapsed .sample-note { padding: 12px 4px; justify-items: center; }
-  .collapsed .sample-tag { padding: 2px 6px; font-size: 11px; }
 }
 @media (max-width: 768px) {
   :root { --pad-x: max(16px, env(safe-area-inset-left, 0px)); }
@@ -589,12 +589,12 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
   .sidebar-head { display: contents; }
   .sidebar-toggle { display: none; }
   .sidebar-head .brand, .brand { flex: none; border-bottom: 0; padding: 0 8px 0 16px; height: 56px; }
+  .brand-logo { height: 32px; }
   .app-nav { display: flex; padding: 0; min-width: 0; }
   .app-nav a { height: 36px; padding: 0 10px; border-radius: var(--radius-sm); font-size: 13px; }
   .app-nav .icon { display: none; }
   .side-history { display: none; } /* the sidebar is a single top bar here */
-  .sample-note { margin: 0 0 0 auto; padding: 0; }
-  .sample-text { display: none; }
+  .sample-note { display: none; }
   .ask-empty { min-height: calc(100dvh - 57px); padding: 24px 16px; } /* 56px bar plus its 1px border */
   .page-bar { height: auto; flex-direction: column; align-items: stretch; gap: 8px; padding-block: 10px; }
   .search { flex: none; }
@@ -612,6 +612,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 }
 @media (max-width: 560px) {
   .brand-name { display: none; }
+  .brand-mark { display: block; }
   .nav-extra { display: none; } /* three menu items only fit a phone with short labels */
   .kv div, .approval-facts li, .gov-row { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .approval-actions .btn, .approval-actions .btn-outline { flex: 1 1 100%; white-space: normal; height: auto; min-height: 44px; padding-block: 8px; }
@@ -636,3 +637,110 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 .triage-note { margin: 0; font-size: 13.5px; overflow-wrap: anywhere; }
 .flow-tags { margin-top: 6px; }
 .flow-tags .triage-tag { font-size: 11px; padding: 2px 8px; }
+
+/* Landing page (/index): one screen, no sidebar */
+.app[hidden] { display: none; }
+.landing { height: 100dvh; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 16px; padding: 24px var(--pad-x) 10px; box-sizing: border-box; background: var(--bg); color: var(--fg); }
+.landing-logo { display: block; height: 130px; width: auto; margin: 0 0 40px -8px; } /* the image has a little space on its left */
+.landing-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: stretch; min-height: 0; }
+.landing-hero { align-self: center; }
+.landing-graph { position: relative; min-height: 0; display: grid; place-items: stretch; }
+.landing-graph .kg { height: 100%; min-height: 0; }
+.landing-graph .kg-search, .landing-graph .kg-card { display: none; } /* only the dots here; the full page has search and captions */
+.landing-graph .kg-status { align-self: center; }
+.landing-kicker { margin: 0 0 12px; font: 500 13px/1.4 var(--font-mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.landing-hero h1 { margin: 0; font-size: clamp(30px, 4vw, 64px); line-height: 1.1; font-weight: 600; letter-spacing: -0.02em; }
+.landing-lead { margin: 20px 0 0; font-size: clamp(17px, 1.4vw, 21px); line-height: 1.6; color: var(--muted); }
+.landing-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+.landing-actions a, .landing-actions button, .problem-actions a { display: inline-flex; align-items: center; height: 48px; padding: 0 20px; border-radius: var(--radius); font-weight: 500; text-decoration: none; }
+.landing-primary { background: var(--accent); color: var(--accent-fg); }
+.landing-primary:hover { background: var(--accent-hover); }
+.landing-secondary { color: var(--fg); border: 1px solid var(--line-strong); background: none; font: inherit; font-weight: 500; cursor: pointer; }
+.landing-secondary:hover { background: var(--button-hover); }
+.landing-name { font-weight: 600; color: var(--fg); }
+.landing-footer { margin: 0 calc(-1 * var(--pad-x)); padding: 10px var(--pad-x) 0; border-top: 1px solid var(--line); text-align: right; font-size: 13px; color: var(--muted); }
+.landing-actions button:focus-visible, .problem-actions a:focus-visible, .landing-actions a:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+@media (max-width: 900px) {
+  .landing { height: auto; min-height: 100dvh; }
+  .landing-body { grid-template-columns: 1fr; }
+  .landing-graph { height: 420px; }
+}
+@media (max-width: 480px) {
+  .landing-graph { height: 340px; }
+  .landing { padding: 16px 16px 8px; gap: 24px; }
+  .landing-lead { font-size: 15px; }
+  .landing-logo { height: 80px; margin-bottom: 24px; }
+}
+
+/* Landing entrance: text rises in one line after another, then the graph grows in. */
+@keyframes landing-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes landing-grow { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: no-preference) {
+  .landing-logo, .landing-kicker, .landing-hero h1, .landing-lead, .landing-actions, .landing-footer {
+    animation: landing-rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .landing-logo { animation-delay: 0s; }
+  .landing-kicker { animation-delay: 0.08s; }
+  .landing-hero h1 { animation-delay: 0.16s; }
+  .landing-lead { animation-delay: 0.28s; }
+  .landing-actions { animation-delay: 0.4s; }
+  .landing-footer { animation: landing-rise 0.7s 0.6s ease-out both; }
+  .landing-graph .kg { animation: landing-grow 0.8s 0.05s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .landing-actions a, .landing-actions button { transition: transform 0.18s ease, background-color 0.18s ease; }
+  .landing-actions a:hover, .landing-actions button:hover { transform: translateY(-2px); }
+  .landing-actions a:active, .landing-actions button:active { transform: none; }
+  .problem[open] { animation: problem-in 0.28s cubic-bezier(0.2, 0.7, 0.2, 1); }
+  .problem[open]::backdrop { animation: problem-fade 0.28s ease-out; }
+}
+
+/* "See the problem we solve" dialog on the landing page */
+@keyframes problem-in { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes problem-fade { from { opacity: 0; } to { opacity: 1; } }
+.problem { width: min(680px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); color: var(--fg); box-shadow: 0 24px 64px rgb(0 0 0 / 0.18); --muted: var(--fg); }
+.problem::backdrop { background: rgb(60 56 53 / 0.35); backdrop-filter: blur(3px); }
+.problem-body { padding: 28px 32px 32px; }
+.problem-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.problem-head .landing-kicker { margin-bottom: 8px; }
+.problem-head h2 { margin: 0; font-size: 26px; line-height: 1.2; font-weight: 600; letter-spacing: -0.01em; }
+.problem-close { flex: none; width: 40px; height: 40px; margin: -6px -10px 0 0; display: grid; place-items: center; background: none; border: 0; border-radius: var(--radius-sm); color: var(--fg); cursor: pointer; }
+.problem-close:hover { background: var(--button-hover); }
+.problem-close:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+.problem-list { list-style: none; margin: 24px 0 0; padding: 0; display: grid; gap: 0; }
+.problem-list li { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 10px 12px; padding: 16px 0; border-top: 1px solid var(--line); }
+.problem-n { font: 500 13px/24px var(--font-mono); color: var(--kg-dot); }
+.problem-list h3 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+.problem-list p { margin: 0; font-size: 15px; line-height: 1.55; }
+.problem-answer { margin: 0; padding: 20px 0 0; border-top: 1px solid var(--line); font-size: 16px; line-height: 1.6; }
+.problem-actions { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 12px; }
+/* The button sits inside the sentence: "Hit [Solution rationale] to see how …". */
+.problem-inline-btn { display: inline-flex; align-items: center; height: 32px; margin: 2px 0; padding: 0 12px; vertical-align: middle; border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--fg); font: inherit; font-weight: 600; cursor: pointer; transition: background-color 0.15s ease; }
+.problem-inline-btn:hover { background: var(--button-hover); }
+.problem-inline-btn[aria-pressed="true"] { background: var(--ok-soft); border-color: var(--ok); }
+.problem-inline-btn:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+.problem-list h3 { line-height: 24px; }
+/* Square bordered badges (4px corners), as tall as the first line of their text so icon and text line up. */
+.problem-badge { flex: none; width: 24px; height: 24px; box-sizing: border-box; display: grid; place-items: center; border: 2px solid currentColor; border-radius: 4px; }
+.problem-badge .icon { stroke-width: 3.25; } /* bold, to match the 600-weight text */
+.problem-list.solved .problem-n { color: var(--bad); display: flex; line-height: 24px; }
+.problem-list.solved .problem-n .problem-badge { background: var(--bad-soft); border-width: 1.5px; }
+.problem-list.solved .problem-n .icon { stroke-width: 2; } /* the X stays lighter than the bold tick */
+.problem-list.solved h3, .problem-list.solved .problem-text { text-decoration: line-through; text-decoration-thickness: 1.5px; color: var(--kg-dot); }
+/* Full row, pulled 12px left so its tick sits in the same column as the X, and its text starts where the problem's does (24px badge + 28px = the 40px column + 12px gap). */
+.problem-fix { grid-column: 1 / -1; display: flex; gap: 28px; align-items: flex-start; margin: 0 0 0 -12px !important; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--ok-soft); color: var(--fg); font-weight: 600; line-height: 24px !important; }
+.problem-fix .problem-badge { color: var(--ok); background: var(--bg); }
+.problem-title-struck { text-decoration: line-through; text-decoration-thickness: 2px; color: var(--kg-dot); }
+/* Same look as the title it replaces. */
+.problem-title-fix { margin: 12px 0 0; font-size: 26px; line-height: 1.2; font-weight: 600; letter-spacing: -0.01em; }
+@keyframes problem-strike { from { text-decoration-color: transparent; } to { text-decoration-color: currentColor; } }
+@media (prefers-reduced-motion: no-preference) {
+  .problem-list.solved h3, .problem-list.solved .problem-text { animation: problem-strike 0.4s ease-out both; animation-delay: calc(var(--i) * 0.12s); }
+  .problem-list.solved .problem-n { animation: problem-fade 0.3s ease-out both; animation-delay: calc(var(--i) * 0.12s); }
+  .problem-title-struck { animation: problem-strike 0.4s ease-out both; }
+  .problem-title-fix { animation: landing-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .problem-fix { animation: landing-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: calc(var(--i) * 0.12s + 0.2s); }
+}
+.problem-actions .landing-primary:hover { background: var(--accent-hover); }
+@media (max-width: 480px) {
+  .problem-body { padding: 20px 20px 24px; }
+  .problem-head h2, .problem-title-fix { font-size: 21px; }
+}

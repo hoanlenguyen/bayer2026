@@ -192,10 +192,28 @@ function buildGraph(entities: Entity[], catalogEdges: Edge[]) {
 interface Props {
   entities: Entity[];
   edges: Edge[];
+  /** Draw each domain's name above its group. Off on the landing page, where only the dots show. */
+  groupLabels?: boolean;
+  /** Click to pin an item, and right-drag to pan. Off on the landing page: hover still works, clicks do nothing. */
+  selectable?: boolean;
+  /** Random items keep lighting up, a few at a time, each fading in, spreading its links, then fading out. */
+  autoHighlight?: boolean;
+  /** Show the highlighted item's name in a tooltip. Off on the landing page: only its links light up. */
+  nameTips?: boolean;
+  /** Links grow out of the highlighted item, with a pulse running along each and a ring around it. */
+  animateLinks?: boolean;
+  /** Size the graph so its widest extent fills this share of the panel (0 to 1). Unset: the fixed default scale. */
+  fill?: number;
+  /** Scroll to zoom. Off on the landing page, where the size stays fixed and the wheel is left to the page. */
+  zoomable?: boolean;
+  /** Domain groups take turns: a few at a time fade and shrink away, then come back. Shared KPIs stay put. */
+  clusterCycle?: boolean;
+  /** Multiplies every dot's size. 1 is the full graph page's size. */
+  dotScale?: number;
 }
 
 /** Rotating 3D cloud of the catalog on a canvas. Hover or tap a named dot to see what it is. */
-export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
+export function KnowledgeGraph({ entities, edges: catalogEdges, groupLabels = true, selectable = true, autoHighlight = false, nameTips = true, animateLinks = false, fill, zoomable = true, clusterCycle = false, dotScale = 1 }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [hover, setHover] = useState<Dot | null>(null);
   const [selected, setSelected] = useState<Dot | null>(null);
@@ -231,7 +249,9 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
   useEffect(() => {
     const canvas = ref.current!;
     const ctx = canvas.getContext("2d")!;
-    const { dots, edges, crossing } = buildGraph(entities, catalogEdges);
+    const built = buildGraph(entities, catalogEdges);
+    const { edges, crossing } = built;
+    const dots = dotScale === 1 ? built.dots : built.dots.map((d) => ({ ...d, r: d.r * dotScale }));
     const css = getComputedStyle(canvas);
     const dotColor = css.getPropertyValue("--kg-dot").trim();
     const lineColor = css.getPropertyValue("--kg-line").trim();
@@ -261,10 +281,93 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
     pinRef.current = (id) => pin(id === null ? -1 : dots.findIndex((d) => d.entity?.id === id));
     const neighbours = dots.map((): number[] => []);
     for (const [a, b] of edges) { neighbours[a]!.push(b); neighbours[b]!.push(a); }
+    // Items with a name and at least one link, for the random highlight.
+    const named = dots.flatMap((d, i) => (d.entity && neighbours[i]!.length ? [i] : []));
+    // Cluster cycle: each dot and each link inside a domain belongs to that domain's group.
+    const groupNames = groups.map((g) => g.name);
+    const groupOf = (d: Dot) => Math.max(0, groupNames.indexOf(d.domain ?? "Shared KPIs"));
+    const dotGroup = dots.map(groupOf);
+    const dotsByGroup = groupNames.map((): number[] => []);
+    dotGroup.forEach((g, i) => dotsByGroup[g]!.push(i));
+    const edgesByGroup = groupNames.map((): [number, number][] => []);
+    const crossEdges: [number, number][] = [];
+    edges.forEach((e, i) => (crossing[i] ? crossEdges.push(e) : edgesByGroup[dotGroup[e[0]]!]!.push(e)));
+    // Groups that take part, in a fixed shuffled order so neighbouring groups don't fade one after another.
+    const cycling = groupNames.map((_, g) => g).filter((g) => groupNames[g] !== "Shared KPIs");
+    for (let k = cycling.length - 1; k > 0; k--) { const j = (k * 7 + 3) % (k + 1); [cycling[k], cycling[j]] = [cycling[j]!, cycling[k]!]; }
+    const slot = new Map(cycling.map((g, k) => [g, k]));
+    const CYCLE_STEP_MS = 1600; // a new group starts fading every 1.6 s
+    const gAlpha = new Float32Array(groupNames.length).fill(1);
+    const smooth = (t: number) => t * t * (3 - 2 * t);
+    /** 1 most of the time; fades to 0.06 and back once per cycle, at this group's own moment. */
+    const cycleAlpha = (g: number, now: number) => {
+      const k = slot.get(g);
+      if (k === undefined) return 1;
+      const phase = (now / (CYCLE_STEP_MS * cycling.length) + k / cycling.length) % 1;
+      if (phase < 0.72) return 1;
+      if (phase < 0.8) return 1 - 0.94 * smooth((phase - 0.72) / 0.08);
+      if (phase < 0.92) return 0.06;
+      return 0.06 + 0.94 * smooth((phase - 0.92) / 0.08);
+    };
+    // Random highlights ("sparks"): a few live at once, each for SPARK_LIFE ms, started a little apart.
+    const SPARK_LIFE = 6000, SPARK_MAX = 2;
+    // Distance of the farthest dot from the centre: with `fill`, the graph is scaled so this reaches the panel's edge share.
+    // Perspective adds at most about 4% while it turns, so a fill up to 0.9 stays inside the panel.
+    const extent = Math.max(1, ...dots.map((d) => Math.hypot(d.x, d.y, d.z)));
+    // Link animation timing (ms): links grow out, pulses run along them, the ring spreads, sparks fade in and out.
+    const GROW_MS = 1500, PULSE_MS = 2800, RING_MS = 2600, FADE_IN_MS = 600, FADE_OUT_MS = 1400;
+    let sparks: { i: number; at: number; speed: number }[] = [], nextSpark = performance.now() + 300; // as the graph grows in
+    // The first sparks are the items nearest the centre, so the animation opens in the middle of the graph.
+    const opening = [...named].sort((a, b) => Math.hypot(dots[a]!.x, dots[a]!.y, dots[a]!.z) - Math.hypot(dots[b]!.x, dots[b]!.y, dots[b]!.z)).slice(0, SPARK_MAX);
+    let lit = -1, litAt = 0; // the highlighted item, and when it lit up: the link animation starts there
     const dotLinked = css.getPropertyValue("--kg-dot-linked").trim();
     const dotHover = css.getPropertyValue("--kg-dot-hover").trim();
     const tipBg = css.getPropertyValue("--kg-tip-bg").trim();
     const px = new Float32Array(dots.length), py = new Float32Array(dots.length), ps = new Float32Array(dots.length);
+
+    /** One lit item at `age` ms: links grow out to its linked items, pulses run along them, a ring spreads from it. */
+    const drawLit = (i: number, age: number, alpha: number) => {
+      const grow = 1 - Math.pow(1 - Math.min(1, age / GROW_MS), 3);
+      const hx = px[i]!, hy = py[i]!;
+      const links = neighbours[i]!;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = lineHover;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (const j of links) { ctx.moveTo(hx, hy); ctx.lineTo(hx + (px[j]! - hx) * grow, hy + (py[j]! - hy) * grow); }
+      ctx.stroke();
+      ctx.fillStyle = dotHover;
+      ctx.beginPath();
+      links.forEach((j, k) => {
+        const t = ((age / PULSE_MS + k * 0.17) % 1) * grow;
+        const x = hx + (px[j]! - hx) * t, y = hy + (py[j]! - hy) * t;
+        ctx.moveTo(x + 2.2, y);
+        ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+      });
+      ctx.fill();
+      ctx.fillStyle = dotLinked;
+      ctx.beginPath();
+      for (const j of links) {
+        const nr = Math.max(4, dots[j]!.r * ps[j]! * 1.5) * grow;
+        ctx.moveTo(px[j]! + nr, py[j]!);
+        ctx.arc(px[j]!, py[j]!, nr, 0, Math.PI * 2);
+      }
+      ctx.fill();
+      const r = Math.max(7, dots[i]!.r * ps[i]! * 1.7) * Math.min(1, age / 500);
+      ctx.fillStyle = dotHover;
+      ctx.beginPath();
+      ctx.arc(hx, hy, r, 0, Math.PI * 2);
+      ctx.fill();
+      const ring = (age % RING_MS) / RING_MS;
+      ctx.globalAlpha = alpha * (1 - ring);
+      ctx.strokeStyle = dotHover;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(hx, hy, r + ring * 18, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    };
 
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
@@ -279,7 +382,8 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
       const w = canvas.clientWidth, h = canvas.clientHeight;
       ctx.clearRect(0, 0, w, h);
       const cy = Math.cos(ry), sy = Math.sin(ry), cx = Math.cos(rx), sx = Math.sin(rx);
-      const f = 1100, base = zoom * Math.min(w, h) / 720; // a long lens keeps near groups from ballooning
+      const f = 1100; // a long lens keeps near groups from ballooning
+      const base = zoom * (fill ? (fill * Math.min(w, h)) / (2 * extent) : Math.min(w, h) / 720);
       shift += ((pinned >= 0 && w > 768 ? 160 : 0) - shift) * 0.15;
       const viewX = w / 2 + panX - shift;
       let hovered = -1, nearest = 10;
@@ -294,38 +398,70 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
         }
       });
 
-      if (!dragging) canvas.style.cursor = hovered >= 0 ? "pointer" : "grab";
+      if (!dragging) canvas.style.cursor = hovered >= 0 && selectable ? "pointer" : "grab";
+      const pointed = hovered >= 0;
       if (hovered < 0) hovered = pinned; // hovering another item previews it; otherwise the pinned one shows
+      const now = performance.now();
+      if (hovered !== lit) { lit = hovered; litAt = now; }
+      const moving = animateLinks && !motion.matches;
+      const age = now - litAt;
+      const grow = moving ? 1 - Math.pow(1 - Math.min(1, age / GROW_MS), 3) : 1; // ease-out: 0 → 1 over GROW_MS
 
+      const cycleOn = clusterCycle && !motion.matches;
+      for (let g = 0; g < gAlpha.length; g++) gAlpha[g] = cycleOn ? cycleAlpha(g, now) : 1;
       ctx.lineWidth = 0.2;
-      for (const far of [true, false]) {
-        ctx.strokeStyle = far ? lineFar : lineColor;
+      ctx.strokeStyle = lineFar;
+      ctx.beginPath();
+      for (const [a, b] of crossEdges) { ctx.moveTo(px[a]!, py[a]!); ctx.lineTo(px[b]!, py[b]!); }
+      ctx.stroke();
+      ctx.strokeStyle = lineColor;
+      edgesByGroup.forEach((list, g) => {
+        ctx.globalAlpha = gAlpha[g]!;
         ctx.beginPath();
-        edges.forEach(([a, b], i) => {
-          if (!!crossing[i] === far) { ctx.moveTo(px[a]!, py[a]!); ctx.lineTo(px[b]!, py[b]!); }
-        });
+        for (const [a, b] of list) { ctx.moveTo(px[a]!, py[a]!); ctx.lineTo(px[b]!, py[b]!); }
         ctx.stroke();
-      }
+      });
+      ctx.globalAlpha = 1;
 
       if (hovered >= 0) {
         ctx.strokeStyle = lineHover;
         ctx.lineWidth = 1;
         ctx.beginPath();
-        for (const [a, b] of edges) {
-          if (a === hovered || b === hovered) { ctx.moveTo(px[a]!, py[a]!); ctx.lineTo(px[b]!, py[b]!); }
+        // Drawn from the highlighted item outwards, so the links can grow out of it.
+        const hx0 = px[hovered]!, hy0 = py[hovered]!;
+        for (const j of neighbours[hovered]!) {
+          ctx.moveTo(hx0, hy0);
+          ctx.lineTo(hx0 + (px[j]! - hx0) * grow, hy0 + (py[j]! - hy0) * grow);
         }
         ctx.stroke();
+        if (moving) {
+          // A small pulse runs out along each link, each a little out of step with the others.
+          ctx.fillStyle = dotHover;
+          ctx.beginPath();
+          neighbours[hovered]!.forEach((j, k) => {
+            const t = ((age / PULSE_MS + k * 0.17) % 1) * grow;
+            const x = hx0 + (px[j]! - hx0) * t, y = hy0 + (py[j]! - hy0) * t;
+            ctx.moveTo(x + 2.2, y);
+            ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+          });
+          ctx.fill();
+        }
       }
 
       ctx.fillStyle = dotColor;
-      ctx.beginPath();
-      dots.forEach((d, i) => {
-        if (i === hovered) return; // drawn on top below
-        const r = d.r * ps[i]!;
-        ctx.moveTo(px[i]! + r, py[i]!);
-        ctx.arc(px[i]!, py[i]!, r, 0, Math.PI * 2);
+      dotsByGroup.forEach((list, g) => {
+        const a = gAlpha[g]!;
+        ctx.globalAlpha = a;
+        ctx.beginPath();
+        for (const i of list) {
+          if (i === hovered) continue; // drawn on top below
+          const r = dots[i]!.r * ps[i]! * (0.4 + 0.6 * a); // a fading group also shrinks
+          ctx.moveTo(px[i]! + r, py[i]!);
+          ctx.arc(px[i]!, py[i]!, r, 0, Math.PI * 2);
+        }
+        ctx.fill();
       });
-      ctx.fill();
+      ctx.globalAlpha = 1;
 
       // Domain names, so each group can be read at a glance.
       ctx.font = `600 ${w < 560 ? 10 : 12}px ${css.fontFamily}`;
@@ -341,11 +477,27 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
         ctx.strokeText(name, inside, y);
         ctx.fillText(name, inside, y);
       };
-      for (const g of groups) {
+      if (groupLabels) for (const g of groups) {
         const x1 = g.x * cy - g.z * sy, z1 = g.x * sy + g.z * cy;
         const y2 = g.y * cx - z1 * sx, z2 = g.y * sx + z1 * cx;
         const s = (f / Math.max(60, f + z2)) * base;
         label(g.name, viewX + x1 * s, h / 2 + panY + y2 * s - g.radius * s - 7);
+      }
+
+      // Sparks: drawn under the hovered item. They skip reduced motion, where nothing should move on its own.
+      if (autoHighlight && named.length && !motion.matches) {
+        sparks = sparks.filter((sp) => now - sp.at < SPARK_LIFE);
+        if (now >= nextSpark && sparks.length < SPARK_MAX) {
+          const first = opening.length > 0; // the opening pair plays faster, so the page comes alive quickly
+          const i = first ? opening.shift()! : named[Math.floor(Math.random() * named.length)]!;
+          if (i !== hovered && gAlpha[dotGroup[i]!] === 1 && !sparks.some((sp) => sp.i === i)) sparks.push({ i, at: now, speed: first ? 2.2 : 1 });
+          nextSpark = now + (opening.length ? 250 : 900 + Math.random() * 1100); // the opening pair starts close together
+        }
+        for (const sp of sparks) {
+          const a = now - sp.at;
+          const fade = Math.min(1, a / FADE_IN_MS, (SPARK_LIFE - a) / FADE_OUT_MS);
+          drawLit(sp.i, a * sp.speed, Math.max(0, fade));
+        }
       }
 
       // The hovered item: a coral dot with its name in a tooltip just below, and its linked items in amber.
@@ -353,7 +505,7 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
         ctx.fillStyle = dotLinked;
         ctx.beginPath();
         for (const i of neighbours[hovered]!) {
-          const nr = Math.max(4, dots[i]!.r * ps[i]! * 1.5);
+          const nr = Math.max(4, dots[i]!.r * ps[i]! * 1.5) * grow; // linked items appear as their link reaches them
           ctx.moveTo(px[i]! + nr, py[i]!);
           ctx.arc(px[i]!, py[i]!, nr, 0, Math.PI * 2);
         }
@@ -366,7 +518,20 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
         ctx.beginPath();
         ctx.arc(hx, hy, r, 0, Math.PI * 2);
         ctx.fill();
+        if (moving) {
+          // A ring spreads out from the item and fades, once every 1.3 s.
+          const ring = (age % RING_MS) / RING_MS;
+          ctx.save();
+          ctx.globalAlpha = 1 - ring;
+          ctx.strokeStyle = dotHover;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(hx, hy, r + ring * 18, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
 
+        if (nameTips) {
         ctx.font = `400 14px ${css.fontFamily}`;
         const tipW = ctx.measureText(name).width + 20, tipH = 30, gap = 12;
         const tipX = Math.max(4, Math.min(w - tipW - 4, hx - tipW / 2));
@@ -379,9 +544,10 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
         ctx.fillStyle = "#ffffff";
         ctx.textBaseline = "middle";
         ctx.fillText(name, tipX + tipW / 2, tipY + tipH / 2 + 1);
+        }
       }
 
-      held = hovered >= 0;
+      held = pointed || pinned >= 0; // a random highlight never stops the rotation
       setHover(hovered >= 0 ? dots[hovered]! : null);
       raf = requestAnimationFrame(draw);
     };
@@ -392,7 +558,7 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
     };
     const down = (e: PointerEvent) => {
       track(e);
-      dragging = e.button === 2 ? "pan" : "rotate";
+      dragging = e.button === 2 && selectable ? "pan" : "rotate"; // not selectable: no panning, so the centre stays put
       lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId);
       downX = e.clientX; downY = e.clientY; clickable = e.button === 0;
       canvas.style.cursor = "grabbing";
@@ -407,7 +573,7 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
     /** A press that barely moved is a click: pin the item under it, or clear the pin. Otherwise it was a drag. */
     const release = (e: PointerEvent) => {
       up();
-      if (!clickable || Math.hypot(e.clientX - downX, e.clientY - downY) > 5) return;
+      if (!selectable || !clickable || Math.hypot(e.clientX - downX, e.clientY - downY) > 5) return;
       track(e);
       let under = -1, nearest = 10;
       dots.forEach((d, i) => {
@@ -419,6 +585,7 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
     const key = (e: KeyboardEvent) => { if (e.key === "Escape") pin(-1); };
     const leave = () => { mx = my = -1e4; };
     const wheel = (e: WheelEvent) => {
+      if (!zoomable) return;
       e.preventDefault();
       zoom = Math.min(4, Math.max(0.4, zoom * (e.deltaY > 0 ? 0.92 : 1.08)));
     };
@@ -439,7 +606,7 @@ export function KnowledgeGraph({ entities, edges: catalogEdges }: Props) {
       cancelAnimationFrame(raf);
       listeners.abort();
     };
-  }, [entities, catalogEdges]);
+  }, [entities, catalogEdges, groupLabels, selectable, autoHighlight, nameTips, animateLinks, fill, zoomable, clusterCycle, dotScale]);
 
   return (
     <div className={`kg${selected ? " kg-open" : ""}`}>

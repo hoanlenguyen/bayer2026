@@ -1,6 +1,6 @@
 {
   "info": {
-    "name": "Analytics Manager - POST /api/chat",
+    "name": "AnalytIQ Intelligence - POST /api/chat",
     "description": "Tests for POST /api/chat, which streams Server-Sent Events.\n\nSet baseUrl to your backend, then send a request or run the collection. Open the Visualize tab on a response for a readable summary of the stream.\n\nCost: against a backend with LLM_PROVIDER=openai every successful request calls the model, and with MongoDB it saves a conversation. Use a backend in mock mode for repeated runs.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },

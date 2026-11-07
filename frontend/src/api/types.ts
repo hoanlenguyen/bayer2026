@@ -154,6 +154,6 @@ export interface SimulatorMessage {
   recommendation?: SimulatorRecommendation;
   report?: SimulatorReport | null;
   stages?: StageEvent[];
-  /** Analytics Manager only: the sentence it answered, used as the title of its steps. */
+  /** AnalytIQ Intelligence only: the sentence it answered, used as the title of its steps. */
   request?: string;
 }

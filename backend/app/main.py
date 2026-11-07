@@ -80,7 +80,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Agentic Analytics Manager", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="AnalytIQ Intelligence", version="0.1.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"])
 
 

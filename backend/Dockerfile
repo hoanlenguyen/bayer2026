@@ -1,4 +1,4 @@
-# Backend image for the Agentic Analytics Manager.
+# Backend image for the AnalytIQ Intelligence.
 # Build from the repository root, because the image also needs materials/:
 #   docker build -f backend/Dockerfile -t analytics-manager-backend .
 # Run (keys are passed at run time, never baked into the image):

@@ -4,7 +4,7 @@ Project context for Claude Code and for the team. Keep this file current: it is 
 
 ## Project
 
-**Agentic Analytics Manager** (working name). SinceAI Hackathon 2026, challenge "Build Less, Build Better: AI for Governed Analytics".
+**AnalytIQ Intelligence**. SinceAI Hackathon 2026, challenge "Build Less, Build Better: AI for Governed Analytics".
 
 An AI workspace that helps a pharma manufacturing plant ask the right business question, reuse or create trustworthy analytics, and manage the follow-up actions. It decides what deserves to exist before anything is built.
 
@@ -38,7 +38,7 @@ Rules:
 - Agents propose, Python verifies: unknown catalog IDs are removed; numbers shown as evidence come from the catalog, never from the model.
 - Every recommendation shows its scores, rules applied and the evidence from all six steps (RULE-008).
 - Classification can use Jev (TypeSafe AI, `app/decider.py`), off unless `TYPESAFE_API_KEY` is set and `JEV_PHASES` names phases (`relevance`, `kpis`, `urgency`). Order: Jev if confident, else GPT, else rules. Jev cannot write text, so follow-up questions, decision text and explanations stay with GPT or templates. Thresholds live in `JEV_THRESHOLDS`. Turn a phase on only if it passes `python scripts/eval_classification.py --modes rules,gpt,jev`.
-- Conversation simulation (`/simulator`, under Ask in the sidebar): SinceAI and Brainrot chat (speakers `A` and `B` in the API; Analytics Manager is `C`), the gate agent labels each sentence off topic, business talk or needs a decision (Jev, then GPT, then rules; `speak` 0.70, `stay_quiet` 0.30 in `JEV_THRESHOLDS`). Its `conversation` phase is on whenever `TYPESAFE_API_KEY` is set. Only "needs a decision" runs `classify_request` on the open thread. A request too vague to check (no KPI, or a loose match with no product or market) gets no reply: Analytics Manager keeps listening, and business talk that follows is checked with it until there is enough. It never asks questions; Analytics Manager's sentence comes from Python templates, never a model, and its evidence is the same verdict and six steps as Ask (`analyse()` in `pipeline.py`, shared by both), and only a plain Reuse is called "already exists". Its accuracy on this question has not been measured yet.
+- Conversation simulation (`/simulator`, under Ask in the sidebar): SinceAI and Brainrot chat (speakers `A` and `B` in the API; AnalytIQ Intelligence is `C`), the gate agent labels each sentence off topic, business talk or needs a decision (Jev, then GPT, then rules; `speak` 0.70, `stay_quiet` 0.30 in `JEV_THRESHOLDS`). Its `conversation` phase is on whenever `TYPESAFE_API_KEY` is set. Only "needs a decision" runs `classify_request` on the open thread. A request too vague to check (no KPI, or a loose match with no product or market) gets no reply: AnalytIQ Intelligence keeps listening, and business talk that follows is checked with it until there is enough. It never asks questions; AnalytIQ Intelligence's sentence comes from Python templates, never a model, and its evidence is the same verdict and six steps as Ask (`analyse()` in `pipeline.py`, shared by both), and only a plain Reuse is called "already exists". Its accuracy on this question has not been measured yet.
 - A preset's own text skips the Intent model call: its intent is already known.
 - Token use is recorded per agent run (`usage` in `agent_runs`) and per question (`runs[].tokens`).
 - `repair` stays an internal decision, shown as "Reuse after repair". Follow-up actions are proposed, and a person accepts them.

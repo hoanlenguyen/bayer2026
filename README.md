@@ -1,4 +1,4 @@
-# Agentic Analytics Manager
+# AnalytIQ Intelligence
 
 SinceAI Hackathon 2026 entry for "Build Less, Build Better: AI for Governed Analytics".
 

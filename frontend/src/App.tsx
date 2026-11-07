@@ -3,12 +3,14 @@ import { Sidebar, type Page } from "./components/Sidebar";
 import { AskPage } from "./pages/AskPage";
 import { CalaGraphPage } from "./pages/CalaGraphPage";
 import { ExplorerPage } from "./pages/ExplorerPage";
+import { LandingPage } from "./pages/LandingPage";
 import { SimulatorPage } from "./pages/SimulatorPage";
 
 const pageFromLocation = (): Page => {
   const path = window.location.pathname.replace(/\/+$/, "");
   if (path === "/cala-graph") return "cala-graph";
   if (path === "/simulator") return "simulator";
+  if (path === "/index") return "landing";
   return window.location.hash.startsWith("#explorer") ? "explorer" : "ask";
 };
 
@@ -35,12 +37,15 @@ export default function App() {
     };
   }, []);
   useEffect(() => {
-    if (page === "ask") document.title = "Analytics Manager";
-    if (page === "simulator") document.title = "Conversation simulation · Analytics Manager";
+    if (page === "ask") document.title = "AnalytIQ Intelligence";
+    if (page === "simulator") document.title = "Conversation simulation · AnalytIQ Intelligence";
   }, [page]);
   console.log('clg')
+  // The landing page has no sidebar; Ask and Simulator stay mounted underneath so nothing is lost.
   return (
-    <div className={`app app-${page}`}>
+    <>
+    {page === "landing" && <LandingPage />}
+    <div className={`app app-${page}`} hidden={page === "landing"}>
       <Sidebar page={page} />
       <div className="app-main">
         {/* Ask and Simulator stay mounted so an answer keeps arriving, and the screen stays as it was, while on another page. */}
@@ -50,5 +55,6 @@ export default function App() {
         {page === "cala-graph" && <CalaGraphPage />}
       </div>
     </div>
+    </>
   );
 }
