@@ -10,6 +10,10 @@ Every number shown as evidence comes from the workbook, never from a model.
 
 All data is synthetic (the SinceAI builder data pack in `materials/`).
 
+## How it works
+
+![AnalytIQ processing flow: a request is checked, understood, matched against existing analytics in six steps, and ends in a recommendation with its evidence](materials/flow.png)
+
 ## Live site
 
 **https://analytics-manager.lenguyenhanhoan.workers.dev**
