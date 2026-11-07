@@ -1,0 +1,18 @@
+# SITE_ADDRESS (in deploy/vultr/.env) decides the address:
+#   your domain or <server-ip>.sslip.io -> HTTPS with an automatic Let's Encrypt certificate
+#   :80                                 -> plain HTTP (first test only)
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	# API, including the Server-Sent Events stream of /api/chat (Caddy flushes it as it arrives).
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	# React app; unknown paths such as /cala-graph load index.html.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
