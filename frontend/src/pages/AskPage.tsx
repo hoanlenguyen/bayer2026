@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, streamPost } from "../api/client";
-import type { CatalogMeta, DecisionType, Health, PipelineEvent, Preset, StageEvent, StageId } from "../api/types";
+import type { CatalogMeta, DecisionType, GuidedChoice, GuidedExample, Health, PipelineEvent, Preset, StageEvent, StageId } from "../api/types";
 import { FlowPanel, RUNNING_COPY } from "../components/ask/FlowPanel";
 import { TriageStrip } from "../components/ask/TriageStrip";
 import { VerdictCard } from "../components/ask/VerdictCard";
@@ -14,24 +14,10 @@ interface ChatMessage {
   content: string;
   kind?: "question" | "result" | "retry";
   suggestions?: string[];
+  choices?: GuidedChoice[];
 }
 
 type ConvState = "idle" | "clarifying" | "awaiting_approval"; // awaiting_approval only exists in older saved conversations
-
-/** Workbook presets carry their governed intent. The dashboard example exercises ordinary free-text intake. */
-const STARTER_QUESTIONS = [
-  "Please create a Power BI replacement for our legacy Tableau Xarelto commercial workbook.",
-  "Build a monthly dashboard for Nubeqa net sales and units shipped in France.",
-  "Show monthly inventory coverage and OTIF for Lynkuet in Spain.",
-  "How are Eylea net sales and digital engagement developing in Japan?",
-  "We need a monthly supply-risk dashboard by medicine and country.",
-  "Can we have a new finance dashboard for net sales, gross-to-net and budget variance by product?",
-];
-
-const MORE_QUESTIONS = [
-  "Please build a new report for market access coverage and reimbursement status by product.",
-  "I need a new Kerendia management report for monthly performance in EMEA and North America.",
-];
 
 /** Renders **bold** segments; everything else is plain text. */
 function RichText({ text }: { text: string }) {
@@ -97,6 +83,7 @@ export function AskPage() {
   const [offline, setOffline] = useState(false);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [catalog, setCatalog] = useState<CatalogMeta | null>(null);
+  const [examples, setExamples] = useState<GuidedExample[] | null>(null);
 
   const [convId, setConvId] = useState<string | null>(null);
   const [restoredRunId, setRestoredRunId] = useState<string | null>(null);
@@ -121,7 +108,7 @@ export function AskPage() {
       const conv = await api.conversation(id);
       if (attempt !== restoreAttempt.current) return; // another conversation was picked meanwhile
       const restored = stagesOf(conv);
-      setMessages(conv.messages.map((m) => ({ id: nextId.current++, role: m.role, content: m.content, kind: m.kind, suggestions: m.suggestions })));
+      setMessages(conv.messages.map((m) => ({ id: nextId.current++, role: m.role, content: m.content, kind: m.kind, suggestions: m.suggestions, choices: m.choices })));
       setStages(restored);
       setRestoredRunId(conv.runs.at(-1)?.id ?? null);
       setDecision(restored.decision?.data?.decision ?? null);
@@ -163,6 +150,7 @@ export function AskPage() {
     api.health().then(setHealth).catch(() => setOffline(true));
     api.presets().then(setPresets).catch(() => setOffline(true));
     api.catalog().then(setCatalog).catch(() => undefined);
+    api.guidedExamples().then((g) => setExamples(g.examples)).catch(() => setExamples([]));
   }, []);
 
   useEffect(() => {
@@ -197,7 +185,7 @@ export function AskPage() {
         break;
       case "message":
         setChecking(false);
-        setMessages((m) => [...m, { id: nextId.current++, role: "assistant", content: e.content, kind: e.kind, suggestions: e.suggestions }]);
+        setMessages((m) => [...m, { id: nextId.current++, role: "assistant", content: e.content, kind: e.kind, suggestions: e.suggestions, choices: e.choices }]);
         break;
       case "done":
         setConvState(e.state);
@@ -226,10 +214,13 @@ export function AskPage() {
     }
   }, [handleEvent]);
 
-  const send = useCallback((text: string, presetId?: string) => {
+  const send = useCallback((text: string, presetId?: string, guided?: { guided_id?: string; choice_id?: string }) => {
     setChecking(true);
     setMessages((m) => [...m, { id: nextId.current++, role: "user", content: text }]);
-    void run("/api/chat", { conversation_id: convId, message: text, preset_id: presetId ?? null });
+    // A guided example starts a fresh conversation; its answers continue the current one.
+    const conversation = guided?.guided_id ? null : convId;
+    void run("/api/chat", { conversation_id: conversation, message: guided?.guided_id ? "" : text, preset_id: presetId ?? null,
+      guided_id: guided?.guided_id ?? null, choice_id: guided?.choice_id ?? null });
   }, [convId, run]);
 
   const newChat = () => {
@@ -263,7 +254,13 @@ export function AskPage() {
   const renderMessage = (m: ChatMessage) => (
     <div key={m.id} className={`msg msg-${m.role}`}>
       <p><RichText text={m.content} /></p>
-      {m.id === lastId && !busy && m.suggestions && m.suggestions.length > 0 && (
+      {m.id === lastId && !busy && m.choices && m.choices.length > 0 && (
+        <div className="chips guided-choices" role="group" aria-label="Choose an answer">
+          {m.choices.map((c) => <button key={c.id} type="button" onClick={() => send(c.label, undefined, { choice_id: c.id })}>
+            {c.label}{c.detail && <span className="choice-detail">{c.detail}</span>}</button>)}
+        </div>
+      )}
+      {m.id === lastId && !busy && !m.choices?.length && m.suggestions && m.suggestions.length > 0 && (
         <div className="chips">
           {m.suggestions.map((s) => <button key={s} type="button" onClick={() => send(s, presets.find((p) => p.prompt === s)?.id)}>{s}</button>)}
         </div>
@@ -288,7 +285,9 @@ export function AskPage() {
   }
 
   if (messages.length === 0) {
-    const starter = (q: string) => <button key={q} type="button" onClick={() => send(q, presets.find((p) => p.prompt === q)?.id)} disabled={busy || !presets.length}>{q}</button>;
+    const starter = (e: GuidedExample) => <button key={e.id} type="button" onClick={() => send(e.text, undefined, { guided_id: e.id })} disabled={busy}>{e.text}</button>;
+    const visible = (examples ?? []).filter((e) => e.placement === "visible");
+    const more = (examples ?? []).filter((e) => e.placement === "more");
     return (
       <div className="ask-empty">
         <div className="ask-empty-above">
@@ -298,12 +297,12 @@ export function AskPage() {
         <Composer onSend={(t) => send(t)} disabled={busy} autoFocus placeholder="Describe the decision or the numbers you need, in your own words" />
         <div className="ask-empty-below">
           <SavedDashboards />
-          <div className="starter-chips" role="group" aria-label="Example questions">
-            {STARTER_QUESTIONS.map(starter)}
-          </div>
-          <details className="rh-examples"><summary>More example questions</summary>
-            <div className="starter-chips">{MORE_QUESTIONS.map(starter)}</div>
-          </details>
+          {visible.length > 0 && <div className="starter-chips" role="group" aria-label="Example dashboards to build">
+            {visible.map(starter)}
+          </div>}
+          {more.length > 0 && <details className="rh-examples"><summary>More example questions</summary>
+            <div className="starter-chips" role="group" aria-label="More example dashboards">{more.map(starter)}</div>
+          </details>}
           <p className="fineprint">The AI sees catalog metadata only, never raw production data.</p>
         </div>
       </div>

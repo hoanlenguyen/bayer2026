@@ -17,8 +17,10 @@ from typing import Any, AsyncIterator
 
 from . import actions as act
 from . import catalog as cat
+from . import guided_examples as guided
 from .ask_metrics import metric_series
 from .agents import AgentRun, IntentAgent, RelevanceAgent
+from .agents.base import Step
 from .agents.gate import ConversationGateAgent
 from .agents.intent import sanitize_intent
 from .agents.relevance import EXAMPLES, retry_message
@@ -235,8 +237,18 @@ class Pipeline:
         ]
 
     # ------------------------------------------------------------ chat turn
-    async def chat(self, conv_id: str | None, message: str, preset_id: str | None) -> AsyncIterator[Event]:
+    async def chat(self, conv_id: str | None, message: str, preset_id: str | None, guided_id: str | None = None,
+                   choice_id: str | None = None) -> AsyncIterator[Event]:
         conv = await self._load(conv_id)
+        run_ = conv["runs"][-1] if conv["runs"] else {}
+        if guided_id or (conv["state"] == "clarifying" and run_.get("guided")):
+            try:
+                async for ev in self._guided(conv, message, guided_id, choice_id):
+                    yield ev
+            finally:
+                if conv["runs"]:
+                    await self._save(conv)
+            return
         try:
             preset = cat.preset_by_id(preset_id)
             text = message.strip() or (preset["prompt"] if preset else "")
@@ -333,6 +345,84 @@ class Pipeline:
         finally:
             if conv["runs"]:  # a chat that only ever held rejected messages stays out of the history
                 await self._save(conv)
+
+    # ------------------------------------------------------------ guided examples (start screen)
+    async def _guided(self, conv: dict[str, Any], text: str, guided_id: str | None, choice_id: str | None) -> AsyncIterator[Event]:
+        """A starter chip: fixed scope from the registry, then two offered-choice questions, then the normal analysis.
+        Replies are matched to the offered options only, so no model or classifier can change the brief."""
+        yield {"type": "conversation", "id": conv["_id"], "provider": self.llm.name, "store": self.store.name}
+        if guided_id:
+            ex = guided.get(guided_id)
+            conv["title"] = conv["title"] or ex["text"][:70]
+            conv["plan"], conv["preset_id"], conv["asked"] = None, None, 0
+            conv["runs"].append({"id": uuid.uuid4().hex[:8], "started_at": now(), "events": [], "msg_start": len(conv["messages"]),
+                                 "guided": {"id": ex["id"], "step": "purpose"}, "similar": None, "kpi_suggestions": []})
+            conv["intent"] = {**guided.intent_for(ex, ex["purposes"][0][0], "all"), "decision": None, "dashboard_brief": {},
+                              "_pending": "guided_purpose"}
+            conv["messages"].append({"role": "user", "content": ex["text"], "ts": now(), "guided_id": ex["id"]})
+            await self._save(conv)
+            yield self._event(conv, "user_message", content=ex["text"])
+            yield self._stage(conv, "intent", "running", "Reading the example's fixed scope")
+            async for ev in self._guided_ask(conv, ex, "purpose"):
+                yield ev
+            return
+        run = conv["runs"][-1]
+        g = run["guided"]
+        ex = guided.BY_ID.get(g["id"])
+        options = guided.purpose_options(ex) if g["step"] == "purpose" else guided.period_options()
+        choice = guided.choose(options, choice_id, text)
+        if not choice:  # anything else repeats the same step; nothing about the run changes
+            conv["messages"].append({"role": "user", "content": text, "ts": now(), "rejected": True})
+            yield self._event(conv, "user_message", content=text)
+            yield self._say(conv, "Please pick one of the two answers below. To ask something else, choose New question.",
+                            kind="retry", rejected=True, verdict="guided_choice", suggestions=[o["label"] for o in options],
+                            choices=options, guided_step=g["step"])
+            yield self._event(conv, "done", state=conv["state"])
+            return
+        conv["messages"].append({"role": "user", "content": choice["label"], "ts": now(), "choice_id": choice["id"]})
+        yield self._event(conv, "user_message", content=choice["label"])
+        if g["step"] == "purpose":
+            g.update(purpose=choice["id"], step="period")
+            conv["intent"]["decision"] = choice["label"]
+            async for ev in self._guided_ask(conv, ex, "period"):
+                yield ev
+            return
+        g.update(period=choice["id"], step="done")
+        intent = guided.intent_for(ex, g["purpose"], g["period"])
+        intent["department"] = cat.department_for(intent["measures"])
+        conv["intent"] = intent
+        trace = self._guided_trace(ex, g)
+        run["intent_id"] = await self._artifact(conv, "intents", public(intent), preset_id=None, guided_id=ex["id"],
+                                                status="new", urgency="normal")
+        await self._register_request(conv, run, intent)
+        tri = await self._triage(conv, "new")
+        yield self._stage(conv, "intent", "done", intent_summary(intent), {**public(intent), "triage": {**tri, "status": None},
+                                                                          "classification": classification(intent), "agent": trace.trace()})
+        await self._pause()
+        async for ev in self._plan(conv, [ex["text"]]):
+            yield ev
+
+    def _guided_trace(self, ex: dict[str, Any], g: dict[str, Any]) -> AgentRun:
+        steps = [Step("rule", "Fixed scope from the guided example", ex["id"])]
+        if g.get("purpose"):
+            steps.append(Step("check", "Purpose matched an offered choice", g["purpose"]))
+        if g.get("period"):
+            steps.append(Step("check", "Period matched an offered choice", g["period"]))
+        return AgentRun(agent="guided", mode="rules", model="Guided example registry", steps=steps, output=None)
+
+    async def _guided_ask(self, conv: dict[str, Any], ex: dict[str, Any], step: str) -> AsyncIterator[Event]:
+        conv["asked"] += 1
+        conv["state"] = "clarifying"
+        conv["intent"]["_pending"] = "guided_" + step
+        trace = self._guided_trace(ex, conv["runs"][-1]["guided"])
+        await self._audit(conv, "intent", trace)
+        tri = await self._triage(conv, None)
+        yield self._stage(conv, "intent", "waiting", f"Clarifying question {conv['asked']} of 2",
+                          {**public(conv["intent"]), "triage": tri, "agent": trace.trace(), "classification": classification(conv["intent"])})
+        options = guided.purpose_options(ex) if step == "purpose" else guided.period_options()
+        question = guided.PURPOSE_QUESTION if step == "purpose" else guided.PERIOD_QUESTION
+        yield self._say(conv, question, kind="question", suggestions=[o["label"] for o in options], choices=options, guided_step=step)
+        yield self._event(conv, "done", state=conv["state"])
 
     # ------------------------------------------------------------ the analysis steps → recommendation
     async def _plan(self, conv: dict[str, Any], user_turns: list[str]) -> AsyncIterator[Event]:

@@ -1,4 +1,4 @@
-import type { CatalogMeta, ConversationDetail, ConversationSummary, Health, PipelineEvent, Preset } from "./types";
+import type { CatalogMeta, ConversationDetail, ConversationSummary, GuidedExamples, Health, PipelineEvent, Preset } from "./types";
 
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -14,6 +14,7 @@ async function deleteJSON(path: string): Promise<void> {
 export const api = {
   health: () => getJSON<Health>("/api/health"),
   presets: () => getJSON<Preset[]>("/api/presets"),
+  guidedExamples: () => getJSON<GuidedExamples>("/api/guided-examples"),
   catalog: () => getJSON<CatalogMeta>("/api/catalog"),
   dashboards: () => getJSON<{ items: { id: string; title: string; url: string; period: { start: string; end: string } }[] }>("/api/dashboards"),
   conversations: () => getJSON<ConversationSummary[]>("/api/conversations"),

@@ -41,6 +41,7 @@ export interface MessageEvent {
   content: string;
   kind?: "question" | "result" | "retry";
   suggestions?: string[];
+  choices?: GuidedChoice[];
   decision?: DecisionType;
   ts: string;
 }
@@ -98,7 +99,7 @@ export interface ConversationSummary {
 
 export interface ConversationDetail extends ConversationSummary {
   state: string;
-  messages: { role: "user" | "assistant"; content: string; kind?: "question" | "result" | "retry"; suggestions?: string[] }[];
+  messages: { role: "user" | "assistant"; content: string; kind?: "question" | "result" | "retry"; suggestions?: string[]; choices?: GuidedChoice[] }[];
   runs: { id: string; events: (StageEvent | { type: "user_message" | "message" | "done" })[] }[];
 }
 
@@ -161,3 +162,8 @@ export interface SimulatorMessage {
   /** AnalytIQ only: the sentence it answered, used as the title of its steps. */
   request?: string;
 }
+
+/** An offered answer in a guided example. The backend accepts only these, by ID. */
+export interface GuidedChoice { id: string; label: string; detail?: string }
+export interface GuidedExample { id: string; placement: "visible" | "more"; text: string; product: string; markets: string[]; measures: string[] }
+export interface GuidedExamples { examples: GuidedExample[]; purpose_question: string; period_question: string }

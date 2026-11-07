@@ -11,7 +11,7 @@ export const READING_TARGET_MS = 5500;
 
 export type BuildPhase =
   | { kind: "saving" }
-  | { kind: "ready"; dashboardId: string; savedAfterMs: number }
+  | { kind: "ready"; dashboardId: string; savedAfterMs: number; exactReuse?: boolean }
   | { kind: "failed"; message: string; stale: boolean };
 
 export interface BuildSession { id: number; startedAt: number; phase: BuildPhase; brief: DesignState }
@@ -121,6 +121,7 @@ export function BuildHandoff({ session, conversationId, onRetry, onReviewUpdated
       : phase.kind === "ready" ? "Dashboard ready. Open now is available." : ""}</p>
 
     {receipt ? <>
+      {phase.kind === "ready" && phase.exactReuse && <p className="small">An identical dashboard (same purpose, scope, period, KPI definitions and values) was saved earlier. This review now points to that saved version.</p>}
       <p className="db-label">{phase.kind === "ready" ? "Built from your approved brief" : "From your approved brief"}</p>
       <ReceiptFacts receipt={receipt} saved={phase.kind === "ready"} />
       <details className="bh-more" onToggle={e => { if ((e.currentTarget as HTMLDetailsElement).open) stay(); }}>

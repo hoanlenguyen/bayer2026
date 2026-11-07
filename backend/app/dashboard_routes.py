@@ -28,8 +28,30 @@ class Build(BaseModel):
     review_token: str = Field(min_length=1, max_length=128)
 
 
+def _guided_summary(req, artifact):
+    """The reviewable brief for a guided example: what was chosen, what will be built, and from which rows."""
+    C = catalog.CATALOG
+    names = [C["markets"][m]["name"] for m in req["markets"]]
+    lead = req["lead_measure"]
+    kpis = sorted(artifact["columns"], key=lambda c: c["id"] != lead)
+    rows = artifact["source_records"]
+    actual = sum(r["value_type"] == "actual_like_synthetic" for r in rows)
+    months = len({r["month"][:7] for r in rows})
+    receipt = build_receipt(artifact)
+    from .guided_examples import _month_label
+    unit = lambda u: "€m" if u in ("M EUR", "EUR") else u
+    return [f"Purpose: {req['decision_goal']}",
+            f"Product: {', '.join(C['products'][k]['name'] for k in req['products'])} · Countries: {' and '.join(names)}, shown side by side",
+            "KPIs: " + "; ".join(f"{c['name']} ({c['kpi_id']}, {unit(c['unit'])}){' · lead metric' if c['id'] == lead else ''}" for c in kpis),
+            f"Months: {_month_label(receipt['first_month'])} to {_month_label(receipt['last_month'])}, {months} monthly points per country",
+            f"Source: {artifact['source']}, {len(rows)} rows ({actual} actual-like and {len(rows) - actual} forecast-like synthetic)",
+            f"Visuals: {receipt['arrangement']}"]
+
+
 def _summary(req, artifact=None):
     C = catalog.CATALOG
+    if artifact and req.get("presentation"):
+        return _guided_summary(req, artifact)
     lines = []
     if req.get("decision_goal"):
         lines.append(req["decision_goal"])
@@ -65,7 +87,10 @@ async def _state(conversation_id, run_id, store):
         raise HTTPException(409, "This run has no completed recommendation.")
     turns = [e["content"] for i, e in enumerate(events) if e.get("type") == "user_message"
              and not (i + 1 < len(events) and events[i + 1].get("rejected"))]
-    req, question, reason = resolve(stages.get("intent") or {}, decision["decision"], doc["answers"], "\n".join(turns or [request]))
+    intent_stage = stages.get("intent") or {}
+    # A guided run's answers are offered choices, not text to read for scope or format: check only its starter text.
+    text = request if (intent_stage.get("dashboard_brief") or {}).get("guided") else "\n".join(turns or [request])
+    req, question, reason = resolve(intent_stage, decision["decision"], doc["answers"], text)
     verdict = decision["decision"]
     state = {"status": "blocked" if reason else "clarifying", "version": doc["version"], "verdict": verdict,
              "request": request, "requirements": req, "question": question, "reason": reason, "dashboard_id": None,
@@ -86,9 +111,14 @@ async def _state(conversation_id, run_id, store):
     did = "dash_" + token[:28]
     artifact.update(id=did, review_token=token, requirements=req)
     existing = await store.get_artifact("dashboards", did)
-    state.update(status="built" if existing else "ready", summary=_summary(req, artifact), review_token=token,
-                 receipt=build_receipt(existing or artifact),
-                 dashboard_id=did if existing else None, reused=existing is not None)
+    # A guided run is a fresh review: it stays reviewable even when an identical dashboard exists. Its Build then
+    # resolves to that immutable artifact, and the result says so.
+    guided = bool(req.get("guided"))
+    built = existing is not None and not guided
+    state.update(status="built" if built else "ready", summary=_summary(req, artifact), review_token=token,
+                 receipt=build_receipt(existing or artifact), guided=req.get("guided"),
+                 matches_saved=did if existing is not None and guided else None,
+                 dashboard_id=did if built else None, reused=built)
     return state, doc, artifact
 
 
@@ -129,7 +159,8 @@ async def build_dashboard(conversation_id: str, run_id: str, request: Build, sto
     saved = await store.publish_dashboard_once({**artifact, "_id": artifact["id"], "created_at": now(),
                                                 "created_by": creator_for_build(http)})
     same_run = (saved["conversation_id"], saved["run_id"]) == (conversation_id, run_id)
-    built = {**state, "status": "built", "version": doc["version"] + 1, "dashboard_id": saved["id"], "reused": not same_run}
+    built = {**state, "status": "built", "version": doc["version"] + 1, "dashboard_id": saved["id"], "reused": not same_run,
+             "exact_reuse": not same_run, "matches_saved": None}
     if not await store.advance_dashboard({**doc, "version": built["version"], "built_id": saved["id"], "built_state": built}, doc["version"]):
         latest, _, _ = await _state(conversation_id, run_id, store)
         if latest.get("dashboard_id") == saved["id"]:

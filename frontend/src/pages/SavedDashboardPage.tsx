@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } f
 import { handoffPath, readHandoff, type DecisionHandoff } from "../api/handoff";
 import type { DashboardObservation, SavedDashboard, SourceRecord } from "../api/dashboardBuilder";
 import { PulseDashboard } from "../components/PulseDashboard";
+import { MarketComparison } from "../components/MarketComparison";
 import { ReceiptDetails, ReceiptFacts } from "../components/ask/BuildHandoff";
 import { bi } from "../api/biEstate";
 import { openConversation } from "../lib/conversations";
@@ -157,7 +158,11 @@ export function SavedDashboardPage({ id }: { id: string }) {
     <PageHeader name={record.title} description={record.decision_goal} kind="Saved dashboard" conversationId={record.conversation_id}/>
     <div className="sd-meta"><span>{places}</span><span>{periodName(period.start)} – {periodName(period.end)}</span>
       <span>{record.columns.length} governed {record.columns.length === 1 ? "KPI" : "KPIs"}</span></div>
-    <DashboardData groups={record.groups} columns={record.columns} source={record.source} scope={places}/>
+    {record.presentation === "market_comparison" && record.groups.length > 1
+      ? <><MarketComparison record={record} />
+          <details className="sd-sources"><summary>All values and workbook rows</summary><div>
+            <DashboardData groups={record.groups} columns={record.columns} source={record.source} scope={places} tableOnly/></div></details></>
+      : <DashboardData groups={record.groups} columns={record.columns} source={record.source} scope={places}/>}
     <SourceNotes>{record.receipt && <section className="sd-receipt" aria-label="What this dashboard holds">
         <p><strong>Built from the approved brief</strong></p><ReceiptFacts receipt={record.receipt} saved/><ReceiptDetails receipt={record.receipt}/>
         {record.created_by && <p>Built by {record.created_by.name}</p>}</section>}

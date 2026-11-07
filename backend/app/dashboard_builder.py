@@ -100,6 +100,11 @@ def resolve(intent, verdict, answers, user_text):
     goal = intent.get("decision") or ""
     default_goal = "Monitor " + (", ".join(C["measures"].get(m, {}).get("name", m) for m in requested) or "the requested numbers")
     req["decision_goal"] = answers.get("decision_goal") or intake.get("decision") or (goal if goal != default_goal else "")
+    guided = intake.get("guided")
+    if guided:  # a guided example: fixed purpose, lead KPI and presentation, all part of the reviewed brief
+        req["guided"] = {k: guided[k] for k in ("id", "purpose", "period")}
+        req["lead_measure"] = guided["lead_measure"]
+        req["presentation"] = guided["presentation"]
     if not req["decision_goal"] or UNKNOWN_GOAL.fullmatch(req["decision_goal"].strip()):
         return req, _question("decision_goal", "What decision will you make using this dashboard?", "text"), None
     if not requested:
@@ -138,6 +143,8 @@ def resolve(intent, verdict, answers, user_text):
         if not axis_known and not selected:
             return req, _question(key, f"Which {key} should it cover?", "multi",
                                   [("all", f"All {len(eligible)} workbook {key}"), *[(k, choices[k]["name"]) for k in eligible]]), None
+        if names and not selector:  # keep the markets in the order the request named them
+            eligible.sort(key=lambda k: list(filters.get(axis) or []).index(k) if k in (filters.get(axis) or []) else len(eligible))
         req[key] = eligible if axis_known or selected == ["all"] else selected
         if set(req[key]) - set(eligible):
             return req, None, f"The saved {axis} selection is no longer available in the workbook."
@@ -167,6 +174,8 @@ def resolve(intent, verdict, answers, user_text):
         req["period"] = _period(period, months)
     except ValueError as exc:
         return req, None, str(exc)
+    if req.get("lead_measure") and req["lead_measure"] not in req["measures"]:
+        return req, None, "The guided example's lead KPI is not part of this brief."
     if any(m not in ADDITIVE for m in req["measures"]):
         combinations = {tuple(_axis(p, m, g) for g in groups) for p in req["products"] for m in req["markets"]}
         if len(combinations) < len(req["products"]) * len(req["markets"]):
@@ -260,11 +269,19 @@ def assemble(req, dashboard_id, conversation_id, run_id, request):
     scope = {"products": [C["products"][k]["name"] for k in req["products"]], "markets": [C["markets"][k]["name"] for k in req["markets"]]}
     subject = " · ".join([scope["products"][0] if len(products) == 1 else f"{len(products)} products",
                           scope["markets"][0] if len(markets) == 1 else f"{len(markets)} markets"])
-    return {"id": dashboard_id, "title": f"{subject} — " + " and ".join(c["name"] for c in columns),
+    if req.get("presentation"):  # guided: name the two countries, lead KPI first
+        lead_first = sorted(columns, key=lambda c: c["id"] != req.get("lead_measure"))
+        title = f"{scope['products'][0]} in {' and '.join(C['markets'][m]['name'] for m in req['markets'])}: " + \
+                " and ".join(c["name"] for c in lead_first)
+    else:
+        title = f"{subject} — " + " and ".join(c["name"] for c in columns)
+    return {"id": dashboard_id, "title": title,
             "conversation_id": conversation_id, "run_id": run_id, "request": request, "decision_goal": req["decision_goal"],
             "period": req["period"], "scope": scope, "dimensions": req["dimensions"], "columns": columns, "groups": result,
             "requested_measures": req["requested_measures"], "omitted_measures": req["omitted_measures"],
-            "source": SOURCE, "source_records": records, "synthetic": True}
+            "source": SOURCE, "source_records": records, "synthetic": True,
+            **({"presentation": req["presentation"], "lead_measure": req["lead_measure"], "guided": req["guided"],
+                "market_order": [C["markets"][m]["name"] for m in req["markets"]]} if req.get("presentation") else {})}
 
 
 def _join(names: list[str]) -> str:
@@ -290,7 +307,14 @@ def build_receipt(artifact: dict) -> dict:
     actual = sum(r.get("value_type") == "actual_like_synthetic" for r in records)
     label = lambda c: f"{c['name']} ({c['unit']})" if c.get("unit") else c["name"]
     names = [label(c) for c in charted]
-    if len(periods) == 1:
+    if artifact.get("presentation") == "market_comparison" and len(groups) > 1:
+        lead = next((c for c in charted if c["id"] == artifact.get("lead_measure")), charted[0] if charted else None)
+        places = _join(artifact.get("market_order") or [g["label"] for g in groups])
+        ordered = [lead] + [c for c in charted if c is not lead] if lead else charted
+        layout = (f"{len(ordered)} monthly trend panels, one per KPI ({_join([label(c) for c in ordered])}), each comparing {places}. "
+                  f"{lead['name'] if lead else 'The lead KPI'} leads, with a latest-month comparison of both countries. "
+                  "Select a month to see both countries' values and their workbook rows. The table below lists every figure.")
+    elif len(periods) == 1:
         layout = f"{_join(names)} for {_month_label(periods[0])}"
         layout = ("Switch between " if len(names) > 1 else "") + layout + "."
     elif len(names) > 1:
@@ -309,4 +333,6 @@ def build_receipt(artifact: dict) -> dict:
         "observations": len(records), "rows": {"first": rows[0], "last": rows[-1]} if rows else None,
         "actual_like": actual, "forecast_like": len(records) - actual, "source": artifact.get("source"),
         "omitted_measures": artifact.get("omitted_measures") or [], "arrangement": layout,
+        "lead_measure": artifact.get("lead_measure"), "presentation": artifact.get("presentation"),
+        "decision_goal": artifact.get("decision_goal"),
     }

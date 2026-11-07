@@ -1,0 +1,56 @@
+/* Guided example dashboards: two countries, two KPIs. Country A is solid with circles, country B dashed with squares,
+   so colour is never the only difference. */
+.mc { display: grid; gap: 16px; min-width: 0; --mc-a: #1f65ad; --mc-b: #c2410c; }
+.mc h3 { margin: 0; font-size: 15px; }
+.mc-s0 { color: var(--mc-a); } .mc-s1 { color: var(--mc-b); }
+.mc-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.mc-kpi { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 12px 14px; display: grid; gap: 6px; }
+.mc-lead { border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
+.mc-tag { margin-left: 8px; font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); color: var(--fg); }
+.mc-sub { margin: 0; font-size: 12px; color: var(--muted); }
+.mc-kpi dl { margin: 0; display: grid; gap: 6px; }
+.mc-kpi dl div { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.mc-kpi dt { display: flex; align-items: center; gap: 6px; }
+.mc-kpi dd { margin: 0; text-align: right; display: grid; }
+.mc-kpi strong { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mc-change { font-size: 12px; color: var(--muted); }
+.mc-swatch { width: 10px; height: 10px; border-radius: 50%; background: currentColor; display: inline-block; }
+.mc-swatch.mc-s1 { border-radius: 2px; }
+.mc-bars { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 12px 14px; display: grid; gap: 8px; }
+.mc-bar { display: grid; grid-template-columns: minmax(90px, max-content) 1fr minmax(90px, max-content); gap: 10px; align-items: center; }
+.mc-bar-track { height: 14px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.mc-bar-fill { display: block; height: 100%; background: currentColor; }
+.mc-bar-value { font-variant-numeric: tabular-nums; text-align: right; font-weight: 500; }
+.mc-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.mc-panel { margin: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 12px 14px; display: grid; gap: 6px; min-width: 0; }
+.mc-panel-lead { border-color: var(--fg); }
+.mc-unit { color: var(--muted); font-size: 12px; }
+.mc-legend { list-style: none; margin: 0; padding: 0; display: flex; gap: 14px; font-size: 13px; }
+.mc-legend li { display: flex; align-items: center; gap: 6px; }
+.mc-key { width: 22px; height: 0; border-top: 2px solid currentColor; position: relative; }
+.mc-key.mc-shape1 { border-top-style: dashed; }
+.mc-svg { width: 100%; height: auto; display: block; border-radius: var(--radius-sm); }
+.mc-svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mc-grid { stroke: var(--line); }
+.mc-axis { font-size: 12px; fill: var(--muted); font-family: var(--font-sans); }
+.mc-cursor { stroke: var(--fg); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.5; }
+.mc-line polyline { stroke: currentColor; stroke-width: 2.5; }
+.mc-line circle, .mc-line rect { fill: currentColor; }
+.mc-hit { fill: transparent; cursor: pointer; }
+.mc-inspect { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 12px 14px; display: grid; gap: 10px; min-width: 0; }
+.mc-months { display: flex; flex-wrap: wrap; gap: 6px; }
+.mc-months button { min-height: 32px; min-width: 44px; padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; font: inherit; font-size: 13px; }
+.mc-months button[aria-pressed="true"] { background: var(--navy); border-color: var(--navy); color: var(--on-navy); }
+.mc-table { overflow-x: auto; }
+.mc-table table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.mc-table th, .mc-table td { text-align: left; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
+.mc-row summary { cursor: pointer; }
+.mc-row dl { margin: 6px 0 0; display: grid; gap: 2px; font-size: 12px; }
+.mc-row dl div { display: flex; gap: 8px; }
+.mc-row dd { margin: 0; }
+.mc-note { margin: 0; font-size: 12px; color: var(--muted); }
+@media (max-width: 560px) {
+  .mc-bar { grid-template-columns: 1fr; gap: 2px; }
+  .mc-bar-value { text-align: left; }
+  .mc-panels { grid-template-columns: 1fr; }
+}

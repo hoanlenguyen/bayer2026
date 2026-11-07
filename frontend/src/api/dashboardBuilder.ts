@@ -29,6 +29,10 @@ export interface DesignState {
   summary: string[];
   storage_mode: string;
   receipt?: BuildReceipt;
+  /** A guided example run: its fixed choices. Such a run stays reviewable even if an identical dashboard exists. */
+  guided?: { id: string; purpose: string; period: string } | null;
+  matches_saved?: string | null;
+  exact_reuse?: boolean;
 }
 
 export interface DashboardObservation {
@@ -60,6 +64,10 @@ export interface SavedDashboard {
   source_records: SourceRecord[];
   synthetic: boolean;
   receipt?: BuildReceipt;
+  presentation?: "market_comparison";
+  lead_measure?: string;
+  market_order?: string[];
+  guided?: { id: string; purpose: string; period: string };
   created_by?: { name: string; source?: string };
 }
 

@@ -764,3 +764,7 @@ code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
 
 /* "(Developing)" after the simulator title: the page is still being built. */
 .sim-developing { font-weight: 400; color: var(--kg-dot); }
+
+/* Guided example answers: the offered choices, each a full-width target with its resolved detail */
+.guided-choices button { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
+.guided-choices .choice-detail { font-size: 12px; opacity: 0.75; font-weight: 400; }

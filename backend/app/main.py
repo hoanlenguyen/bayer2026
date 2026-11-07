@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from . import actions as act
 from . import catalog as cat
+from . import guided_examples
 from .bi_estate import router as bi_estate_router
 from .governance import router as governance_router
 from .briefing_routes import router as briefing_router
@@ -34,6 +35,8 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = None
     message: str = ""
     preset_id: str | None = None
+    guided_id: str | None = None   # a guided example chip on the start screen
+    choice_id: str | None = None   # an offered answer in a guided example
 
 
 class ActionCreate(BaseModel):
@@ -256,9 +259,23 @@ async def agent_runs(conversation_id: str | None = None) -> list[dict[str, Any]]
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest) -> StreamingResponse:
-    if not req.message.strip() and not req.preset_id:
+    if req.guided_id is not None:
+        example = guided_examples.get(req.guided_id)
+        if not example:
+            raise HTTPException(400, "Unknown guided example.")
+        if req.preset_id or req.choice_id or (req.message.strip() and req.message.strip() != example["text"]):
+            raise HTTPException(400, "A guided example starts with its own text only.")
+    elif not req.message.strip() and not req.preset_id and not req.choice_id:
         raise HTTPException(400, "Send a message or choose a preset.")
-    return stream(pipeline().chat(req.conversation_id, req.message, req.preset_id))
+    if req.choice_id is not None and not req.conversation_id:
+        raise HTTPException(400, "An answer needs the conversation it answers.")
+    return stream(pipeline().chat(req.conversation_id, req.message, req.preset_id, req.guided_id, req.choice_id))
+
+
+@app.get("/api/guided-examples")
+async def guided_example_list() -> dict:
+    """The start screen's guided dashboard examples, in order, with their offered choices."""
+    return guided_examples.public()
 
 
 @app.post("/api/v2/chat")

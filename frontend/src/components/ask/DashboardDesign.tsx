@@ -8,7 +8,10 @@ import "./dashboard-design.css";
 
 function Brief({ state }: { state: DesignState }) {
   return <div className="db-brief"><p className="db-label">Interpreted brief</p>
-    <ul>{state.summary.map((line, i) => <li key={i}>{line}</li>)}</ul></div>;
+    <ul>{state.summary.map((line, i) => {
+      const m = /^(Purpose|Product|KPIs|Months|Source|Visuals): (.*)$/.exec(line);
+      return <li key={i}>{m ? <><strong>{m[1]}:</strong> {m[2]}</> : line}</li>;
+    })}</ul></div>;
 }
 
 function DesignQuestion({ state, pending, submit }: {
@@ -82,6 +85,9 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
   useEffect(() => {
     if (state?.status === "built" && state.dashboard_id) onBuilt(runId, !!state.reused);
   }, [state, onBuilt, runId]);
+  // A guided example goes straight to its reviewable brief.
+  const guidedReady = !!state?.guided && state.status === "ready";
+  useEffect(() => { if (guidedReady) setOpen(true); }, [guidedReady]);
 
   /** Final Build: send at once, show the reviewed facts while saving, then the hand-off. Clarification answers use send(). */
   async function buildNow(reviewed: DesignState) {
@@ -97,8 +103,9 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
       window.dispatchEvent(new Event("dashboards-changed"));
       if (!mounted.current) return;
       setState(result);
-      if (result.reused) { setSession(null); return; }  // an existing dashboard: its link, no new-build sequence
-      update({ kind: "ready", dashboardId: result.dashboard_id!, savedAfterMs: performance.now() - startedAt });
+      if (result.reused && !result.guided) { setSession(null); return; }  // an existing dashboard: its link, no new-build sequence
+      // A guided review that resolved to an identical saved dashboard is still this run's approved build: say so and open it.
+      update({ kind: "ready", dashboardId: result.dashboard_id!, savedAfterMs: performance.now() - startedAt, exactReuse: !!result.exact_reuse });
     };
     try {
       let response: Response | null = null;
@@ -161,6 +168,8 @@ export function DashboardDesign({ conversationId, runId, onBuilt }: {
   return <section className="db-design" aria-label="Dashboard design"><div className="db-design-head"><p className="db-label">Dashboard design</p>
     <button type="button" className="db-text-link" disabled={pending} onClick={() => setOpen(false)}>Close design</button></div>
     {state.status === "ready" ? <><h3>Review your dashboard brief</h3><Brief state={state} />
+      {state.matches_saved && <p className="db-caption">An identical dashboard was saved earlier. Building records your review and opens that saved version.</p>}
+      {state.guided && <p className="db-caption">Nothing is saved until you choose Build dashboard. To change the product, countries or KPIs, choose New question.</p>}
       <button type="button" className="btn" disabled={pending} onClick={() => void buildNow(state)}>
         Build dashboard<Icon name="arrowRight" size={15}/></button></> :
       state.question && <><DesignQuestion key={state.question.key} state={state} pending={pending}

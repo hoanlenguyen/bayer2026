@@ -30,18 +30,18 @@ def test_v2_chat_shows_the_input(client):
     typed = client.post("/api/v2/chat", json={"message": "  Show net sales  ", "conversation_id": "c1"})
     assert typed.status_code == 200
     assert typed.json() == {
-        "received": {"conversation_id": "c1", "message": "  Show net sales  ", "preset_id": None},
+        "received": {"conversation_id": "c1", "message": "  Show net sales  ", "preset_id": None, "guided_id": None, "choice_id": None},
         "question": "Show net sales", "source": "message", "length": 14, "new_conversation": False,
     }
 
-    preset = client.post("/api/v2/chat", json={"preset_id": "scn_reuse_eylea_jp"}).json()
+    preset = client.post("/api/v2/chat", json={"preset_id": "scn_reuse_eylea_jp", "guided_id": None, "choice_id": None}).json()
     assert preset["source"] == "preset" and "Eylea" in preset["question"] and preset["new_conversation"] is True
 
-    both = client.post("/api/v2/chat", json={"message": "Typed wins", "preset_id": "scn_reuse_eylea_jp"}).json()
+    both = client.post("/api/v2/chat", json={"message": "Typed wins", "preset_id": "scn_reuse_eylea_jp", "guided_id": None, "choice_id": None}).json()
     assert both["source"] == "message" and both["question"] == "Typed wins"
 
     assert client.post("/api/v2/chat", json={"message": "   "}).status_code == 400
-    unknown = client.post("/api/v2/chat", json={"preset_id": "nope"})
+    unknown = client.post("/api/v2/chat", json={"preset_id": "nope", "guided_id": None, "choice_id": None})
     assert unknown.status_code == 400 and unknown.json()["detail"] == "Unknown preset: nope"
 
     assert client.get("/api/conversations").json() == []  # nothing was saved
@@ -107,7 +107,7 @@ def test_classify_survives_vector_search_failure(client, monkeypatch):
 
 
 def test_reuse_flow_with_preview(client):
-    evs = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_lynkuet_es"}))
+    evs = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_lynkuet_es", "guided_id": None, "choice_id": None}))
     d = stage(evs, "decision")["data"]
     assert d["decision"] == "reuse" and d["preview"]["rows"]
     assert stage(evs, "deliver")
@@ -168,13 +168,13 @@ def test_free_text_grill_me(client):
 
 
 def test_not_feasible(client):
-    evs = sse(client.post("/api/chat", json={"preset_id": "scn_out_of_scope"}))
+    evs = sse(client.post("/api/chat", json={"preset_id": "scn_out_of_scope", "guided_id": None, "choice_id": None}))
     assert stage(evs, "decision")["data"]["decision"] == "not_feasible"
 
 
 def test_understand_step_carries_the_classification(client):
     text = "How are Eylea net sales and digital engagement developing in Japan?"
-    evs = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_eylea_jp"}))
+    evs = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_eylea_jp", "guided_id": None, "choice_id": None}))
     tags = stage(evs, "intent")["data"]["classification"]
     assert tags["domain"] == "Commercial"
     assert tags["market"] == ["JP"] or tags["market"] == ["Japan"]
@@ -236,7 +236,7 @@ def test_steps_handle_tableau_and_trust(client):
 
 
 def test_ask_flow_shows_the_same_steps(client):
-    evs = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_eylea_jp"}))
+    evs = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_eylea_jp", "guided_id": None, "choice_id": None}))
     assert "steps" not in stage(evs, "intent")["data"]["classification"]
     found = stage(evs, "discovery")["data"]["step"]
     assert found["step"] == 3 and found["data"]["reuse_count"] == 0
@@ -287,7 +287,7 @@ def test_conversation_can_be_reopened_and_continued(client):
 
 
 def test_conversation_is_saved_before_the_answer_finishes(client):
-    stream = client.stream("POST", "/api/chat", json={"preset_id": "scn_reuse_eylea_jp"})
+    stream = client.stream("POST", "/api/chat", json={"preset_id": "scn_reuse_eylea_jp", "guided_id": None, "choice_id": None})
     with stream as r:
         for line in r.iter_lines():
             if '"user_message"' in line:
@@ -307,8 +307,8 @@ def test_conversation_list_limit_and_unknown_id(client):
 def test_delete_conversation_removes_it_and_what_it_produced(client):
     from app.main import pipeline
 
-    keep = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_eylea_jp"}))[0]["id"]
-    gone_evs = sse(client.post("/api/chat", json={"preset_id": "req_finance_gtn"}))
+    keep = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_eylea_jp", "guided_id": None, "choice_id": None}))[0]["id"]
+    gone_evs = sse(client.post("/api/chat", json={"preset_id": "req_finance_gtn", "guided_id": None, "choice_id": None}))
     gone = gone_evs[0]["id"]
     store = pipeline().store
     vectors = pipeline().vectors
@@ -338,7 +338,7 @@ def test_delete_conversation_removes_it_and_what_it_produced(client):
 
 
 def test_ok_after_a_result_is_rejected_and_keeps_the_result(client):
-    evs = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_eylea_jp"}))
+    evs = sse(client.post("/api/chat", json={"preset_id": "scn_reuse_eylea_jp", "guided_id": None, "choice_id": None}))
     conv = evs[0]["id"]
     before = client.get(f"/api/conversations/{conv}").json()
 
@@ -433,12 +433,12 @@ def test_a_country_can_be_given_as_the_answer(client):
 
 
 def test_a_report_held_for_human_review_is_not_picked_to_migrate(client):
-    d = stage(sse(client.post("/api/chat", json={"preset_id": "req_migrate_xarelto"})), "decision")["data"]
+    d = stage(sse(client.post("/api/chat", json={"preset_id": "req_migrate_xarelto", "guided_id": None, "choice_id": None})), "decision")["data"]
     chosen = cat.asset_by_id(d["candidate"]["asset_id"])
     assert d["decision"] == "migrate" and chosen["migration"]["recommended_path_candidate"] != "HUMAN_REVIEW"
     assert d["candidate"]["owner"] == chosen["owner"]
     # The step beside the card agrees with the card about this report.
-    rows = {r["id"]: r for r in stage(sse(client.post("/api/chat", json={"preset_id": "req_migrate_xarelto"})), "migration")["data"]["step"]["data"]["assets"]}
+    rows = {r["id"]: r for r in stage(sse(client.post("/api/chat", json={"preset_id": "req_migrate_xarelto", "guided_id": None, "choice_id": None})), "migration")["data"]["step"]["data"]["assets"]}
     assert rows[chosen["id"]]["recommendation"] != "review"
 
 
@@ -459,7 +459,7 @@ def test_recommendation_is_human_review_when_nothing_else_can_move():
 
 
 def test_new_build_names_the_shared_model_and_its_owner(client):
-    d = stage(sse(client.post("/api/chat", json={"preset_id": "req_finance_gtn"})), "decision")["data"]
+    d = stage(sse(client.post("/api/chat", json={"preset_id": "req_finance_gtn", "guided_id": None, "choice_id": None})), "decision")["data"]
     assert d["decision"] == "new_build"
     model = cat.model_by_id(d["target_model_id"])
     assert d["target_model"] == {"id": model["id"], "name": model["name"], "owner": model["owner"], "owner_status": model["owner_status"]}
