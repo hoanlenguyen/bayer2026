@@ -186,7 +186,9 @@ class Pipeline:
         return self._event(conv, "stage", stage=stage, title=STAGES[stage], status=status, summary=summary, data=data)
 
     def _say(self, conv: dict[str, Any], text: str, **extra: Any) -> Event:
-        msg = {"role": "assistant", "content": text, "ts": now(), **extra}
+        # The run it answers, so an earlier answer card can stay under its own message when the chat continues.
+        run_id = conv["runs"][-1]["id"] if conv["runs"] and conv["runs"][-1].get("id") else None
+        msg = {"role": "assistant", "content": text, "ts": now(), **({"run_id": run_id} if run_id else {}), **extra}
         conv["messages"].append(msg)
         return self._event(conv, "message", **msg)
 

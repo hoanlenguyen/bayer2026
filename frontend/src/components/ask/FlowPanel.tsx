@@ -4,6 +4,7 @@ import { Icon } from "../Icon";
 import { RecommendationChip } from "./RecommendationChip";
 import { currentTriage, TriageTags } from "./TriageStrip";
 import { StageDetail } from "./StageDetail";
+import { scrollWithin } from "../../lib/scrollWithin";
 
 /** Who does the work in each stage. Mirrors the legend in SinceAI's reference pipeline. */
 const STAGE_KIND: Record<StageId, { label: string; cls: string }> = {
@@ -184,7 +185,7 @@ export function FlowPanel({ stages, decision, health, catalog, groups, focusGrou
     if (!focusGroup) return;
     setCollapsed(false); // a hidden panel can't show what was asked for
     setOpenGroup(focusGroup);
-    requestAnimationFrame(() => document.getElementById(`flow-group-${focusGroup}`)?.scrollIntoView({ block: "start", behavior: "smooth" }));
+    requestAnimationFrame(() => { const el = document.getElementById(`flow-group-${focusGroup}`); if (el) scrollWithin(el, "start", "smooth"); });
   }, [focusGroup, focusTick]);
 
   const toggleTechnical = () => {

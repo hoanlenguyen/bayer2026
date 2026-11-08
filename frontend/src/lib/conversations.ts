@@ -119,8 +119,13 @@ export async function removeConversation(id: string): Promise<void> {
 
 /** The steps of the latest question. A step left running means the answer was cut off, so it is not shown as running. */
 export function stagesOf(conv: ConversationDetail): Partial<Record<StageId, StageEvent>> {
+  return stagesOfRun(conv.runs[conv.runs.length - 1]);
+}
+
+/** One saved run's completed steps, as the Ask page shows them. */
+export function stagesOfRun(run: ConversationDetail["runs"][number] | undefined): Partial<Record<StageId, StageEvent>> {
   const stages: Partial<Record<StageId, StageEvent>> = {};
-  for (const event of conv.runs[conv.runs.length - 1]?.events ?? []) {
+  for (const event of run?.events ?? []) {
     if (event.type !== "stage") continue;
     if (event.status === "running") delete stages[event.stage];
     else stages[event.stage] = event;

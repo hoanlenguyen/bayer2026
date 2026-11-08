@@ -210,7 +210,10 @@ def test_a_built_dashboard_is_reused_next_time_and_a_retry_keeps_it():
         discovery = next(e for e in c.get(f"/api/conversations/{cid2}").json()["runs"][-1]["events"]
                          if e.get("stage") == "discovery" and e.get("status") == "done")
         assert discovery["summary"].startswith("Already built in Ask") and discovery["data"]["step"]["data"]["built_in_ask"]["id"] == first["dashboard_id"]
-        run = c.get(f"/api/conversations/{cid2}").json()["runs"][-1]
+        conv2 = c.get(f"/api/conversations/{cid2}").json()
+        result = [m for m in conv2["messages"] if m.get("kind") == "result"][-1]
+        assert result["run_id"] == run_id2  # the answer card can stay under its own message when the chat continues
+        run = conv2["runs"][-1]
         proposals = next(e for e in run["events"] if e.get("stage") == "actions" and e.get("status") == "done")["data"]["proposals"]
         assert any(p["key"] == f"owner:{first['dashboard_id']}" and p["owner"] == "BI steward" for p in proposals)
         assert c.get(f"/api/conversations/{cid2}/runs/{run_id2}/dashboard").status_code in (200, 409)

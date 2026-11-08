@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { dashboardUrl, type BuildReceipt, type BuildStepId, type DesignState } from "../../api/dashboardBuilder";
 import { getCurrentConversation, useCurrentConversation } from "../../lib/conversations";
 import { prefetchDashboard } from "../../lib/dashboardPrefetch";
+import { scrollWithin } from "../../lib/scrollWithin";
 
 /* "How your dashboard is prepared": the approved build as it runs. Each row is one checkpoint the server reports before
    its work starts and completes with that work's verified facts. "Dashboard saved" shows only after the server
@@ -121,7 +122,7 @@ export function BuildHandoff({ session, conversationId, onRetry, onReviewUpdated
     void import("../../pages/SavedDashboardPage");
     if (!stillHere(conversationId)) return;
     heading.current?.focus({ preventScroll: true });
-    panel.current?.scrollIntoView({ block: "nearest" });
+    if (panel.current) scrollWithin(panel.current, "nearest");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

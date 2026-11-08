@@ -45,6 +45,8 @@ export interface MessageEvent {
   /** the verified scope a guided question was asked for */
   facts?: GuidedFacts;
   decision?: DecisionType;
+  /** the run this message answers */
+  run_id?: string;
   ts: string;
 }
 
@@ -108,7 +110,7 @@ export interface ConversationSummary {
 
 export interface ConversationDetail extends ConversationSummary {
   state: string;
-  messages: { role: "user" | "assistant"; content: string; kind?: "question" | "result" | "retry"; suggestions?: string[]; choices?: GuidedChoice[]; facts?: GuidedFacts }[];
+  messages: { role: "user" | "assistant"; content: string; kind?: "question" | "result" | "retry"; suggestions?: string[]; choices?: GuidedChoice[]; facts?: GuidedFacts; run_id?: string }[];
   runs: { id: string; events: (StageEvent | { type: "user_message" | "message" | "done" })[] }[];
 }
 

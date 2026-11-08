@@ -7,7 +7,8 @@ import { TriageStrip } from "../components/ask/TriageStrip";
 import { VerdictCard } from "../components/ask/VerdictCard";
 import { Icon } from "../components/Icon";
 import { LiveSteps, type TurnPhase } from "../components/ask/LiveSteps";
-import { cancelPendingConversation, CURRENT_REMOVED_EVENT, forgetConversation, getCurrentConversation, inSession, OPEN_CONVERSATION_EVENT, recordConversation, setAnswerInProgress, setCurrentConversation, stagesOf, takePendingConversation } from "../lib/conversations";
+import { cancelPendingConversation, CURRENT_REMOVED_EVENT, forgetConversation, getCurrentConversation, inSession, OPEN_CONVERSATION_EVENT, recordConversation, setAnswerInProgress, setCurrentConversation, stagesOf, stagesOfRun, takePendingConversation } from "../lib/conversations";
+import { scrollWithin } from "../lib/scrollWithin";
 
 interface ChatMessage {
   id: number;
@@ -16,6 +17,8 @@ interface ChatMessage {
   kind?: "question" | "result" | "retry";
   suggestions?: string[];
   choices?: GuidedChoice[];
+  /** The run this assistant message answers: an earlier run's answer card stays under its last message. */
+  runId?: string;
   facts?: GuidedFacts;
 }
 
@@ -107,6 +110,10 @@ export function AskPage() {
   const [convState, setConvState] = useState<ConvState>("idle");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [stages, setStages] = useState<Partial<Record<StageId, StageEvent>>>({});
+  const stagesRef = useRef(stages);
+  stagesRef.current = stages;
+  // Earlier runs' completed steps, by run ID: their answer cards stay in the chat when a new question starts.
+  const [pastRuns, setPastRuns] = useState<Record<string, Partial<Record<StageId, StageEvent>>>>({});
   const [decision, setDecision] = useState<DecisionType | null>(null);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false); // sent, and the backend has not said yet if it accepts the message
@@ -144,7 +151,9 @@ export function AskPage() {
       const conv = await api.conversation(id);
       if (!latest()) return; // another conversation was picked, or New question, meanwhile
       const restored = stagesOf(conv);
-      const restoredMessages: ChatMessage[] = conv.messages.map((m) => ({ id: nextId.current++, role: m.role, content: m.content, kind: m.kind, suggestions: m.suggestions, choices: m.choices }));
+      const restoredMessages: ChatMessage[] = conv.messages.map((m) => ({ id: nextId.current++, role: m.role, content: m.content, kind: m.kind, suggestions: m.suggestions, choices: m.choices, runId: m.run_id }));
+      setPastRuns(Object.fromEntries(conv.runs.slice(0, -1).map((r) => [r.id, stagesOfRun(r)] as const)
+        .filter(([, s]) => s.decision?.status === "done")));
       setMessages(restoredMessages);
       // A saved run comes back as completed evidence under its last accepted message; nothing is replayed.
       const accepted = conv.messages.map((m, i) => (m.role === "user" && !(m as { rejected?: boolean }).rejected ? i : -1)).filter((i) => i >= 0);
@@ -197,7 +206,9 @@ export function AskPage() {
     // Open a finished dashboard at its headline. Keep following messages while the request runs.
     const result = !busy && last.classList.contains("verdict");
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    last.scrollIntoView({ block: result ? "start" : "nearest", behavior: result || reducedMotion ? "instant" : "smooth" });
+    scrollWithin(last, result ? "start" : "nearest", result || reducedMotion ? "instant" : "smooth");
+    // Desktop Ask fits the window and never scrolls as a page: undo any shift something else caused.
+    if (window.scrollY && window.matchMedia("(min-width: 961px)").matches) window.scrollTo(0, 0);
   }, [messages, busy, stages]);
 
   const handleEvent = useCallback((e: PipelineEvent) => {
@@ -221,6 +232,10 @@ export function AskPage() {
         if (e.stage === "intent" && e.status === "running") {
           if (turnRef.current) updateTurn(turnRef.current.id, { newRun: true });
           setRestoredRunId(null);
+          // Keep the finished answer of the run that ends here, so its card stays in the conversation.
+          const previous = stagesRef.current;
+          const previousRun = previous.decision?.status === "done" ? previous.decision.data?.run_id : null;
+          if (previousRun) setPastRuns((p) => ({ ...p, [previousRun]: previous }));
           setStages({ intent: e });
           setDecision(null);
           break;
@@ -231,7 +246,7 @@ export function AskPage() {
       case "message":
         setChecking(false);
         if (e.kind === "retry" && turnRef.current) updateTurn(turnRef.current.id, { rejected: true });  // shown as soon as it settles
-        setMessages((m) => [...m, { id: nextId.current++, role: "assistant", content: e.content, kind: e.kind, suggestions: e.suggestions, choices: e.choices, facts: e.facts }]);
+        setMessages((m) => [...m, { id: nextId.current++, role: "assistant", content: e.content, kind: e.kind, suggestions: e.suggestions, choices: e.choices, facts: e.facts, runId: e.run_id }]);
         break;
       case "done":
         setConvState(e.state);
@@ -307,7 +322,7 @@ export function AskPage() {
     setRestoring(false);
     setCurrentConversation(null);
     setRestoredRunId(null);
-    setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null); setTimelineAt(null);
+    setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setPastRuns({}); setDecision(null); setError(null); setTimelineAt(null);
     requestAnimationFrame(() => document.getElementById("ask-input")?.focus());
   };
 
@@ -318,7 +333,7 @@ export function AskPage() {
       restoreAttempt.current++;
       setRestoring(false);
       setRestoredRunId(null);
-      setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setDecision(null); setError(null); setTimelineAt(null);
+      setConvId(null); setConvState("idle"); setMessages([]); setStages({}); setPastRuns({}); setDecision(null); setError(null); setTimelineAt(null);
     };
     window.addEventListener(CURRENT_REMOVED_EVENT, cleared);
     return () => window.removeEventListener(CURRENT_REMOVED_EVENT, cleared);
@@ -340,6 +355,10 @@ export function AskPage() {
     if ((checking || turn) && shownMessages[tailStart - 1]?.role === "user") tailStart--;
     while (tailStart >= 2 && shownMessages[tailStart - 1].kind === "retry" && shownMessages[tailStart - 2].role === "user") tailStart -= 2;
   }
+  // An earlier run's answer card sits under that run's last message (never the run still on screen as the current answer).
+  const currentRun = shownStages.decision?.data?.run_id ?? (turn ? null : restoredRunId);
+  const pastAnchors = new Map<string, number>();
+  for (const m of shownMessages) if (m.runId && m.runId !== currentRun && pastRuns[m.runId]) pastAnchors.set(m.runId, m.id);
   const renderMessage = (m: ChatMessage) => (<Fragment key={m.id}>
     <div className={`msg msg-${m.role}`}>
       <p><RichText text={m.content} /></p>
@@ -355,6 +374,11 @@ export function AskPage() {
         </div>
       )}
     </div>
+    {m.runId && pastAnchors.get(m.runId) === m.id && pastRuns[m.runId] && <div className="past-answer">
+      <TriageStrip stages={pastRuns[m.runId]} />
+      <VerdictCard stages={pastRuns[m.runId]} catalog={catalog} busy={false}
+        handoff={convId ? { conversationId: convId, runId: m.runId } : undefined} />
+    </div>}
     {m.id === timelineAt && (turn || Object.keys(stages).length > 0) && !(turn?.settled && turn.rejected)
       && <LiveSteps stages={turnStages} active={!!turn && !turn.settled} phase={turn?.phase ?? null} />}
   </Fragment>);
