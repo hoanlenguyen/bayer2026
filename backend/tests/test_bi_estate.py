@@ -39,6 +39,7 @@ def test_built_dashboard_appears_once_with_its_creator_and_no_owner():
         assert again.status_code == 200
         r = rows(c, origin="generated")
         assert r["total"] == 364 and [x["id"] for x in r["rows"]] == [did]
+        assert [x["id"] for x in r["recent_from_ask"]] == [did]  # shown first, whatever the sort
         row = r["rows"][0]
         assert row["creator"]["recorded"] and row["creator"]["name"] == "Demo employee"
         assert row["owner"] is None and row["owner_state"] == "absent" and "needs_owner" in row["issues"]

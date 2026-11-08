@@ -109,6 +109,16 @@ function PortfolioList({ params }: { params: URLSearchParams }) {
       {active && <button type="button" className="bp-linkbtn" onClick={() => go("/bi-estate")}>Clear filters</button>}
     </form>
 
+    {data && !active && (data.recent_from_ask ?? []).length > 0 && <section className="bp-recent" aria-labelledby="bp-recent-title">
+      <h2 id="bp-recent-title">Just built in Ask</h2>
+      <p>The newest dashboards built from Ask. Each starts without an owner until you assign one.</p>
+      <ul>{data.recent_from_ask.map((r) => <li key={r.id}>
+        <a href={`/bi-estate/${encodeURIComponent(r.id)}`} onClick={link} className="bp-title">{r.title}</a>
+        <span>{[r.creator.name && `By ${r.creator.name}`, r.created.value && new Date(r.created.value).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }),
+          r.owner_state === "absent" ? "Needs an owner" : null].filter(Boolean).join(" · ")}</span>
+      </li>)}</ul>
+    </section>}
+
     <div className="bp-tablebar">
       <p role="status" aria-live="polite">{data ? <><strong>{data.matching}</strong> of {data.total} reporting assets
         {data.pairs_in_view > 0 && <> · {data.pairs_in_view} consolidation {data.pairs_in_view === 1 ? "pair" : "pairs"} in view</>}</> : loading ? "Loading the portfolio…" : ""}</p>

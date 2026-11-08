@@ -157,3 +157,9 @@ a.bp-tag:hover { text-decoration: underline; }
 .bp-tag-scope, .bp-tag-refresh, .bp-tag-chronology { color: var(--warn) !important; }
 .bp-tag-retirement { color: var(--rec-retire) !important; }
 .bg-ev, .bg-meta, .bg-risks li, .bg-pols li, .bp-detail .bp-card { overflow-wrap: anywhere; min-width: 0; }
+.bp-recent { display: grid; gap: 6px; padding: 14px 16px; border: 1px solid var(--line); border-left: 3px solid var(--rec-new_build); border-radius: var(--radius); background: var(--surface); }
+.bp-recent h2 { margin: 0; font-size: 15px; }
+.bp-recent > p { margin: 0; color: var(--muted); font-size: 13px; }
+.bp-recent ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
+.bp-recent li { display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: baseline; min-width: 0; }
+.bp-recent li span { color: var(--muted); font-size: 13px; }

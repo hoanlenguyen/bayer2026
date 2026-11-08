@@ -316,7 +316,9 @@ export function KnowledgeGraph({ entities, edges: catalogEdges, groupLabels = tr
     const extent = Math.max(1, ...dots.map((d) => Math.hypot(d.x, d.y, d.z)));
     // Link animation timing (ms): links grow out, pulses run along them, the ring spreads, sparks fade in and out.
     const GROW_MS = 1500, PULSE_MS = 2800, RING_MS = 2600, FADE_IN_MS = 600, FADE_OUT_MS = 1400;
-    let sparks: { i: number; at: number; speed: number }[] = [], nextSpark = performance.now() + 300; // as the graph grows in
+    // The opening sparks light up within the first second and stay briefly, then random ones take over.
+    const OPENING_LIFE = 2200;
+    let sparks: { i: number; at: number; speed: number; life: number }[] = [], nextSpark = performance.now() + 120; // as the graph grows in
     // The first sparks are the items nearest the centre, so the animation opens in the middle of the graph.
     const opening = [...named].sort((a, b) => Math.hypot(dots[a]!.x, dots[a]!.y, dots[a]!.z) - Math.hypot(dots[b]!.x, dots[b]!.y, dots[b]!.z)).slice(0, SPARK_MAX);
     let lit = -1, litAt = 0; // the highlighted item, and when it lit up: the link animation starts there
@@ -486,16 +488,19 @@ export function KnowledgeGraph({ entities, edges: catalogEdges, groupLabels = tr
 
       // Sparks: drawn under the hovered item. They skip reduced motion, where nothing should move on its own.
       if (autoHighlight && named.length && !motion.matches) {
-        sparks = sparks.filter((sp) => now - sp.at < SPARK_LIFE);
+        sparks = sparks.filter((sp) => now - sp.at < sp.life);
         if (now >= nextSpark && sparks.length < SPARK_MAX) {
-          const first = opening.length > 0; // the opening pair plays faster, so the page comes alive quickly
+          const first = opening.length > 0; // the opening pair plays fast and short, so the page comes alive at once
           const i = first ? opening.shift()! : named[Math.floor(Math.random() * named.length)]!;
-          if (i !== hovered && gAlpha[dotGroup[i]!] === 1 && !sparks.some((sp) => sp.i === i)) sparks.push({ i, at: now, speed: first ? 2.2 : 1 });
-          nextSpark = now + (opening.length ? 250 : 900 + Math.random() * 1100); // the opening pair starts close together
+          // The opening pair ignores the cluster fade, so it always shows; later picks skip items in a faded group.
+          if (i !== hovered && (first || gAlpha[dotGroup[i]!] === 1) && !sparks.some((sp) => sp.i === i))
+            sparks.push({ i, at: now, speed: first ? 2.5 : 1, life: first ? OPENING_LIFE : SPARK_LIFE });
+          nextSpark = now + (opening.length ? 150 : first ? 700 : 900 + Math.random() * 1100); // the first random one follows soon
         }
         for (const sp of sparks) {
           const a = now - sp.at;
-          const fade = Math.min(1, a / FADE_IN_MS, (SPARK_LIFE - a) / FADE_OUT_MS);
+          const fadeIn = sp.life === OPENING_LIFE ? 250 : FADE_IN_MS, fadeOut = sp.life === OPENING_LIFE ? 600 : FADE_OUT_MS;
+          const fade = Math.min(1, a / fadeIn, (sp.life - a) / fadeOut);
           drawLit(sp.i, a * sp.speed, Math.max(0, fade));
         }
       }

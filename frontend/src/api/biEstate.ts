@@ -14,6 +14,8 @@ export interface Row {
   last_view_month: string | null; last_view_count: number | null; refresh: string; model_id: string | null; pair_ids: string[];
 }
 export interface EstatePage {
+  /** The three newest dashboards built in Ask, independent of filters and sort. */
+  recent_from_ask: Row[];
   rows: Row[]; total: number; matching: number; page: number; size: number; pages: number; sort: string; direction: "asc" | "desc";
   counts: Record<IssueCode, { assets: number; pairs?: number }>; pairs_in_view: number;
   issue_labels: Record<IssueCode, string>; origin_labels: Record<Origin, string>;
