@@ -54,13 +54,10 @@ def test_source_bound_dashboard_is_immutable_retrievable_and_run_scoped(monkeypa
         assert dash["source_records"][-1]["market_id"] == "FR" and dash["source_records"][-1]["net_sales_m_eur_syn"] == 37.58
         assert dash["source_records"][-1]["month"] == "2026-10-01"
         assert c.post(path + "/build", json=approved).json()["dashboard_id"] == did  # same-run retry: same dashboard
-        other = seed(c, "different-chat")  # another run with the identical brief builds its own dashboard
+        other = seed(c, "different-chat")  # another run with a brief the saved dashboard covers: reuse it, no copy
         fresh = c.get(other).json()
-        assert fresh["status"] == "ready" and not fresh["reused"] and fresh["dashboard_id"] is None
-        assert fresh["review_token"] == approved["review_token"]  # same approved content, so the same review fingerprint
-        second = build(c, other)[0]
-        assert second["dashboard_id"] != did and not second["reused"] and len(c.get("/api/dashboards").json()["items"]) == 2
-        assert c.get("/api/dashboards/" + second["dashboard_id"]).json()["conversation_id"] == "different-chat"
+        assert fresh["status"] == "blocked" and fresh["reuse_url"] == f"/dashboards/{did}" and "already built in Ask" in fresh["reason"]
+        assert len(c.get("/api/dashboards").json()["items"]) == 1
         c.delete("/api/conversations/conversation").raise_for_status()
         monkeypatch.setitem(rows[19], "net_sales_m_eur_syn", 999)
         assert c.get("/api/dashboards/" + did).json() == dash

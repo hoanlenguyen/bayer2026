@@ -67,6 +67,13 @@ def propose(intent: dict[str, Any], decision: dict[str, Any], existing: list[dic
             f"From your request. Afterwards, {target['metric_name']} should {'go down' if target['direction'] == 'decrease' else 'go up'}.",
             "You (requester)", 30, cand.get("asset_id") if dec == "reuse" else None, target)
 
+    # A dashboard built in Ask is reused before anyone owns it: the BI steward assigns an owner.
+    saved = decision.get("saved_dashboard")
+    if dec == "reuse" and saved and not saved.get("owner"):
+        add(f"owner:{saved['id']}", "maintenance", f"Assign an owner to {saved['title']}",
+            "This dashboard was built in Ask and is now being reused, but nobody answers for it yet (BI Portfolio: Needs an owner).",
+            "BI steward", 14)
+
     # Maintenance: overlapping, legacy or poorly governed reports flagged by the decision.
     for f in decision.get("flags", []):
         a = cat.asset_by_id(f["asset_id"])

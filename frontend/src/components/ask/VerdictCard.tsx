@@ -5,6 +5,7 @@ import { RUNNING_COPY } from "./FlowPanel";
 import { RecommendationChip } from "./RecommendationChip";
 import { RequestHandoff } from "./RequestHandoff";
 import { navigate } from "../../lib/navigation";
+import type { SavedDashboardReuse } from "../../api/handoff";
 
 interface Props {
   stages: Partial<Record<StageId, StageEvent>>;
@@ -68,12 +69,14 @@ export function VerdictCard({ stages, catalog, busy, handoff }: Props) {
   const t = d.thresholds ?? {};
 
   const native = d.decision === "reuse" ? d.employee_report : null;
+  const savedReuse: SavedDashboardReuse | null = d.decision === "reuse" ? d.saved_dashboard ?? null : null;
   const asset = stages.deliver?.data?.asset;
-  const reportName: string | null = native?.title ?? native?.label ?? asset?.name ?? (building ? null : c?.name) ?? null;
+  const reportName: string | null = savedReuse?.title ?? native?.title ?? native?.label ?? asset?.name ?? (building ? null : c?.name) ?? null;
   const targetModel: { name: string; owner?: string | null; owner_status?: string | null } | null = d.target_model ?? null;
   const owner: string | null = native?.owner ?? asset?.owner ?? (building ? targetModel?.owner : c?.owner) ?? null;
   const ownerStatus: string | null | undefined = asset?.owner_status ?? (building ? targetModel?.owner_status : c?.owner_status);
-  const ownerText = owner && `Owner: ${owner}${ownerStatus && ownerStatus !== "active" ? ` (${ownerStatus})` : ""}`;
+  const ownerText = savedReuse ? (savedReuse.owner ? `Owner: ${savedReuse.owner}` : "Built in Ask · No owner yet")
+    : owner && `Owner: ${owner}${ownerStatus && ownerStatus !== "active" ? ` (${ownerStatus})` : ""}`;
   const reportId: string | null = native?.report_id ?? asset?.id ?? (building ? null : c?.asset_id) ?? null;
 
   const missing = c && !building
@@ -118,10 +121,13 @@ export function VerdictCard({ stages, catalog, busy, handoff }: Props) {
 
       {d.reason && !handoff && <p className="verdict-note">{d.reason}</p>}
 
+      {savedReuse && !handoff && <div className="verdict-actions">
+        <a className="btn" href={savedReuse.url} onClick={navigate}>Open the saved dashboard <Icon name="arrowRight" /></a>
+      </div>}
       {native && !handoff && <div className="verdict-actions">
         <a className="btn" href={native.url} onClick={navigate}>Open matching employee report <Icon name="arrowRight" /></a>
       </div>}
-      {handoff && <RequestHandoff key={`${handoff.conversationId}/${handoff.runId}`} {...handoff} catalog={catalog} isNative={!!native} onRecheck={onRecheck} onBuilt={onBuilt} dashboardReady={!!saved} />}
+      {handoff && <RequestHandoff key={`${handoff.conversationId}/${handoff.runId}`} {...handoff} catalog={catalog} isNative={!!native || !!savedReuse} onRecheck={onRecheck} onBuilt={onBuilt} dashboardReady={!!saved} />}
 
       {!saved && <>
       {building && c && !handoff && (

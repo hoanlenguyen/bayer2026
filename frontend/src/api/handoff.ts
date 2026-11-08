@@ -64,6 +64,8 @@ export interface DecisionHandoff {
   preview: HandoffPreview | null;
   metric_series?: MetricSeries | null;
   employee_report: { report_id: string; view_id: string; url: string; label: string; title?: string; owner?: string; revision?: number } | null;
+  /** Reuse of a dashboard already built in Ask that covers this request. */
+  saved_dashboard?: SavedDashboardReuse | null;
   estate_assessment?: { decision: string; reason: string } | null;
   owners: { id: string; name: string; role: string }[];
   suggested_owner_id: string | null;
@@ -87,4 +89,11 @@ export async function readHandoff<T>(path: string, method = "GET", body?: object
     throw new Error(typeof data.detail === "string" ? data.detail : `The request failed (${response.status}). Try again.`);
   }
   return response.json() as Promise<T>;
+}
+
+/** A dashboard built in Ask that covers a later request, so the decision is Reuse instead of a new build. */
+export interface SavedDashboardReuse {
+  id: string; title: string; url: string; created_at?: string; created_by: string; owner: string | null;
+  period: { start?: string; end?: string }; scope: { products?: string[]; markets?: string[] };
+  kpis: { id: string; name: string; kpi_id: string | null }[];
 }

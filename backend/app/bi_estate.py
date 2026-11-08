@@ -316,9 +316,11 @@ async def _set(store, kind: str, doc_id: str, fields: dict) -> None:
 async def _dashboards(store) -> list[dict]:
     """Metadata of saved dashboards, without their source rows or chart points."""
     fields = ("id", "title", "created_at", "created_by", "period", "decision_goal", "scope", "columns", "conversation_id", "run_id",
-              "requested_measures", "omitted_measures", "source")
+              "requested_measures", "omitted_measures", "source", "dimensions", "requirements")
     if store.name == "mongodb":
-        projection_ = {k: 1 for k in fields if k != "columns"} | {"_id": 0, "columns.kpi_id": 1, "columns.name": 1, "columns.id": 1}
+        projection_ = ({k: 1 for k in fields if k not in ("columns", "requirements")}
+                       | {"_id": 0, "columns.kpi_id": 1, "columns.name": 1, "columns.id": 1,
+                          "requirements.products": 1, "requirements.markets": 1, "requirements.measures": 1, "requirements.dimensions": 1})
         return [d async for d in store.db["dashboards"].find({}, projection_)]
     return [{k: d.get(k) for k in fields} for d in store.artifacts.get("dashboards", {}).values()]
 

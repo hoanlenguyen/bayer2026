@@ -1,3 +1,4 @@
+import { navigate } from "../../lib/navigation";
 import type { ActionProposal, Candidate, CatalogMeta, StageId } from "../../api/types";
 import { RecommendationChip } from "./RecommendationChip";
 
@@ -184,11 +185,17 @@ export function StageDetail({ stage, data, catalog, technical }: Props) {
 
     case "discovery": {
       const cands: Candidate[] = data.candidates ?? [];
+      const built = data.step?.data?.built_in_ask;
       return (
         <div className="detail-stack">
           <StepFindings step={data.step} technical={technical} />
-          <p className="muted">Searched {data.searched} catalog assets. Scores compare each report with your request.</p>
-          {cands.length === 0 && <p className="muted">No existing report uses these numbers.</p>}
+          {built && <div className="cand">
+            <div className="cand-head"><strong>Already built in Ask: {built.title}</strong></div>
+            <p className="muted">{built.kpis.map((k: { name: string }) => k.name).join(", ")} · built by {built.created_by} · no owner yet</p>
+            <a className="btn-outline" href={built.url} onClick={navigate}>Open the saved dashboard</a>
+          </div>}
+          <p className="muted">Searched {data.searched} catalog assets{data.step?.data?.built_in_ask_searched != null ? ` and ${data.step.data.built_in_ask_searched} dashboards built in Ask` : ""}. Scores compare each report with your request.</p>
+          {cands.length === 0 && !built && <p className="muted">No existing report uses these numbers.</p>}
           {cands.map((c) => (
             <div key={c.asset_id} className="cand">
               <div className="cand-head"><strong>{c.name}</strong></div>
@@ -273,6 +280,15 @@ export function StageDetail({ stage, data, catalog, technical }: Props) {
       );
 
     case "deliver": {
+      const saved = data.saved_dashboard;
+      if (saved) return <KV rows={[
+        ["Dashboard", saved.title],
+        ["Scope", [saved.scope?.products?.join(", "), saved.scope?.markets?.join(", ")].filter(Boolean).join(" · ")],
+        ["KPIs", saved.kpis.map((k: { name: string; kpi_id: string | null }) => `${k.name}${k.kpi_id ? ` (${k.kpi_id})` : ""}`).join(", ")],
+        ["Period", [saved.period?.start, saved.period?.end].filter(Boolean).join(" to ")],
+        ["Built by", saved.created_by],
+        ["Owner", saved.owner ?? "Unassigned until the BI steward assigns one"],
+      ]} />;
       const employee = data.employee_report;
       if (employee) return <KV rows={[
         ["Employee report", employee.title], ["Scope", "Nubeqa · Germany · Monthly"],

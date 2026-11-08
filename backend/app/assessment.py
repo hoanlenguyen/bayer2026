@@ -27,12 +27,18 @@ REPORT_STATUS = {"reuse": ("yes", "usable"), "repair": ("yes", "needs_repair"), 
                  "consolidate": ("no", "partial_match"), "new_build": ("no", "none"), "not_feasible": ("no", "none"),
                  "retire": ("yes", "retire"), "review": ("yes", "needs_review")}
 
+from .employee_report_match import newest_covering, saved_dashboard_summary, wanted_from_intent
+
 ORDER = ("kpis", "discovery", "lineage", "governance", "migration")
 
 
 class Assessment:
-    def __init__(self, intent: dict[str, Any], matched_by: dict[str, dict[str, Any]] | None = None) -> None:
+    def __init__(self, intent: dict[str, Any], matched_by: dict[str, dict[str, Any]] | None = None,
+                 saved_dashboards: list[dict[str, Any]] | None = None) -> None:
         self.intent = intent
+        # Dashboards built in Ask (metadata), searched in step 3 next to the imported catalog. None: not searched.
+        self.saved_dashboards = saved_dashboards
+        self.saved_match: dict[str, Any] | None = None
         self.C = cat.CATALOG
         self.matched_by = matched_by or {}
         self.governed = [m for m in intent.get("measures") or [] if m in self.C["measures"] and self.C["measures"][m]["certified"]]
@@ -105,6 +111,20 @@ class Assessment:
             "existing_report_detail": {"status": status, "decision": result.decision.value, "report": named},
         }
         self.steps[3] = find_analytics(self.candidates)
+        if self.saved_dashboards is not None:
+            hit = newest_covering(self.saved_dashboards, wanted_from_intent(intent))
+            self.saved_match = saved_dashboard_summary(hit) if hit else None
+            step = self.steps[3]
+            step["sheets"] = [*step["sheets"], "Dashboards built in Ask"]
+            step["data"] = {**step["data"], "built_in_ask_searched": len(self.saved_dashboards), "built_in_ask": self.saved_match}
+            if self.saved_match:
+                m = self.saved_match
+                step["summary"] = f"Already built in Ask: {m['title']}. " + step["summary"]
+                step["findings"] = [f"Built in Ask: {m['title']} ({', '.join(k['name'] for k in m['kpis'])}), by {m['created_by']}, "
+                                    "no owner yet", *step["findings"]]
+                self.assessed["existing_report"] = True
+                self.assessed["existing_report_detail"] = {"status": "built_in_ask", "decision": "reuse",
+                                                           "report": {"id": m["id"], "name": m["title"], "platform": "AnalytIQ", "owner": None}}
         return self.steps[3]
 
     @property

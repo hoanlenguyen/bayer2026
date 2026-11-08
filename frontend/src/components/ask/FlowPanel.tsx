@@ -118,8 +118,9 @@ function StepList({ stages, decision, catalog, technical }: { stages: Partial<Re
                 aria-expanded={ev?.data ? isOpen : undefined}
                 disabled={!ev?.data}
               >
-                <span className="flow-name">{stages.decision?.data?.employee_report
-                  ? (NATIVE_STEP_TITLES[id] ?? TITLES[id]) : TITLES[id]}</span>
+                <span className="flow-name">{stages.decision?.data?.saved_dashboard && id === "deliver"
+                  ? "Open the dashboard already built in Ask"
+                  : stages.decision?.data?.employee_report ? (NATIVE_STEP_TITLES[id] ?? TITLES[id]) : TITLES[id]}</span>
                 {technical && <span className={`kind ${STAGE_KIND[id].cls}`}>{STAGE_KIND[id].label}</span>}
                 {ev?.data && <span className={`flow-chevron${isOpen ? " open" : ""}`}><Icon name="chevron" size={14} /></span>}
               </button>

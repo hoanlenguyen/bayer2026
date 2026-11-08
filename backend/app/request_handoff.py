@@ -95,7 +95,8 @@ def _receipt(conversation_id: str, run: dict, question: str) -> dict[str, Any]:
     intent = {"measures": [], "dimensions": [], "filters": {}, "grain": None,
               **{k: raw_intent[k] for k in INTENT_FIELDS if k in raw_intent}}
     native = decision.get("employee_report") if verdict == "reuse" and decision.get("change_type") == "employee_report_reuse" else None
-    candidate = None if native else decision.get("candidate")
+    saved = decision.get("saved_dashboard") if verdict == "reuse" and decision.get("change_type") == "saved_dashboard_reuse" else None
+    candidate = None if native or saved else decision.get("candidate")
     asset = catalog.asset_by_id(candidate["asset_id"]) if candidate and candidate.get("asset_id") else None
     asset = asset or {}
     evidence = []
@@ -150,13 +151,22 @@ def _receipt(conversation_id: str, run: dict, question: str) -> dict[str, Any]:
         evidence.insert(0, {"stage": "employee_report", "summary": f"{native['title']} · saved revision {native['revision']}",
                             "sheets": [proof["sheet"]], "findings": [f"{native['report_id']} · {native['kpi_id']}"],
                             "data": proof})
+    if saved:
+        action_title = f"Assign an owner to {saved['title']}"
+        plan = [f"Open the dashboard already built in Ask ({saved['url']}) and use it for this request.",
+                "Assign an accountable owner in BI Portfolio, so the reused dashboard has someone who answers for it."]
+        target_owner = None
+        evidence.insert(0, {"stage": "saved_dashboard", "summary": f"{saved['title']} · built in Ask by {saved['created_by']}",
+                            "sheets": [], "findings": [f"{saved['id']} · " + ", ".join(k["kpi_id"] for k in saved["kpis"] if k.get("kpi_id"))],
+                            "data": saved})
     return _check_current_reuse({
         "conversation_id": conversation_id, "run_id": run["id"], "started_at": run.get("started_at"), "question": question,
         "verdict": verdict, "reason": decision.get("reason") or stages["decision"].get("summary", ""),
         "action_title": action_title, "plan_steps": plan, "intent": intent, "candidate": candidate,
         "candidates": (stages.get("discovery", {}).get("data") or {}).get("candidates", []),
         "target_model": model, "rules": decision.get("rules_applied", []), "evidence": evidence, "source_refs": source_refs,
-        "preview": verified_reuse_preview(intent, decision, asset), "employee_report": native or matching_employee_report(intent),
+        "preview": None if saved else verified_reuse_preview(intent, decision, asset),
+        "employee_report": native or (None if saved else matching_employee_report(intent)), "saved_dashboard": saved,
         "metric_series": decision.get("metric_series"),
         "estate_assessment": decision.get("estate_assessment"), "change_type": decision.get("change_type"),
         "handoff_verdict": verdict, "current_review": None,
@@ -166,7 +176,7 @@ def _receipt(conversation_id: str, run: dict, question: str) -> dict[str, Any]:
 
 def _check_current_reuse(receipt: dict) -> dict:
     """Preserve the original verdict, but do not offer access to a report that now fails the reuse checks."""
-    if (receipt["verdict"] != "reuse" or receipt.get("change_type") == "employee_report_reuse"
+    if (receipt["verdict"] != "reuse" or receipt.get("change_type") in ("employee_report_reuse", "saved_dashboard_reuse")
             or receipt.get("handoff_verdict") == "review"):
         return receipt
     old = receipt.get("candidate") or {}

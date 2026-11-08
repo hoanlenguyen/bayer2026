@@ -196,20 +196,30 @@ def test_stale_token_after_a_source_change_is_rejected(monkeypatch):
         assert res.status_code == 409 and c.get("/api/dashboards").json()["items"] == []
 
 
-def test_every_approved_run_builds_its_own_dashboard_and_a_retry_keeps_it():
+def test_a_built_dashboard_is_reused_next_time_and_a_retry_keeps_it():
     with TestClient(app) as c:
         cid, run_id, _, _ = guided_run(c, "xarelto-stock-shipments", "a", "all")
         state, first, path = build(c, cid, run_id)
         retry = c.post(path + "/build", json={"version": state["version"], "review_token": state["review_token"]}).json()
         assert retry["dashboard_id"] == first["dashboard_id"]  # same-run retry: idempotent
-        cid2, run_id2, _, _ = guided_run(c, "xarelto-stock-shipments", "a", "all")
-        fresh = c.get(f"/api/conversations/{cid2}/runs/{run_id2}/dashboard").json()
-        assert fresh["status"] == "ready" and fresh["dashboard_id"] is None and "matches_saved" not in fresh
+        # The same request again: the decision is Reuse of the saved dashboard, with a follow-up to give it an owner.
+        cid2, run_id2, _, decision = guided_run(c, "xarelto-stock-shipments", "a", "all")
+        assert decision["decision"] == "reuse" and decision["change_type"] == "saved_dashboard_reuse"
+        assert decision["saved_dashboard"]["id"] == first["dashboard_id"] and decision["saved_dashboard"]["owner"] is None
+        assert decision["saved_dashboard"]["url"] == f"/dashboards/{first['dashboard_id']}"
+        discovery = next(e for e in c.get(f"/api/conversations/{cid2}").json()["runs"][-1]["events"]
+                         if e.get("stage") == "discovery" and e.get("status") == "done")
+        assert discovery["summary"].startswith("Already built in Ask") and discovery["data"]["step"]["data"]["built_in_ask"]["id"] == first["dashboard_id"]
+        run = c.get(f"/api/conversations/{cid2}").json()["runs"][-1]
+        proposals = next(e for e in run["events"] if e.get("stage") == "actions" and e.get("status") == "done")["data"]["proposals"]
+        assert any(p["key"] == f"owner:{first['dashboard_id']}" and p["owner"] == "BI steward" for p in proposals)
+        assert c.get(f"/api/conversations/{cid2}/runs/{run_id2}/dashboard").status_code in (200, 409)
         assert c.get(f"/api/conversations/{cid}/runs/{run_id}/dashboard").json()["status"] == "built"  # the first run reopens built
-        _, second, _ = build(c, cid2, run_id2)
-        assert second["dashboard_id"] != first["dashboard_id"] and second["reused"] is False
-        assert c.get(f"/api/dashboards/{second['dashboard_id']}").json()["conversation_id"] == cid2  # its own source and creator
-        assert len(c.get("/api/dashboards").json()["items"]) == 2
+        assert len(c.get("/api/dashboards").json()["items"]) == 1  # nothing was built twice
+        handoff = c.get(f"/api/conversations/{cid2}/runs/{run_id2}/handoff")
+        assert handoff.status_code == 200, handoff.text
+        receipt = handoff.json()["receipt"] if "receipt" in handoff.json() else handoff.json()
+        assert receipt["saved_dashboard"]["id"] == first["dashboard_id"] and receipt.get("handoff_verdict") == "reuse"
 
 
 def test_ordinary_ask_and_estate_scenarios_keep_their_outcomes():

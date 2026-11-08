@@ -167,10 +167,11 @@ export function RequestHandoff({ conversationId, runId, catalog, isNative, onRec
     ? <>Could not open this decision’s next step. {error} <button type="button" className="btn-outline" onClick={() => setAttempt(n => n + 1)}>Retry</button></>
     : "Loading the saved decision…"}</div>;
   const employee = data.employee_report;
+  const savedReuse = data.verdict === "reuse" ? data.saved_dashboard ?? null : null;
   const verdict = data.handoff_verdict || data.verdict;
   const canDesign = !data.current_review && ["new_build", "create", "extend"].includes(verdict);
   const workbook = verdict === "reuse" && !data.current_review && !isNative && !!data.metric_series?.points.length;
-  const hasPrimary = canDesign || isNative || workbook;
+  const hasPrimary = canDesign || isNative || workbook || !!savedReuse;
   const labels: Partial<Record<typeof verdict, string>> = {
     repair: "Plan repairs with an owner", review: "Start owner review", migrate: "Plan migration with an owner",
     consolidate: "Review consolidation", retire: "Review retirement", not_feasible: "Assign a feasibility review",
@@ -204,7 +205,9 @@ export function RequestHandoff({ conversationId, runId, catalog, isNative, onRec
       <RequestFit data={data} catalog={catalog}/><DecisionEvidence data={data}/>
       {data.action && followUp}
     </details> : <>
-    {employee && isNative && <div className="rh-native"><a className="btn" href={employee.url} onClick={navigate}>Open matching employee report <Icon name="arrowRight" size={15}/></a></div>}
+    {employee && isNative && !savedReuse && <div className="rh-native"><a className="btn" href={employee.url} onClick={navigate}>Open matching employee report <Icon name="arrowRight" size={15}/></a></div>}
+    {savedReuse && <div className="rh-native"><p className="rh-sub">Already built in Ask by {savedReuse.created_by} · {savedReuse.owner ? `Owner: ${savedReuse.owner}` : "No owner yet"}</p>
+      <a className="btn" href={savedReuse.url} onClick={navigate}>Open the saved dashboard <Icon name="arrowRight" size={15}/></a></div>}
     {workbook && <div className="rh-native"><a className="btn" href={workbookViewUrl(conversationId, runId)} onClick={navigate}>Open verified workbook view <Icon name="arrowRight" size={15}/></a></div>}
     {data.current_review && <div className="rh-recheck"><strong>Saved recommendation · Reuse</strong>
       <p>Current catalog check · {data.current_review.reason}</p></div>}

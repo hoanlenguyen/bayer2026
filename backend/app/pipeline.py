@@ -26,7 +26,7 @@ from .agents.intent import sanitize_intent
 from .agents.relevance import EXAMPLES, retry_message
 from .decision import THRESHOLDS, Decision
 from .facts import preview as facts_preview
-from .employee_report_match import native_reuse, supports_monthly_workbook
+from .employee_report_match import native_reuse, saved_dashboard_reuse, saved_dashboards, supports_monthly_workbook
 from .assessment import Assessment
 from .decider import Decider
 from .vectors import VectorStore, get_embedder, similar_requests, suggest_kpis
@@ -489,7 +489,7 @@ class Pipeline:
         carries that operation's own result, which the next stage uses. Catalog work runs off the event loop, so the
         `running` event is delivered while the work is still going."""
         intent = conv["intent"]
-        a = Assessment(intent)
+        a = Assessment(intent, saved_dashboards=await saved_dashboards(self.store))  # step 3 also searches Ask dashboards
         a.parse()
         # ---- 2 to 6: KPI_Catalog, Analytics_Assets, Semantic_Models, Governance_Signals, Migration_Backlog
         for stage, _n, running in ANALYSIS_STAGES:
@@ -502,8 +502,9 @@ class Pipeline:
         yield self._stage(conv, "decision", "running", "Preparing the recommendation")
         result = a.result
         estate = recommend(a)
-        decision = await native_reuse(self.store, intent, user_turns, estate) or estate
-        if decision["decision"] == "reuse" and supports_monthly_workbook(user_turns):
+        decision = (await native_reuse(self.store, intent, user_turns, estate)
+                    or saved_dashboard_reuse(a.saved_match, user_turns, estate) or estate)
+        if decision["decision"] == "reuse" and supports_monthly_workbook(user_turns) and not decision.get("saved_dashboard"):
             decision["metric_series"] = metric_series(intent, decision)
         decision["run_id"] = conv["runs"][-1]["id"]
         missing = decision["availability"]["missing_terms"]
@@ -512,7 +513,8 @@ class Pipeline:
         conv["plan"] = {"decision": decision}
         await self._artifact(conv, "evidence", {"recommendation": decision["recommendation"]})
         employee = decision.get("employee_report")
-        if employee:
+        saved = decision.get("saved_dashboard")
+        if employee or saved:
             explanation = decision["reason"]
         else:
             with usage_scope() as used:
@@ -532,7 +534,10 @@ class Pipeline:
                           {"proposals": proposals})
 
         conv["state"] = "idle"
-        if employee:
+        if saved:
+            yield self._stage(conv, "deliver", "done", f"Dashboard already built in Ask: {saved['title']}", {"saved_dashboard": saved})
+            yield self._say(conv, explanation, kind="result", decision="reuse", asset_id=saved["id"])
+        elif employee:
             yield self._stage(conv, "deliver", "done", f"Employee report available: {employee['title']}", {"employee_report": employee})
             yield self._say(conv, explanation, kind="result", decision="reuse", asset_id=employee["report_id"])
         elif result.decision == Decision.REUSE:

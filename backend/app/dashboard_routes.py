@@ -11,6 +11,7 @@ from . import catalog
 from .actions import now
 from .bi_estate import creator_for_build
 from .briefing_routes import StoreDep
+from .employee_report_match import matching_saved_dashboard, wanted_from_requirements
 from .dashboard_builder import build_receipt, calculate, check_reuse, fingerprint, resolve, select_source, validate_answer
 from .request_handoff import _saved_run
 
@@ -121,6 +122,12 @@ async def _brief(conversation_id, run_id, store):
     if reason or question:
         return state, doc, None
     reason, link = check_reuse(req)
+    if not reason:
+        saved = await matching_saved_dashboard(store, wanted_from_requirements(req), (conversation_id, run_id))
+        if saved:
+            reason = (f"{saved.get('title') or saved['id']} was already built in Ask with these KPIs, markets and period. "
+                      "Open the saved dashboard instead of building a copy.")
+            link = f"/dashboards/{saved['id']}"
     if reason:
         return {**state, "status": "blocked", "reason": reason, "reuse_url": link}, doc, None
     return {**state, "status": "ready"}, doc, req
