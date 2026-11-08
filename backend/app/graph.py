@@ -2,6 +2,8 @@
 
 Entities: reports (assets), semantic models, KPIs (approved ones and their
 local, duplicate or conflicting variants), owners and workspaces.
+Dashboards built in Ask (saved in the `dashboards` collection) join as reports that use their KPIs, so a KPI's
+details list them next to the workbook's reports.
 Edges: model supplies report, report uses KPI, variant duplicates or conflicts
 with the approved KPI, owner owns, lineage (derived from), model in workspace.
 Status, trust and flags reuse the governance scoring in decision.py, so the
@@ -35,7 +37,7 @@ def _asset_status(a: dict[str, Any]) -> str:
     return "certified" if a.get("endorsement") in ("certified", "promoted") else "uncertified"
 
 
-def build_graph() -> dict[str, Any]:
+def build_graph(saved_dashboards: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     C = cat.CATALOG
     entities: dict[str, dict[str, Any]] = {}
     edges: list[dict[str, str]] = []
@@ -128,6 +130,30 @@ def build_graph() -> dict[str, Any]:
         if a["lifecycle"] == "candidate_retire" or (low_use and a["lifecycle"] != "active") or mig.get("recommended_path_candidate") == "RETIRE":
             entity["action"] = f"Retire {a['name']}"
         entities[a["id"]] = entity
+
+    # Dashboards built in Ask, newest first. Their KPI IDs come from the saved columns, checked against the catalog.
+    for d in sorted(saved_dashboards or [], key=lambda d: d.get("created_at") or "", reverse=True):
+        if not d.get("id"):
+            continue
+        scope = d.get("scope") or {}
+        period = d.get("period") or {}
+        creator = (d.get("created_by") or {}).get("name") or "Unknown"
+        kpis = [c.get("kpi_id") for c in d.get("columns") or [] if c.get("kpi_id") in entities]
+        entities[d["id"]] = {
+            "id": d["id"], "uid": d["id"], "type": "dashboard", "name": d.get("title") or d["id"], "status": "draft",
+            "trust": 1.0 if kpis else 0.5, "updated": (d.get("created_at") or "")[:10], "link": f"/dashboards/{d['id']}",
+            "origin": "ask", "created_at": d.get("created_at") or "",
+            "summary": "Dashboard built in Ask from the reviewed brief, using approved KPIs from the workbook.",
+            "props": {"Asset": d["id"], "Type": "AnalytIQ dashboard (built in Ask)",
+                      "Product scope": ", ".join(scope.get("products") or []) or "-",
+                      "Market scope": ", ".join(scope.get("markets") or []) or "-",
+                      "Period": " to ".join(p for p in (period.get("start"), period.get("end")) if p) or "-",
+                      "Created by": creator, "Created": (d.get("created_at") or "")[:16].replace("T", " "),
+                      "Owner": "Unassigned until the BI steward assigns one"},
+            "flags": [],
+        }
+        for k in kpis:
+            edge(d["id"], "uses", k)
 
     # People that exist only as names (new reports created in this session)
     for a in C["assets"]:

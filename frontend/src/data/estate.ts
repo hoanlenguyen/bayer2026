@@ -45,7 +45,10 @@ export const EDGES: Edge[] = [];
 
 export const PROV: Record<EntityType, (e: Entity) => [string, string, string][]> = {
   metric: (e) => [["SinceAI data pack", `KPI_Catalog / ${e.id}`, "Synthetic"]],
-  dashboard: (e) => [
+  dashboard: (e) => e.origin === "ask" ? [
+    ["AnalytIQ dashboard", "Built in Ask from a reviewed brief", `Created ${e.updated || "–"}`],
+    ["SinceAI data pack", "Values from the workbook rows cited on the dashboard", "Synthetic"],
+  ] : [
     ["SinceAI data pack", "Analytics_Assets, Asset_Usage, Governance_Signals, Migration_Backlog", `Modified ${e.updated || "–"}`],
     ["Governance score", "decision.py, same rules as the Ask flow", "Computed on load"],
   ],

@@ -4,7 +4,7 @@ import type { SavedDashboard } from "../api/dashboardBuilder";
    build receipt, the hand-off and the saved page always describe the same screen. It reads the data's shape only,
    so dashboards saved before this rule (no presentation flag, no layout field) get the same layout as new ones. */
 
-export type DashboardLayout = "table" | "empty" | "comparison" | "pulse" | "summary" | "overview";
+export type DashboardLayout = "table" | "empty" | "pulse" | "summary" | "compare" | "overview";
 
 type Shape = Pick<SavedDashboard, "columns" | "groups"> & { display_mode?: string };
 
@@ -20,8 +20,8 @@ export function chooseLayout(record: Shape): DashboardLayout {
     .map((g) => new Set(g.points.filter((p) => charted.some((k) => Number.isFinite(p.values[k]))).map((p) => p.period)))
     .filter((m) => m.size > 0);
   if (!months.length) return "empty";
-  if (months.length === 2 && months[0].size === months[1].size && [...months[0]].every((m) => months[1].has(m))) return "comparison";
   if (months.length === 1) return months[0].size >= 2 ? "pulse" : "summary";
+  if (months.length <= 3) return "compare";
   return "overview";
 }
 

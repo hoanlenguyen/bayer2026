@@ -32,6 +32,12 @@ export interface Entity {
   views?: number;
   /** AI-recommended governance action awaiting human approval. */
   action?: string;
+  /** "ask": a dashboard built in Ask (not from the workbook). */
+  origin?: "ask";
+  /** Page of a dashboard built in Ask. */
+  link?: string;
+  /** Full build timestamp of a dashboard built in Ask. */
+  created_at?: string;
 }
 
 export interface Edge {

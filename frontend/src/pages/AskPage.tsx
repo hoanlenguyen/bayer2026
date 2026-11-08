@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { api, streamPost } from "../api/client";
 import type { CatalogMeta, DecisionType, GuidedChoice, GuidedExample, GuidedFacts, Health, PipelineEvent, Preset, StageEvent, StageId } from "../api/types";
+import { GUIDED_EXAMPLES } from "../lib/guidedExamples";
 import { FlowPanel, RUNNING_COPY } from "../components/ask/FlowPanel";
 import { TriageStrip } from "../components/ask/TriageStrip";
 import { VerdictCard } from "../components/ask/VerdictCard";
@@ -100,7 +101,6 @@ export function AskPage() {
   const [offline, setOffline] = useState(false);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [catalog, setCatalog] = useState<CatalogMeta | null>(null);
-  const [examples, setExamples] = useState<GuidedExample[] | null>(null);
 
   const [convId, setConvId] = useState<string | null>(null);
   const [restoredRunId, setRestoredRunId] = useState<string | null>(null);
@@ -189,7 +189,6 @@ export function AskPage() {
     api.health().then(setHealth).catch(() => setOffline(true));
     api.presets().then(setPresets).catch(() => setOffline(true));
     api.catalog().then(setCatalog).catch(() => undefined);
-    api.guidedExamples().then((g) => setExamples(g.examples)).catch(() => setExamples([]));
   }, []);
 
   useEffect(() => {
@@ -377,9 +376,9 @@ export function AskPage() {
   }
 
   if (messages.length === 0) {
-    const starter = (e: GuidedExample) => <button key={e.id} type="button" onClick={() => send(e.text, undefined, { guided_id: e.id })} disabled={busy}>{e.text}</button>;
-    const visible = (examples ?? []).filter((e) => e.placement === "visible");
-    const more = (examples ?? []).filter((e) => e.placement === "more");
+    const starter = (e: GuidedExample) => <button key={e.id} type="button" onClick={() => send(e.text)} disabled={busy}>{e.text}</button>;
+    const visible = GUIDED_EXAMPLES.filter((e) => e.placement === "visible");
+    const more = GUIDED_EXAMPLES.filter((e) => e.placement === "more");
     return (
       <div className="ask-empty">
         <div className="ask-empty-above">

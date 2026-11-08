@@ -56,6 +56,8 @@ export interface SavedDashboard {
   dimensions: string[];
   columns: { id: string; name: string; unit: string; field: string; kpi_id: string; aggregation: string; lower_is_better: boolean }[];
   groups: { label: string; points: DashboardObservation[] }[];
+  /** One approved month only: the months leading up to it, for the trend (as in the team briefings). Not approved figures. */
+  context?: { period: BuildPeriod; groups: { label: string; points: DashboardObservation[] }[] };
   omitted_measures: string[];
   requested_measures: string[];
   source: string;

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from . import actions as act
 from . import catalog as cat
 from . import guided_examples
+from .bi_estate import _dashboards as saved_dashboard_metadata
 from .bi_estate import router as bi_estate_router
 from .governance import router as governance_router
 from .briefing_routes import router as briefing_router
@@ -182,8 +183,8 @@ async def datapack_summary() -> dict[str, Any]:
 
 @app.get("/api/graph")
 async def graph() -> dict[str, Any]:
-    """Entities and relationships for the Estate Explorer, built from the live catalog."""
-    return build_graph()
+    """Entities and relationships for the Estate Explorer, built from the live catalog and the dashboards built in Ask."""
+    return build_graph(await saved_dashboard_metadata(pipeline().store))
 
 
 @app.get("/api/specs")
@@ -270,12 +271,6 @@ async def chat(req: ChatRequest) -> StreamingResponse:
     if req.choice_id is not None and not req.conversation_id:
         raise HTTPException(400, "An answer needs the conversation it answers.")
     return stream(pipeline().chat(req.conversation_id, req.message, req.preset_id, req.guided_id, req.choice_id))
-
-
-@app.get("/api/guided-examples")
-async def guided_example_list() -> dict:
-    """The start screen's guided dashboard examples, in order, with their offered choices."""
-    return guided_examples.public()
 
 
 @app.post("/api/v2/chat")

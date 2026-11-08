@@ -44,7 +44,7 @@ def test_built_dashboard_appears_once_with_its_creator_and_no_owner():
         assert row["owner"] is None and row["owner_state"] == "absent" and "needs_owner" in row["issues"]
         assert row["data_through"] == "2026-10"
         dash = c.get(f"/api/dashboards/{did}").json()
-        assert dash["groups"][0]["points"][-1]["values"] == {"net_sales": 37.58, "units_shipped": 33941}
+        assert dash["groups"][0]["points"][-1]["values"] == {"net_sales": 37.58, "units_shipped": 33941, "sales_forecast": 39.2}
         assert dash["source_records"][-1]["row"] == 21
 
 

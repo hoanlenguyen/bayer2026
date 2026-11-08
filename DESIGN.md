@@ -40,7 +40,7 @@ Read this before changing or adding a screen.
 - No avatar on assistant messages; the user's bubble is enough to tell the two apart.
 
 ## Analytics views
-The default look for every in-app analytic dashboard. Two layouts, one visual system: a light comparison for two peers and a dark Monthly Pulse module for one scope. A new dashboard surface adapts its approved data to these components; it does not get its own chart style.
+The default look for every in-app analytic dashboard: the dark Monthly Pulse module the team briefings use, for every chart. Several peers add a light overview and a Group selector above it. A new dashboard surface adapts its approved data to these components; it does not get its own chart style. (The light two-peer comparison, `MarketComparison`, was retired from saved dashboards on 8 November 2026; the section on it below is kept for reference only.)
 
 **References** (checked live on 7 November 2026; labels and values there are reference content, a real dashboard shows its own approved title, scope, KPIs, period and evidence):
 - Light comparison: [Nubeqa in France and Germany · Units Shipped and Net Sales](https://analytics-manager.lenguyenhanhoan.workers.dev/dashboards/dash_d25f4aa03f17ed09ce46c070701e)
@@ -51,10 +51,10 @@ The default look for every in-app analytic dashboard. Two layouts, one visual sy
 **Which layout** (from the data's shape only: groups, charted measures and finite values. No flag is needed, so older records get the same layout as new ones). First match wins:
 1. Approved table-only view: the exact values table, visible.
 2. Nothing chartable: a plain empty state and whatever evidence is valid.
-3. Exactly two peers (markets, products or any two groups) with values in the same months: light comparison. Two months or more get trend panels; a single month gets the summary cards and the month table only.
-4. One scope with two months or more: one dark Monthly Pulse module, with a metric selector when several measures chart.
-5. One scope with one month: the dated values table with its rows.
-6. Three or more peers, or two peers over different months: a light overview (each peer's latest value per KPI, an earlier month named beside its value), then one peer's Monthly Pulse, chosen from the overview or the Group selector.
+3. One scope with two months or more: one dark Monthly Pulse module, with a metric selector when several measures chart.
+4. One scope with one month: the dated values table with its rows.
+5. Two or three peers: one Monthly Pulse chart per KPI, stacked with a gap, each drawing every peer as its own line (colour, dash and marker differ) with a legend (`components/PulseCompareChart.tsx`). The briefings use the same chart for their markets. Then the values table.
+6. Four or more peers: a light overview (each peer's latest value per KPI, an earlier month named beside its value), then one peer's Monthly Pulse, chosen from the overview or the Group selector.
 
 A sales forecast next to net sales is drawn as net sales' comparison line, not as its own chart. A scope summed over several products or markets is labelled "combined".
 

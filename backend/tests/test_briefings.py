@@ -155,3 +155,28 @@ async def test_briefing_survives_store_reconnect():
     retry = await briefings.save_followup(reconnected, "commercial", briefing["version"], None, None, "OWN-017",
                                           date(2026, 11, 20))
     assert retry == action and await reconnected.count_artifacts("actions") == 1
+
+
+def test_briefing_follows_the_newest_dashboard_built_in_ask():
+    store = MemoryStore()
+    default = asyncio.run(briefings.read_briefing(store, "commercial"))
+    assert (default["product"], default["market"], default["scope_source"]) == ("Nubeqa", "Germany", None)
+    store.artifacts.setdefault("dashboards", {}).update({
+        "dash_old": {"id": "dash_old", "title": "Old", "created_at": "2026-11-01T09:00:00+00:00",
+                     "scope": {"products": ["Kerendia"], "markets": ["Italy"]}},
+        "dash_multi": {"id": "dash_multi", "title": "Two products", "created_at": "2026-11-09T09:00:00+00:00",
+                       "scope": {"products": ["Nubeqa", "Kerendia"], "markets": ["France"]}},  # skipped: not one product
+        "dash_new": {"id": "dash_new", "title": "Nubeqa · 2 markets", "created_at": "2026-11-08T09:00:00+00:00",
+                     "scope": {"products": ["Nubeqa"], "markets": ["Germany", "France"]}},
+    })
+    first = asyncio.run(briefings.read_briefing(store, "commercial"))
+    assert first["scope_source"]["id"] == "dash_new" and first["scope_source"]["url"] == "/dashboards/dash_new"
+    assert [m["name"] for m in first["markets"]] == ["Germany", "France"] and first["market"] == "Germany"
+    france = asyncio.run(briefings.read_briefing(store, "commercial", "FR"))
+    sales = next(v for v in france["views"] if v["id"] == "sales")
+    assert france["market"] == "France" and sales["evidence"]["filters"] == {"product_id": "P-NUB", "market_id": "FR"}
+    assert (sales["current"], sales["forecast"]) == (37.58, 39.2) and france["version"] != first["version"]
+    assert asyncio.run(briefings.read_briefing(store, "commercial", "XX"))["market"] == "Germany"  # unknown: first market
+    trends = {t["market"]: {v["id"]: v["points"][-1]["value"] for v in t["views"]} for t in france["market_trends"]}
+    assert list(trends) == ["Germany", "France"] and trends["Germany"]["sales"] == 13.96 and trends["France"]["sales"] == 37.58
+    assert default["market_trends"] == []  # one market: the single chart as before

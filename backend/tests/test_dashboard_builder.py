@@ -49,8 +49,8 @@ def test_source_bound_dashboard_is_immutable_retrievable_and_run_scoped(monkeypa
         dash = c.get("/api/dashboards/" + did).json()
         assert dash["period"] == {"start": "2026-01", "end": "2026-10"} and dash["scope"]["markets"] == ["France"]
         assert [p["source_rows"] for p in dash["groups"][0]["points"]] == [[n] for n in range(12, 22)]
-        assert dash["groups"][0]["points"][-2]["values"] == {"net_sales": 3.85, "units_shipped": 12405}
-        assert dash["groups"][0]["points"][-1]["values"] == {"net_sales": 37.58, "units_shipped": 33941}
+        assert dash["groups"][0]["points"][-2]["values"] == {"net_sales": 3.85, "units_shipped": 12405, "sales_forecast": 3.44}
+        assert dash["groups"][0]["points"][-1]["values"] == {"net_sales": 37.58, "units_shipped": 33941, "sales_forecast": 39.2}
         assert dash["source_records"][-1]["market_id"] == "FR" and dash["source_records"][-1]["net_sales_m_eur_syn"] == 37.58
         assert dash["source_records"][-1]["month"] == "2026-10-01"
         assert c.post(path + "/build", json=approved).json()["dashboard_id"] == did  # same-run retry: same dashboard
@@ -87,7 +87,8 @@ def test_only_answer_the_current_question_and_require_explicit_kpi_narrowing():
         did = build(c, path)[0]["dashboard_id"]
         saved = c.get("/api/dashboards/" + did).json()
         assert saved["requested_measures"] == intent["measures"] and saved["omitted_measures"] == ["gross_to_net_rate"]
-        assert [c["id"] for c in saved["columns"]] == ["net_sales", "units_shipped"]
+        assert [c["id"] for c in saved["columns"]] == ["net_sales", "units_shipped", "sales_forecast"]  # forecast: Net Sales' line
+        assert "forecast" not in saved["title"].lower()
 
 
 def test_unsafe_verdicts_and_narrowed_reusable_scope_cannot_be_built():
@@ -109,6 +110,7 @@ def test_unsafe_verdicts_and_narrowed_reusable_scope_cannot_be_built():
 
 
 def test_grouped_source_math_tracks_every_observation_and_never_assumes_weights():
+    from app.dashboard_builder import build_receipt
     catalog.reset_catalog()
     intent = {"measures": ["net_sales", "units_shipped", "on_time_in_full"], "dimensions": ["month"],
               "grain": "month", "decision": "Compare distribution", "filters": {"product": ["Nubeqa"], "market": ["DE", "FR"]},
@@ -120,9 +122,15 @@ def test_grouped_source_math_tracks_every_observation_and_never_assumes_weights(
     dash = assemble(req, "example", "c", "r", "October distribution")
     point = dash["groups"][0]["points"][0]
     assert point["source_rows"] == [11, 21] and point["values"]["units_shipped"] == 12635 + 33941
-    raw = dash["source_records"]
+    raw = [r for r in dash["source_records"] if not r.get("context")]
     assert point["values"]["on_time_in_full"] == round(sum(r["otif_pct_syn"] for r in raw) / 2, 4)
     assert point["values"]["net_sales"] == 51.54
+    # One approved month: the months before it ride along for the trend only, like the briefings' history.
+    ctx = dash["context"]
+    assert ctx["period"] == {"start": "2026-01", "end": "2026-10"} and len(ctx["groups"][0]["points"]) == 10
+    assert ctx["groups"][0]["points"][-1] == point and len(dash["groups"][0]["points"]) == 1
+    receipt = build_receipt(dash)
+    assert receipt["months"] == 1 and receipt["observations"] == 2 and "trend from January 2026 to October 2026" in receipt["arrangement"]
     per, _, _ = resolve(intent, "new_build", {"rates": "separate"}, "Monthly distribution")
     assert len(assemble(per, "d", "c", "r", "")["groups"]) == 2
 
@@ -186,8 +194,8 @@ def test_build_receipt_wording_follows_months_measures_and_groups():
     grouped_intent = {**intent, "measures": ["net_sales", "units_shipped", "on_time_in_full"]}
     per, _, _ = resolve(grouped_intent, "new_build", {"rates": "separate"}, "")
     grouped = build_receipt(assemble(per, "y", "c", "r", ""))
-    # Two peers over the same months: the comparison layout, whether or not a guided example built it.
-    assert grouped["groups"] == 2 and grouped["layout"] == "comparison" and "Summary cards for" in grouped["arrangement"]
+    # Two peers: the Monthly Pulse panel with a group choice, the same chart as the team briefings.
+    assert grouped["groups"] == 2 and grouped["layout"] == "compare" and "each comparing Nubeqa · France and Nubeqa · Germany" in grouped["arrangement"]
 
 
 def _artifact(groups: dict, columns=("units_shipped",), **extra) -> dict:
@@ -199,15 +207,13 @@ def _artifact(groups: dict, columns=("units_shipped",), **extra) -> dict:
 def test_choose_layout_follows_the_data_shape():
     from app.dashboard_builder import build_receipt, choose_layout
     a = [("2026-05", 1), ("2026-06", 2)]
-    assert choose_layout(_artifact({"FR": a, "DE": a})) == "comparison"
+    assert choose_layout(_artifact({"FR": a, "DE": a})) == "compare"            # two peers: one chart per KPI, a line each
     assert choose_layout(_artifact({"FR": a})) == "pulse"
     assert choose_layout(_artifact({"FR": a[:1]})) == "summary"
-    assert choose_layout(_artifact({"FR": a, "DE": a[:1]})) == "overview"           # uneven coverage
-    assert choose_layout(_artifact({"FR": a, "DE": a, "IT": a})) == "overview"      # three peers
+    assert choose_layout(_artifact({"FR": a, "DE": a[:1]})) == "compare"            # uneven coverage: lines of different length
+    assert choose_layout(_artifact({"FR": a, "DE": a, "IT": a})) == "compare"       # three peers
+    assert choose_layout(_artifact({"FR": a, "DE": a, "IT": a, "ES": a})) == "overview"  # four or more: one at a time
     assert choose_layout(_artifact({"FR": [("2026-05", None)]})) == "empty"
     assert choose_layout(_artifact({"FR": a}, display_mode="table")) == "table"
-    three = build_receipt(_artifact({"FR": a, "DE": a}, columns=("net_sales", "units_shipped", "on_time_in_full"), lead_measure="units_shipped"))
-    assert three["layout"] == "comparison" and "two at a time, with a KPI selector" in three["arrangement"]
-    assert "units_shipped leads" in three["arrangement"]
-    plain = build_receipt(_artifact({"FR": a, "DE": a}))
-    assert "leads" not in plain["arrangement"] and "one panel per KPI" in plain["arrangement"]
+    two = build_receipt(_artifact({"FR": a, "DE": a}, columns=("net_sales", "units_shipped"), lead_measure="units_shipped"))
+    assert two["layout"] == "compare" and "One Monthly Pulse chart per KPI" in two["arrangement"]

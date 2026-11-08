@@ -1,6 +1,8 @@
 """Guided dashboard examples on the Ask start screen: all 20 paths through the real streaming chat, the saved
 conversation, the builder's review and build, and the saved dashboard; plus the edge cases around them."""
 import json
+import re
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -58,9 +60,23 @@ def build(c, cid, run_id):
     return state, res.json(), path
 
 
-def test_registry_feeds_the_start_screen_in_order():
+FRONTEND_LIST = Path(__file__).resolve().parents[2] / "frontend" / "src" / "lib" / "guidedExamples.ts"
+
+
+def test_frontend_chips_match_the_registry():
+    """The start screen ships its chips in the bundle (no request); they must be the registry's, in order."""
+    found = re.findall(r'id: "([^"]+)", placement: "(visible|more)",\s*text: "([^"]+)"', FRONTEND_LIST.read_text())
+    assert found == [(e["id"], e["placement"], e["text"]) for e in guided_examples.EXAMPLES]
+    assert all(guided_examples.get(e["id"]) for e in guided_examples.EXAMPLES)  # every shipped chip is offered
+
+
+def test_guided_examples_endpoint_is_gone():
     with TestClient(app) as c:
-        listed = c.get("/api/guided-examples").json()
+        assert c.get("/api/guided-examples").status_code in (404, 405)
+
+
+def test_registry_feeds_the_start_screen_in_order():
+    listed = guided_examples.public()
     assert [e["id"] for e in listed["examples"]] == [e["id"] for e in guided_examples.EXAMPLES]
     assert [e["placement"] for e in listed["examples"]] == ["visible", "visible", "more", "more", "more"]
     assert [e["text"] for e in listed["examples"]] == [e["text"] for e in guided_examples.EXAMPLES]
@@ -109,7 +125,7 @@ def test_every_guided_path_builds_the_reviewed_comparison(example_id, purpose, p
         countries = [C["markets"][m]["name"] for m in ex["markets"]]
         assert dash["presentation"] == "market_comparison" and dash["lead_measure"] == lead and dash["decision_goal"] == label
         assert sorted(g["label"] for g in dash["groups"]) == sorted(countries) and dash["market_order"] == countries
-        assert [col["id"] for col in dash["columns"]] == ex["measures"]
+        assert [col["id"] for col in dash["columns"]] == ex["measures"] + (["sales_forecast"] if "net_sales" in ex["measures"] else [])
         rows = catalog.SHEETS["product_market_monthly"]
         for g in dash["groups"]:
             assert [p["period"] for p in g["points"]] == PERIODS[period]

@@ -71,6 +71,14 @@ export interface FollowUp {
 }
 
 export interface Briefing extends Omit<Snapshot, "scope_view_id"> {
+  /** The market shown, one of `markets`: the newest Ask dashboard's markets, or Germany when there is none. */
+  market_id: string;
+  markets: { id: string; name: string }[];
+  /** The newest dashboard built in Ask that set this scope, or null for the default Nubeqa in Germany. */
+  scope_source: { id: string; title: string; url: string; created_at?: string } | null;
+  /** Two or more markets: each market's monthly history, drawn side by side. Empty for one market. */
+  market_trends: { market_id: string; market: string;
+    views: { id: ViewId; title: string; unit: ReportView["unit"]; display_mode: ReportView["display_mode"]; points: ReportHistory["points"] }[] }[];
   views: (ReportView & { action: FollowUp | null })[];
   suggested_action: string;
   action: FollowUp | null;

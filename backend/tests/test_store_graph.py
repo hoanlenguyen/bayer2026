@@ -67,6 +67,26 @@ def test_graph():
     assert all(e["s"] in ids and e["t"] in ids for e in g["edges"])
 
 
+
+def test_graph_lists_dashboards_built_in_ask_under_their_kpis():
+    saved = [{"id": "dash_old", "title": "Older", "created_at": "2026-11-01T09:00:00+00:00",
+              "columns": [{"id": "net_sales", "kpi_id": "KPI-001"}]},
+             {"id": "dash_new", "title": "Nubeqa in France and Germany", "created_at": "2026-11-07T23:14:00+00:00",
+              "created_by": {"name": "Demo employee"}, "scope": {"products": ["Nubeqa"], "markets": ["France", "Germany"]},
+              "period": {"start": "2026-08", "end": "2026-10"},
+              "columns": [{"id": "net_sales", "kpi_id": "KPI-001"}, {"id": "units_shipped", "kpi_id": "KPI-014"},
+                          {"id": "x", "kpi_id": "KPI-NOPE"}]}]
+    g = build_graph(saved)
+    ids = {e["id"]: e for e in g["entities"]}
+    rels = {(e["s"], e["rel"], e["t"]) for e in g["edges"]}
+    new = ids["dash_new"]
+    assert new["origin"] == "ask" and new["link"] == "/dashboards/dash_new" and new["type"] == "dashboard"
+    assert new["props"]["Created by"] == "Demo employee" and new["props"]["Period"] == "2026-08 to 2026-10"
+    assert {("dash_new", "uses", "KPI-001"), ("dash_new", "uses", "KPI-014"), ("dash_old", "uses", "KPI-001")} <= rels
+    assert not any(t == "KPI-NOPE" for _, _, t in rels)  # unknown KPI IDs are dropped
+    assert all(e["s"] in ids and e["t"] in ids for e in g["edges"])
+    assert "dash_new" not in {e["id"] for e in build_graph()["entities"]}
+
 async def test_outdated_catalog_in_mongo_is_reloaded():
     store = MongoStore(AsyncMockDB())
     # Simulate the earlier plant catalog: assets present, no schema in meta.

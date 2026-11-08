@@ -48,3 +48,7 @@
 .sd-overview tr[aria-current="true"] th{font-weight:600}
 .sd-show{min-height:32px;padding:4px 10px;border:1px solid var(--line-strong);border-radius:999px;background:var(--surface);cursor:pointer;font:inherit;font-size:13px;white-space:nowrap}
 .sd-show[aria-pressed="true"]{background:var(--navy);border-color:var(--navy);color:var(--on-navy)}
+
+.sd-context-note { margin: 8px 0 0; color: var(--muted); font-size: 13px; max-width: 72ch; }
+.sd-peer-charts{display:grid;gap:16px}
+.sd-peer-charts>*{min-width:0}

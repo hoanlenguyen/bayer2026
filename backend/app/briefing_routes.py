@@ -28,6 +28,7 @@ class FollowUp(BaseModel):
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=200)] | None = None
     owner_id: str = Field(pattern=r"^OWN-[0-9]{3}$")
     due_date: date
+    market_id: str | None = Field(default=None, max_length=8)
 
 
 class Verification(BaseModel):
@@ -45,26 +46,26 @@ class Progress(BaseModel):
 
 
 @router.get("/{team}")
-async def get_briefing(team: briefings.Team, store: StoreDep) -> dict[str, Any]:
+async def get_briefing(team: briefings.Team, store: StoreDep, market: str | None = None) -> dict[str, Any]:
     try:
-        return await briefings.read_briefing(store, team)
+        return await briefings.read_briefing(store, team, market)
     except ValueError as exc:
         raise HTTPException(503, str(exc)) from exc
 
 
 @router.put("/{team}/selection")
-async def select_views(team: briefings.Team, selection: Selection, store: StoreDep) -> dict[str, Any]:
+async def select_views(team: briefings.Team, selection: Selection, store: StoreDep, market: str | None = None) -> dict[str, Any]:
     ids = selection.view_ids
     if len(set(ids)) != len(ids):
         raise HTTPException(422, "Choose each report view only once.")
     await store.save_artifact("briefing_selections", {"_id": team, "view_ids": ids})
-    return await get_briefing(team, store)
+    return await get_briefing(team, store, market)
 
 
 @router.post("/{team}/actions")
 async def follow_up(team: briefings.Team, req: FollowUp, store: StoreDep) -> dict[str, Any]:
     try:
-        return await briefings.save_followup(store, team, req.version, req.view_id, req.title, req.owner_id, req.due_date)
+        return await briefings.save_followup(store, team, req.version, req.view_id, req.title, req.owner_id, req.due_date, req.market_id)
     except KeyError as exc:
         raise HTTPException(422, exc.args[0]) from exc
     except ValueError as exc:

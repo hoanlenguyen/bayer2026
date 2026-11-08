@@ -1,6 +1,6 @@
 .pulse-chart{
   --pc-ink:#142932;--pc-ink-deep:#10222a;--pc-text:#edf7f7;--pc-quiet:#b1c6cb;
-  --pc-line:#36525a;--pc-teal:#69e3ce;--pc-muted-teal:#a0f0df;
+  --pc-line:#36525a;--pc-teal:#69e3ce;--pc-muted-teal:#a0f0df;--pc-amber:#f5b66b;--pc-violet:#c6a8ff;
   margin:0;width:100%;min-width:0;display:grid;gap:10px;padding:18px 20px 13px;overflow:hidden;
   border:1px solid #375158;border-radius:12px;background:linear-gradient(145deg,#1a333c 0%,var(--pc-ink) 48%,var(--pc-ink-deep) 100%);
   color:var(--pc-text);font:400 14px/1.4 var(--font-sans,system-ui,sans-serif);text-align:left;color-scheme:dark;
@@ -53,3 +53,12 @@
   .pc-halo{animation:pc-pick .24s ease-out}
   @keyframes pc-pick{from{opacity:.48;r:5px}to{opacity:.22;r:8px}}
 }
+.pcc-latest{display:flex;flex-wrap:wrap;gap:10px 32px}
+.pcc-peer{display:grid;gap:2px;min-width:0}
+.pcc-peer-name{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--pc-quiet)}
+.pcc-value{letter-spacing:-.045em;font-size:clamp(24px,2.4vw,32px);line-height:1.1;font-weight:550;color:var(--pc-text);font-variant-numeric:tabular-nums}
+.pcc-swatch{display:inline-block;width:16px;border-top:3px solid;flex:none}
+.pcc-reading{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pcc-reading strong{font:600 12px var(--font-mono,monospace)}
+.pcc-forecast{font-size:11px;color:var(--pc-quiet)}
+.pulse-compare .pc-legend svg{display:block;overflow:visible}

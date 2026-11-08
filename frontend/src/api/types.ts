@@ -174,5 +174,4 @@ export interface SimulatorMessage {
 
 /** An offered answer in a guided example. The backend accepts only these, by ID. */
 export interface GuidedChoice { id: string; label: string; detail?: string; start?: string; end?: string; count?: number }
-export interface GuidedExample { id: string; placement: "visible" | "more"; text: string; product: string; markets: string[]; measures: string[] }
-export interface GuidedExamples { examples: GuidedExample[]; purpose_question: string; period_question: string }
+export interface GuidedExample { id: string; placement: "visible" | "more"; text: string }

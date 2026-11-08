@@ -17,7 +17,8 @@ from .employee_report_match import matching_employee_report
 SOURCE = "Product_Market_Monthly"
 BUILDABLE = {"new_build", "create", "extend"}
 DIMENSIONS = {"month", "product", "market", "region", "therapeutic_area"}
-ADDITIVE = {"net_sales", "units_shipped"}
+ADDITIVE = {"net_sales", "units_shipped", "sales_forecast"}
+CONTEXT_MONTHS = 12  # a one-month dashboard's trend, like the briefings' history (latest 12 workbook months)
 UNSUPPORTED = re.compile(
     r"\b(?:power\s?bi|pbix|pbip|tableau|excel|export|csv|pdf|powerpoint|yoy|ytd|(?:by|per) (?:channel|hospital|clinic|customer|sku|store|site|postcode|city)|"
     r"patient.level|prescriber.level|hcp.level)\b", re.I)
@@ -231,6 +232,10 @@ def select_source(req):
                   "Unweighted mean of workbook rows" if req.get("rates") == "mean" else "Single product-market observation")
         columns.append({"id": key, "name": meta["name"], "unit": meta["fact_unit"] or meta["unit"], "field": meta["fact_column"],
                         "kpi_id": meta["kpi_id"], "aggregation": method, "lower_is_better": meta["lower_is_better"]})
+    net = next((col for col in columns if col["id"] == "net_sales"), None)
+    if net:  # drawn as Net Sales' forecast line, the same as the team briefings (not a KPI of its own)
+        columns.append({"id": "sales_forecast", "name": "Sales forecast", "unit": net["unit"], "field": "forecast_m_eur_syn",
+                        "kpi_id": None, "aggregation": "Sum of workbook rows", "lower_is_better": None})
     fields = {col["field"] for col in columns}
     records, seen = [], set()
     for i, row in enumerate(catalog.SHEETS[SOURCE.lower()], 2):
@@ -248,16 +253,37 @@ def select_source(req):
                         **{field: row[field] for field in sorted(fields)}})
     if len(seen) != len(products) * len(markets) * len(months):
         raise ValueError("A requested product, market or month is missing source observations. Narrow or revise the brief.")
-    return {"columns": columns, "records": records, "months": months}
+    context = _context_records(products, markets, fields, months) if len(months) == 1 else []
+    return {"columns": columns, "records": records + context, "months": months,
+            "context_months": sorted({r["month"][:7] for r in context})}
 
 
-def calculate(req, source, dashboard_id, conversation_id, run_id, request):
-    """Aggregate a verified source snapshot into the approved monthly series and groups. Reads no workbook rows."""
-    C = catalog.CATALOG
-    columns, records = source["columns"], source["records"]
-    products, markets = set(req["products"]), set(req["markets"])
+def _context_records(products, markets, fields, months):
+    """A one-month brief also carries the months leading up to it, as the team briefings show (up to CONTEXT_MONTHS in
+    all). They are part of the reviewed snapshot and marked `context`: shown in the trend only, never in the approved
+    figures. Walks back from the month before and stops at the first month that is not complete and valid."""
+    rows = {}
+    for i, row in enumerate(catalog.SHEETS[SOURCE.lower()], 2):
+        if row.get("product_id") in products and row.get("market_id") in markets and isinstance(row.get("month"), str):
+            rows.setdefault((row["product_id"], row["market_id"], row["month"][:7]), []).append((i, row))
+    earlier = [m for m in workbook_months() if m < months[0]][::-1][:CONTEXT_MONTHS - 1]
+    out = []
+    for period in earlier:
+        found = [rows.get((p, m, period), []) for p in sorted(products) for m in sorted(markets)]
+        if any(len(f) != 1 for f in found):
+            break
+        picked = [f[0] for f in found]
+        if any(r.get("value_type") not in ("actual_like_synthetic", "forecast_like_synthetic")
+               or any(type(r.get(f)) not in (float, int) or not math.isfinite(r[f]) for f in fields) for _, r in picked):
+            break
+        out += [{"row": i, "product_id": r["product_id"], "market_id": r["market_id"], "month": r["month"],
+                 "value_type": r["value_type"], "context": True, **{f: r[f] for f in sorted(fields)}} for i, r in picked]
+    return sorted(out, key=lambda r: r["row"])
+
+
+def _series(records, columns, axes):
+    """Monthly points per group from verified records (sum for additive measures, mean of several rows otherwise)."""
     groups = defaultdict(lambda: defaultdict(list))
-    axes = [d for d in req["dimensions"] if d != "month"]
     for record in records:
         groups[tuple(_axis(record["product_id"], record["market_id"], d) for d in axes)][record["month"][:7]].append(record)
     result = []
@@ -276,20 +302,34 @@ def calculate(req, source, dashboard_id, conversation_id, run_id, request):
             points.append({"period": period, "values": values, "source_rows": [r["row"] for r in rows],
                            "value_types": sorted({r["value_type"] for r in rows})})
         result.append({"label": " · ".join(group) if group else "Selected scope", "points": points})
+    return result
+
+
+def calculate(req, source, dashboard_id, conversation_id, run_id, request):
+    """Aggregate a verified source snapshot into the approved monthly series and groups. Reads no workbook rows."""
+    C = catalog.CATALOG
+    columns, records = source["columns"], source["records"]
+    products, markets = set(req["products"]), set(req["markets"])
+    axes = [d for d in req["dimensions"] if d != "month"]
+    result = _series([r for r in records if not r.get("context")], columns, axes)
+    context = _series(records, columns, axes) if any(r.get("context") for r in records) else None
     scope = {"products": [C["products"][k]["name"] for k in req["products"]], "markets": [C["markets"][k]["name"] for k in req["markets"]]}
     subject = " · ".join([scope["products"][0] if len(products) == 1 else f"{len(products)} products",
                           scope["markets"][0] if len(markets) == 1 else f"{len(markets)} markets"])
+    named = [c for c in columns if c["id"] != "sales_forecast"]  # the forecast is Net Sales' line, not a measure in the title
     if req.get("presentation"):  # guided: name the two countries, lead KPI first
-        lead_first = sorted(columns, key=lambda c: c["id"] != req.get("lead_measure"))
+        lead_first = sorted(named, key=lambda c: c["id"] != req.get("lead_measure"))
         title = f"{scope['products'][0]} in {' and '.join(C['markets'][m]['name'] for m in req['markets'])}: " + \
                 " and ".join(c["name"] for c in lead_first)
     else:
-        title = f"{subject}: " + _join([c["name"] for c in columns])
+        title = f"{subject}: " + _join([c["name"] for c in named])
     return {"id": dashboard_id, "title": title,
             "conversation_id": conversation_id, "run_id": run_id, "request": request, "decision_goal": req["decision_goal"],
             "period": req["period"], "scope": scope, "dimensions": req["dimensions"], "columns": columns, "groups": result,
             "requested_measures": req["requested_measures"], "omitted_measures": req["omitted_measures"],
             "source": SOURCE, "source_records": records, "synthetic": True,
+            **({"context": {"period": {"start": context[0]["points"][0]["period"], "end": req["period"]["end"]},
+                            "groups": context}} if context else {}),
             **({"presentation": req["presentation"], "lead_measure": req["lead_measure"], "guided": req["guided"],
                 "market_order": [C["markets"][m]["name"] for m in req["markets"]]} if req.get("presentation") else {})}
 
@@ -322,8 +362,9 @@ def _finite(v) -> bool:
 
 def choose_layout(artifact: dict) -> str:
     """The dashboard layout, from the data's shape alone (the frontend mirrors this in lib/dashboardLayout.ts):
-    table (approved table-only), empty (nothing chartable), comparison (exactly two peers over the same months),
-    pulse (one scope with two or more months), summary (one scope, one month) or overview (3+ peers or uneven coverage)."""
+    table (approved table-only), empty (nothing chartable), pulse (one scope with two or more months), summary (one
+    scope, one month), compare (two or three groups: one chart per KPI, every group a line, with a legend) or overview
+    (four or more groups: one group's chart at a time). Every chart is in the Monthly Pulse style the briefings use."""
     if artifact.get("display_mode") == "table":
         return "table"
     charted = [c["id"] for c in charted_columns(artifact)]
@@ -332,11 +373,9 @@ def choose_layout(artifact: dict) -> str:
     if not groups:
         return "empty"
     months = [{p["period"] for p in g["points"] if any(_finite(p["values"].get(k)) for k in charted)} for g in groups]
-    if len(groups) == 2 and months[0] == months[1]:
-        return "comparison"
     if len(groups) == 1:
         return "pulse" if len(months[0]) >= 2 else "summary"
-    return "overview"
+    return "compare" if len(groups) <= 3 else "overview"
 
 
 def build_receipt(artifact: dict) -> dict:
@@ -347,41 +386,43 @@ def build_receipt(artifact: dict) -> dict:
     charted = charted_columns(artifact)
     groups = artifact.get("groups") or []
     periods = sorted({p["period"] for g in groups for p in g["points"]})
-    records = artifact.get("source_records") or []
+    records = [r for r in artifact.get("source_records") or [] if not r.get("context")]  # the approved figures only
     rows = sorted(r["row"] for r in records)
     actual = sum(r.get("value_type") == "actual_like_synthetic" for r in records)
     unit = lambda u: "€m" if u in ("M EUR", "EUR M") else u
     label = lambda c: f"{c['name']} ({unit(c['unit'])})" if c.get("unit") else c["name"]
     names = [label(c) for c in charted]
     view = choose_layout(artifact)
-    lead = next((c for c in charted if c["id"] == artifact.get("lead_measure")), None)
-    if view == "comparison":
-        places = _join(artifact.get("market_order") or [g["label"] for g in groups])
-        ordered = ([lead] + [c for c in charted if c is not lead]) if lead else charted
-        if len(periods) == 1:
-            layout = f"Summary cards for {places} in {_month_label(periods[0])}: {_join([label(c) for c in ordered])}."
-        else:
-            shown = "two at a time, with a KPI selector" if len(ordered) > 2 else "one panel per KPI"
-            layout = f"Monthly trend panels ({shown}: {_join([label(c) for c in ordered])}), each comparing {places}."
-        if lead:
-            layout += f" {lead['name']} leads, with a latest-month comparison of both."
-        layout += " Select a month to see both values and their workbook rows; every value is also listed under All values and workbook rows."
-    elif view == "table":
+    if view == "table":
         layout = "A table of the approved monthly values with their workbook rows."
     elif view == "empty":
         layout = "No chartable values were saved for this scope; the table shows what was."
     elif view == "summary":
         layout = ("Switch between " if len(names) > 1 else "") + f"{_join(names)} for {_month_label(periods[0])}. The table below lists the figures and their workbook rows."
+    elif view == "compare":
+        places = _join([g["label"] for g in groups])
+        layout = (f"One Monthly Pulse chart per KPI ({_join(names)}), stacked, each comparing {places} as separate lines with a legend."
+                  " The figures and their workbook rows are listed under the charts.")
+        if len(charted) < len(columns):
+            layout += " Net Sales is drawn with its sales forecast line, as in the team briefings."
     else:
         trend = f"Switch between {_join(names)} in a monthly trend" if len(names) > 1 else f"A monthly trend of {names[0]}"
         layout = trend + " in the Monthly Pulse panel."
+        if len(charted) < len(columns):
+            layout += " Net Sales is drawn with its sales forecast line, as in the team briefings."
         if view == "overview":
             layout += f" Choose one of {len(groups)} groups ({_join([g['label'] for g in groups][:4])}{', …' if len(groups) > 4 else ''}) to see its figures."
         layout += " The figures and their workbook rows are listed under the chart."
+    context = artifact.get("context")
+    if context and view not in ("table", "empty"):
+        start, end = context["period"]["start"], context["period"]["end"]
+        where = "the charts show" if view == "compare" else "the Monthly Pulse panel shows"
+        layout += (f" For context, as in the team briefings, {where} the trend from {_month_label(start)}"
+                   f" to {_month_label(end)}; the approved figures are {_month_label(periods[-1])} only.")
     scope = artifact.get("scope") or {}
     return {
         "products": scope.get("products", []), "markets": scope.get("markets", []), "period": artifact.get("period"),
-        "measures": [{"id": c["id"], "kpi_id": c.get("kpi_id"), "name": c["name"], "unit": c.get("unit", "")} for c in columns],
+        "measures": [{"id": c["id"], "kpi_id": c.get("kpi_id"), "name": c["name"], "unit": c.get("unit", "")} for c in charted],
         "charted_measures": len(charted), "groups": len(groups), "group_labels": [g["label"] for g in groups],
         "months": len(periods), "first_month": periods[0] if periods else None, "last_month": periods[-1] if periods else None,
         "observations": len(records), "rows": {"first": rows[0], "last": rows[-1]} if rows else None,

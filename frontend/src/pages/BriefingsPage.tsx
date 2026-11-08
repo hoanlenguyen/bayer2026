@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { briefingRequest, completeAction, type Briefing, type FollowUp, type Team, type ViewId } from "../api/briefings";
 import { Icon } from "../components/Icon";
+import { PulseCompareChart } from "../components/PulseCompareChart";
 import { PulseDashboard } from "../components/PulseDashboard";
 import { MonthlyHistory } from "./BriefingHistory";
 import { amount, comparison, month } from "../lib/briefingFormat";
@@ -48,13 +49,15 @@ function TeamBriefing({ team, initialView, onRegister }: { team: Team; initialVi
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<ViewId[]>([]);
+  const [market, setMarket] = useState<string>();
+  const query = market ? `?market=${encodeURIComponent(market)}` : "";
   useEffect(() => {
     let active = true;
     setLoadError("");
-    briefingRequest<Briefing>(team).then(result => { if (active) setData(result); })
+    briefingRequest<Briefing>(team, query).then(result => { if (active) setData(result); })
       .catch(e => { if (active) setLoadError(e.message); });
     return () => { active = false; };
-  }, [team, attempt]);
+  }, [team, attempt, query]);
 
   function open(next: Overlay) { setError(""); setNotice(""); setOverlay(next); }
   async function save(operation: () => Promise<Briefing>, message: string) {
@@ -85,8 +88,9 @@ function TeamBriefing({ team, initialView, onRegister }: { team: Team; initialVi
     void save(async () => {
       await briefingRequest(team, "/actions", "POST", {
         title, owner_id: ownerId, due_date: values.get("due_date"), version: brief.version, view_id: activeView?.id,
+        market_id: brief.market_id,
       });
-      return briefingRequest<Briefing>(team);
+      return briefingRequest<Briefing>(team, query);
     }, "Follow-up saved with its source snapshot.");
   }
   function finish(event: FormEvent<HTMLFormElement>, action: FollowUp) {
@@ -95,7 +99,7 @@ function TeamBriefing({ team, initialView, onRegister }: { team: Team; initialVi
     if (!outcome) { setError("Describe what was done."); return; }
     void save(async () => {
       await completeAction(team, action._id, outcome);
-      return briefingRequest<Briefing>(team);
+      return briefingRequest<Briefing>(team, query);
     }, "Outcome recorded. The follow-up is marked done.");
   }
 
@@ -103,13 +107,24 @@ function TeamBriefing({ team, initialView, onRegister }: { team: Team; initialVi
   const meeting = overlay?.kind === "meeting";
   const trends = pinned.flatMap(view => view.display_mode === "chart" && view.history?.points.length
     ? [{ id: view.id, title: view.title, unit: view.unit, points: view.history.points }] : []);
-  const pulse = trends.length > 0 && <PulseDashboard scope={scope} source="Product_Market_Monthly"
-    preferred={team === "supply" ? "otif" : "sales"} metrics={trends} compact={meeting} />;
+  const preferred = team === "supply" ? "otif" : "sales";
+  // Several markets: one chart per pinned metric, stacked, each drawing every market as its own line with a legend.
+  const pulse = brief.market_trends.length > 1
+    ? <div className="bf-pulse-stack">{pinned.filter(view => view.display_mode === "chart").map(view => {
+        const lines = brief.market_trends.flatMap(t => { const v = t.views.find(x => x.id === view.id); return v?.points.length ? [{ label: t.market, points: v.points }] : []; });
+        return lines.length ? <PulseCompareChart key={view.id} title={view.title} unit={view.unit} series={lines} source="Product_Market_Monthly" /> : null;
+      })}</div>
+    : trends.length > 0 && <PulseDashboard scope={scope} source="Product_Market_Monthly"
+      preferred={preferred} metrics={trends} compact={meeting} />;
   const cards = (wall: boolean) => <div className={`bf-grid bf-grid-${pinned.length}`}>{pinned.map((view, index) =>
     <ReportCard key={view.id} periods={brief} view={view} index={index} onOpen={wall ? undefined : () => open({ kind: "report", viewId: view.id })} />)}</div>;
   const heading = <div className="bf-intro">
     <p className="bf-kicker">{teamLabel[team]} briefing <span> / </span> {month(brief.period)}</p>
-    <h1>{scope}</h1>
+    <h1>{brief.scope_source?.title ?? scope}</h1>
+    {brief.scope_source && <p className="bf-scope-source">Same title and scope as the newest dashboard built in Ask. <a href={brief.scope_source.url}>Open the dashboard</a></p>}
+    {brief.markets.length > 1 && <div className="bf-market-picks" role="group" aria-label="Choose a market">
+      {brief.markets.map(m => <button key={m.id} type="button" className="bf-btn" aria-pressed={m.id === brief.market_id}
+        onClick={() => setMarket(m.id)}>{m.name}</button>)}</div>}
     <p className="bf-dek">{pinned.map(view => `${metricSubject[view.id]} ${comparison(view, brief.previous_period).replace(/^Unchanged/, "unchanged").replace(/^Compared/, "compared")}`).join(". ")}.</p>
   </div>;
   const followupTitle = activeView ? `Review ${activeView.title.toLowerCase()} for ${brief.product} in ${brief.market}` : brief.suggested_action;
@@ -163,7 +178,7 @@ function TeamBriefing({ team, initialView, onRegister }: { team: Team; initialVi
             onChange={e => { const checked = e.target.checked; setSelected(ids => checked ? [...ids, view.id] : ids.filter(id => id !== view.id)); }} />
           <span><strong>{view.title}</strong><small>{view.report}</small></span></label>)}</div>
         <div className="bf-dialog-foot"><span>{selected.length} selected</span><button type="button" className="bf-btn bf-primary" disabled={busy || !selected.length}
-          onClick={() => void save(() => briefingRequest<Briefing>(team, "/selection", "PUT", { view_ids: selected }), `Saved the ${teamLabel[team]} briefing.`)}>
+          onClick={() => void save(() => briefingRequest<Briefing>(team, `/selection${query}`, "PUT", { view_ids: selected }), `Saved the ${teamLabel[team]} briefing.`)}>
           {busy ? "Saving…" : "Save selection"}</button></div>
       </>}
       {overlay.kind === "report" && activeView && <div className="bf-report-detail">

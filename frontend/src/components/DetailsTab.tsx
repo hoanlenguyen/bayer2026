@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { EDGES, PROV, TYPES } from "../data/estate";
 import type { Entity } from "../data/types";
 import { byId, ownerOf, relGroups } from "../lib/estate";
@@ -50,6 +50,44 @@ function governanceRows(e: Entity, onFocus: (id: string) => void): [string, Reac
   return rows;
 }
 
+/** Dashboards built in Ask that use this KPI, newest first, each opening its saved page. */
+function AskDashboards({ kpi, onFocus }: { kpi: string; onFocus: (id: string) => void }) {
+  const [all, setAll] = useState(false);
+  const built = EDGES.filter((l) => l.t === kpi && l.rel === "uses").map((l) => byId[l.s])
+    .filter((d) => d?.origin === "ask")
+    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+  const shown = all ? built : built.slice(0, 5);
+  return (
+    <article className="card">
+      <div className="card-head">
+        <h2 className="card-title">Dashboards built in Ask <span className="count">{built.length}</span></h2>
+      </div>
+      {built.length ? (
+        <>
+          <ul className="ask-dash-list">
+            {shown.map((d) => (
+              <li key={d.id}>
+                <a href={d.link} className="ask-dash-name">{d.name}</a>
+                <span className="ask-dash-meta">
+                  {d.props["Created"]} · {d.props["Created by"]} · {d.props["Period"]}
+                  {" · "}<button type="button" className="inline-link" onClick={() => onFocus(d.id)}>Details</button>
+                </span>
+              </li>
+            ))}
+          </ul>
+          {built.length > 5 && (
+            <button type="button" className="btn-outline" onClick={() => setAll((v) => !v)}>
+              {all ? "Show the latest 5" : `Show all ${built.length}`}
+            </button>
+          )}
+        </>
+      ) : (
+        <p className="empty">No dashboard built in Ask uses this KPI yet.</p>
+      )}
+    </article>
+  );
+}
+
 export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Props) {
   const groups = relGroups(e.id);
   const total = groups.reduce((a, g) => a + g.items.length, 0);
@@ -60,6 +98,7 @@ export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Pr
       <div className="details-main">
         <article className="card">
           <p className="summary">{e.summary}</p>
+          {e.link && <p><a className="btn" href={e.link}>Open dashboard</a></p>}
           <dl className="props">
             {Object.entries(e.props).map(([k, v]) => (
               <div key={k} className={`prop${WIDE_KEYS.has(k) ? " wide" : ""}`}>
@@ -69,6 +108,7 @@ export function DetailsTab({ entity: e, sent, onFocus, onSend, onShowGraph }: Pr
             ))}
           </dl>
         </article>
+        {e.type === "metric" && <AskDashboards kpi={e.id} onFocus={onFocus} />}
         <article className="card">
           <div className="card-head">
             <h2 className="card-title">Relationships <span className="count">{total}</span></h2>

@@ -9,10 +9,14 @@ export interface PulseMetric {
   points: ComponentProps<typeof PulseChart>["points"];
 }
 
-export function PulseDashboard({ metrics, scope, source, preferred, compact }: {
+export function PulseDashboard({ metrics, scope, source, preferred, compact, choice: chosen, onChoose }: {
   metrics: PulseMetric[]; scope: string; source: string; preferred?: string; compact?: boolean;
+  /** Controlled metric choice, so charts shown side by side switch together. */
+  choice?: string; onChoose?: (id: string) => void;
 }) {
-  const [choice, setChoice] = useState<string>();
+  const [ownChoice, setOwnChoice] = useState<string>();
+  const choice = chosen ?? ownChoice;
+  const setChoice = onChoose ?? setOwnChoice;
   const available = metrics.filter(metric => metric.points.length > 1);
   const active = available.find(metric => metric.id === choice) ?? available.find(metric => metric.id === preferred) ?? available[0];
   if (!active) return null;
